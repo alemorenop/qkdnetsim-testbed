@@ -1,0 +1,138 @@
+# Escenario de 6 hosts del paper (Fig. 3), cada uno un contenedor con un
+# proceso ns-3 independiente. Las IPs de cada red coinciden con los valores
+# por defecto ya escritos en los .cc de paper-6hosts/, asi que no hace falta
+# pasar --myIpXXX por linea de comandos.
+#
+# Uso:
+#   docker compose -f docker/docker-compose.yml up
+#
+# Nota sobre DEV_MAP_*: Docker no garantiza que el orden en que se conectan
+# las redes se traduzca siempre en el mismo eth0/eth1/eth2 dentro del
+# contenedor entre un "up" y otro. El entrypoint.sh detecta en arranque, por
+# cada interfaz, la IP que le asigno Docker, la compara contra estas
+# variables (prefijo /24) y le pasa el --devXXX correcto a ns-3 el solo, asi
+# que el mapeo real de red->interfaz no importa.
+
+# Todas las redes fijan su gateway en ".254", fuera del rango .1-.6 que usan
+# los contenedores, para que Docker no reserve por defecto una IP (".1") que
+# ya le hemos asignado a alguno de los hosts (eso causaba "Address already in use").
+networks:
+  net_h1_h2:   # HOST1 <-> HOST2  (sifting, post-processing Alice-Bob)
+    ipam:
+      config:
+        - subnet: 192.168.11.0/24
+          gateway: 192.168.11.254
+  net_h1_h3:   # HOST1 <-> HOST3  (post-processing Alice -> KMS Alice)
+    ipam:
+      config:
+        - subnet: 192.168.13.0/24
+          gateway: 192.168.13.254
+  net_h2_h4:   # HOST2 <-> HOST4  (post-processing Bob -> KMS Bob)
+    ipam:
+      config:
+        - subnet: 192.168.24.0/24
+          gateway: 192.168.24.254
+  net_h3_h4:   # HOST3 <-> HOST4  (KMS Alice <-> KMS Bob, relay/transform_keys)
+    ipam:
+      config:
+        - subnet: 192.168.34.0/24
+          gateway: 192.168.34.254
+  net_h3_h5:   # HOST3 <-> HOST5  (KMS Alice -> ETSI014 Alice, GET_KEY)
+    ipam:
+      config:
+        - subnet: 192.168.35.0/24
+          gateway: 192.168.35.254
+  net_h4_h6:   # HOST4 <-> HOST6  (KMS Bob -> ETSI014 Bob, GET_KEY)
+    ipam:
+      config:
+        - subnet: 192.168.46.0/24
+          gateway: 192.168.46.254
+  net_h5_h6:   # HOST5 <-> HOST6  (trafico cifrado ETSI014 Alice-Bob)
+    ipam:
+      config:
+        - subnet: 192.168.56.0/24
+          gateway: 192.168.56.254
+
+services:
+
+  host1_pp_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host1
+    hostname: host1
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_SIFT: "192.168.11"
+      DEV_MAP_KMS: "192.168.13"
+    networks:
+      net_h1_h2: { ipv4_address: 192.168.11.1 }
+      net_h1_h3: { ipv4_address: 192.168.13.1 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host1_pp_alice-default"]
+
+  host2_pp_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host2
+    hostname: host2
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_SIFT: "192.168.11"
+      DEV_MAP_KMS: "192.168.24"
+    networks:
+      net_h1_h2: { ipv4_address: 192.168.11.2 }
+      net_h2_h4: { ipv4_address: 192.168.24.2 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host2_pp_bob-default"]
+
+  host3_kms_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host3
+    hostname: host3
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_PP: "192.168.13"
+      DEV_MAP_KMS: "192.168.34"
+      DEV_MAP_ETSI: "192.168.35"
+    networks:
+      net_h1_h3: { ipv4_address: 192.168.13.3 }
+      net_h3_h4: { ipv4_address: 192.168.34.3 }
+      net_h3_h5: { ipv4_address: 192.168.35.3 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host3_kms_alice-default"]
+
+  host4_kms_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host4
+    hostname: host4
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_PP: "192.168.24"
+      DEV_MAP_KMS: "192.168.34"
+      DEV_MAP_ETSI: "192.168.46"
+    networks:
+      net_h2_h4: { ipv4_address: 192.168.24.4 }
+      net_h3_h4: { ipv4_address: 192.168.34.4 }
+      net_h4_h6: { ipv4_address: 192.168.46.4 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host4_kms_bob-default"]
+
+  host5_etsi014_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host5
+    hostname: host5
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_DATA: "192.168.56"
+      DEV_MAP_KMS: "192.168.35"
+    networks:
+      net_h5_h6: { ipv4_address: 192.168.56.5 }
+      net_h3_h5: { ipv4_address: 192.168.35.5 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host5_etsi014_alice-default"]
+
+  host6_etsi014_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-host6
+    hostname: host6
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_DATA: "192.168.56"
+      DEV_MAP_KMS: "192.168.46"
+    networks:
+      net_h5_h6: { ipv4_address: 192.168.56.6 }
+      net_h4_h6: { ipv4_address: 192.168.46.6 }
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host6_etsi014_bob-default"]
