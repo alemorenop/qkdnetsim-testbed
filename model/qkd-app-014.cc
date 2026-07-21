@@ -115,6 +115,9 @@ QKDApp014::GetTypeId()
     .AddTraceSource("Mx", "Missed send packet call",
                      MakeTraceSourceAccessor(&QKDApp014::m_mxTrace),
                      "ns3::Packet::TracedCallback")
+    .AddTraceSource("AppListenReady", "El socket de datos hacia la app par (no master) ya esta en Listen()",
+                     MakeTraceSourceAccessor(&QKDApp014::m_appListenReadyTrace),
+                     "ns3::QKDApp014::AppListenReady")
   ;
 
   return tid;
@@ -459,6 +462,7 @@ QKDApp014::PrepareSocketToApp()
         }
         NS_LOG_FUNCTION(this << "PEER DATA Listen");
         m_dataSocketApp->Listen();
+        m_appListenReadyTrace(GetNode()->GetId());
       }
     }
 
@@ -1268,6 +1272,10 @@ QKDApp014::GetKeysFromKMS(std::string keyType)
   PushHttpKmsRequest(keyType);
   m_txKmsTrace(GetId(), packet);
   m_socketToKMS->Send(packet);
+
+  if(m_kmsRequestTimeoutEvent.IsPending())
+    Simulator::Cancel(m_kmsRequestTimeoutEvent);
+  m_kmsRequestTimeoutEvent = Simulator::Schedule(Seconds(3.0), &QKDApp014::KmsRequestTimeout, this);
 }
 
 void
@@ -1294,12 +1302,36 @@ QKDApp014::GetKeyWithKeyIDs(std::string keyIds)
 
   m_txKmsTrace(GetId(), packet);
   m_socketToKMS->Send(packet);
+
+  if(m_kmsRequestTimeoutEvent.IsPending())
+    Simulator::Cancel(m_kmsRequestTimeoutEvent);
+  m_kmsRequestTimeoutEvent = Simulator::Schedule(Seconds(3.0), &QKDApp014::KmsRequestTimeout, this);
+}
+
+void
+QKDApp014::KmsRequestTimeout()
+{
+  NS_LOG_FUNCTION(this);
+
+  if(m_socketToKMS)
+  {
+    m_socketToKMS->Close();
+    m_socketToKMS = nullptr; //Fuerza que PrepareSocketToKMS() cree un socket nuevo en el proximo intento
+  }
+
+  if(m_master)
+    ManageStores(); //Reintenta enc_keys si el store de claves esta vacio (mismo camino que un error real)
+  else
+    SendKeyIds({}, HTTPMessage::HttpStatus::BadRequest); //Avisa a Alice como si dec_keys hubiera fallado
 }
 
 void
 QKDApp014::ProcessResponseFromKMS(HTTPMessage& header, Ptr<Packet> packet, Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << header.GetRequestUri() << header.GetStatus());
+
+  if(m_kmsRequestTimeoutEvent.IsPending()) //Llego respuesta real: el socket esta vivo, cancelar el vigilante
+    Simulator::Cancel(m_kmsRequestTimeoutEvent);
 
   std::string reqMethod = ReadUri(header.GetRequestUri())[5]; //Get method from request URI field!
   nlohmann::json responseBody;

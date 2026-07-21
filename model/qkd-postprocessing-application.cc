@@ -226,6 +226,7 @@ std::string bitsToBytes(const std::string& bits) {
 
     m_sinkSocketList.clear();
     Simulator::Cancel(m_sendEvent);
+    Simulator::Cancel(m_kmsConnectCheckEvent);
     // chain up
     Application::DoDispose();
   }
@@ -342,6 +343,10 @@ std::string bitsToBytes(const std::string& bits) {
         MakeCallback(&QKDPostprocessingApplication::DataSendKMS, this));
     m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
     m_sendSocketKMS->Connect(m_kms);
+    m_kmsSocketConnected = false;
+    if(m_kmsConnectCheckEvent.IsPending())
+      Simulator::Cancel(m_kmsConnectCheckEvent);
+    m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(2.0), &QKDPostprocessingApplication::KmsConnectCheck, this);
 
 
     Address allocatedLocalAddress;
@@ -976,6 +981,12 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
       NS_LOG_FUNCTION(this << socket);
       NS_LOG_FUNCTION(this << "QKDPostprocessingApplication-KMS Connection succeeded");
+      if(socket == m_sendSocketKMS)
+      {
+        m_kmsSocketConnected = true;
+        if(m_kmsConnectCheckEvent.IsPending())
+          Simulator::Cancel(m_kmsConnectCheckEvent);
+      }
   }
 
   void
@@ -983,6 +994,35 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication-KMS Connection Failed");
+  }
+
+  void
+  QKDPostprocessingApplication::KmsConnectCheck()
+  {
+    NS_LOG_FUNCTION(this << m_kmsSocketConnected);
+    if(m_kmsSocketConnected)
+      return; //Conexion ya establecida, nada que hacer
+
+    //Socket roto en silencio (Connect() nunca disparo ConnectionSucceededKMS
+    //ni ConnectionFailedKMS): lo descartamos y creamos uno nuevo con los
+    //mismos callbacks, reintentando la conexion hacia el KMS.
+    if(m_sendSocketKMS)
+    {
+      m_sendSocketKMS->Close();
+      m_sendSocketKMS = nullptr;
+    }
+    m_sendSocketKMS = Socket::CreateSocket(GetNode(), m_tid);
+    m_sendSocketKMS->Bind();
+    m_sendSocketKMS->ShutdownRecv();
+    m_sendSocketKMS->SetConnectCallback(
+        MakeCallback(&QKDPostprocessingApplication::ConnectionSucceededKMS, this),
+        MakeCallback(&QKDPostprocessingApplication::ConnectionFailedKMS, this));
+    m_sendSocketKMS->SetDataSentCallback(
+        MakeCallback(&QKDPostprocessingApplication::DataSendKMS, this));
+    m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
+    m_sendSocketKMS->Connect(m_kms);
+
+    m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(2.0), &QKDPostprocessingApplication::KmsConnectCheck, this);
   }
 
   void

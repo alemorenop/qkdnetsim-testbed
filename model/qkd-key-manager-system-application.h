@@ -291,6 +291,36 @@ public:
     return m_qbuffersVector;
   }
 
+  /**
+   * @brief Pre-crea (bootstrap) el S-Buffer de tipo RELAY hacia un KM alcanzable
+   * solo mediante relay (no vecino directo).
+   *
+   * En el flujo normal, este buffer lo crea el propio KMS bajo demanda al procesar
+   * una peticion GET_STATUS entrante o el primer mensaje de relay entrante. Como
+   * QKDApp014 nunca envia GET_STATUS, en un escenario de relay puro (sin ese
+   * bootstrap implicito) SBufferClientCheck() fallaria al no encontrar la entrada.
+   * Llamar a esta funcion durante la configuracion evita ese problema. Es
+   * idempotente: si el buffer ya existe, no hace nada.
+   *
+   * @param peerNodeId ID del nodo KM remoto alcanzable por relay
+   */
+  void BootstrapRelaySBuffer(uint32_t peerNodeId);
+
+  /**
+   * @brief Fuerza la comprobacion/reposicion de un S-Buffer (local o de relay).
+   *
+   * Envoltorio publico de SBufferClientCheck() (privado). Para un S-Buffer LOCAL
+   * esto se dispara solo automaticamente al llegar material nuevo del enlace QKD
+   * directo; para un S-Buffer RELAY no hay ningun disparador automatico en el
+   * flujo actual (ver BootstrapRelaySBuffer), asi que hay que invocarlo desde
+   * fuera, p.ej. con un Simulator::Schedule periodico.
+   *
+   * @param peerNodeId ID del nodo KM remoto (vecino directo o alcanzable por relay)
+   */
+  void CheckBufferReplenishment(uint32_t peerNodeId){
+    SBufferClientCheck(peerNodeId);
+  }
+
 protected:
 
   void DoDispose() override;
@@ -461,6 +491,19 @@ private:
    * @param amount amount of key material
    */
   void Relay(uint32_t dstKmNodeId, uint32_t amount);
+
+  /**
+   * @brief Mitigacion: la conexion KMS-KMS usada por Relay()/ProcessRelayRequest
+   * a veces deja de transmitir en silencio (misma clase de fallo confirmada
+   * con strace en las conexiones app-KMS: el socket TCP subyacente de ns-3
+   * deja de escribir sin disparar ningun callback de error), dejando
+   * relayBuffer->IsRelayActive()==true para siempre y bloqueando todo intento
+   * futuro de relay hacia ese destino. Si la respuesta no llega en un plazo
+   * tras iniciar un relay, se fuerza el reseteo del estado para que la
+   * siguiente comprobacion periodica pueda reintentar.
+   * @param dstKmNodeId destino cuyo relay puede haberse quedado colgado
+   */
+  void RelayTimeoutCheck(uint32_t dstKmNodeId, uint32_t generation);
 
   /**
    * @brief Process key relay request
@@ -693,6 +736,10 @@ private:
 
   std::map<uint32_t, Ptr<SBuffer> > m_keys_dec; //!< LOCAL S-buffers for the inbound point-to-poit usage
 
+  std::map<uint32_t, std::vector<std::string> > m_pendingRelayKeyIds; //!< IDs marcados INIT por el ultimo Relay() hacia cada destino, para poder obsoletarlos si RelayTimeoutCheck() dispara (ver comentario en RelayTimeoutCheck)
+
+  std::map<uint32_t, uint32_t> m_relayGeneration; //!< Contador por destino: se incrementa en cada Relay() real. Permite a un RelayTimeoutCheck() detectar si es obsoleto (la respuesta real ya llego y arranco un intento nuevo antes de que este disparara) y no tocar nada.
+
   std::map<std::string, uint32_t> m_qkdmodules;    //!< QKD modules and KM node ID they connect to
 
   uint32_t m_kms_id;
@@ -714,6 +761,12 @@ private:
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
+  // Se dispara una vez, cuando m_sinkSocket y m_sinkSocketKMS ya estan en
+  // Listen(). Pensada para que un healthcheck externo (Docker depends_on)
+  // sepa cuando este KMS ya puede aceptar conexiones entrantes, en vez de
+  // depender solo de temporizacion/reintentos (ver watchdogs en qkd-app-014
+  // y qkd-postprocessing-application).
+  TracedCallback<const uint32_t&> m_listenReadyTrace;
 
   uint32_t m_maxKeyPerRequest; //Maximal number of keys per request QKDApp can ask for
   uint32_t m_minKeySize; //Minimal size of key QKDApp can request from KMS

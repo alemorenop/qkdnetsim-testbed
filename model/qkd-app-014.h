@@ -188,6 +188,19 @@ public:
     void GetKeyWithKeyIDs(std::string keyIds);
 
     /**
+     * @brief Mitigacion: el socket TCP hacia el KMS a veces deja de transmitir
+     * en silencio tras varias peticiones exitosas (confirmado con strace: el
+     * Send() de la app se sigue llamando y devolviendo, pero cero escrituras
+     * reales llegan al socket raw subyacente) sin que ns-3 dispare ningun
+     * callback de error (ConnectionToKMSFailed/HandlePeerErrorFromKMS). Si no
+     * llega respuesta dentro de un plazo tras un Send(), se asume el socket
+     * roto: se descarta y se fuerza uno nuevo en el siguiente intento,
+     * reutilizando el mismo camino de reintento que ya existe para errores
+     * reales (ManageStores/SendKeyIds con error).
+     */
+    void KmsRequestTimeout();
+
+    /**
      * @brief Callback function after the connection to the KMS has failed
      * @param socket the connected socket
      */
@@ -593,6 +606,7 @@ private:
     Ptr<Socket>     m_signalingSocketApp;
     Ptr<Socket>     m_dataSocketApp;
     Ptr<Socket>     m_socketToKMS;
+    EventId         m_kmsRequestTimeoutEvent; //!< Vigila una peticion al KMS sin respuesta (socket TCP roto en silencio)
 
     //Addresses
     Address         m_peer;                 //!< peer address
@@ -651,6 +665,10 @@ private:
     TracedCallback<const std::string&, Ptr<const Packet> > m_rxSigTrace;
     /// Traced Callback: received packets from KMS.
     TracedCallback<const std::string&, Ptr<const Packet> > m_rxKmsTrace;
+    // Se dispara una vez, cuando el socket de datos hacia la app par (no
+    // master) ya esta en Listen(). Igual que ListenReady en
+    // QKDKeyManagerSystemApplication, pensada para un healthcheck externo.
+    TracedCallback<const uint32_t&> m_appListenReadyTrace;
     ///Traced Callback: missed send packet call.
     TracedCallback<const std::string&, Ptr<const Packet> > m_mxTrace;
     /// The `StateTransition` trace source.

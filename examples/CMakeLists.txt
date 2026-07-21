@@ -64,10 +64,21 @@ build_qkd_example(examples_qkdnetsim_secoqc examples_qkdnetsim_secoqc.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation_tap examples_qkdnetsim_etsi_014_emulation_tap.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation examples_qkdnetsim_etsi_014_emulation.cc)
 
-# --- Paper 6-host scenario (one independent process per host/container) ---
-build_qkd_example(paper_host1_pp_alice paper-6hosts/host1_pp_alice.cc)
-build_qkd_example(paper_host2_pp_bob paper-6hosts/host2_pp_bob.cc)
-build_qkd_example(paper_host3_kms_alice paper-6hosts/host3_kms_alice.cc)
-build_qkd_example(paper_host4_kms_bob paper-6hosts/host4_kms_bob.cc)
-build_qkd_example(paper_host5_etsi014_alice paper-6hosts/host5_etsi014_alice.cc)
-build_qkd_example(paper_host6_etsi014_bob paper-6hosts/host6_etsi014_bob.cc)
+# --- Point-to-point scenario (Fig. 3 del paper, un proceso independiente por host/contenedor) ---
+build_qkd_example(p2p_host1_pp_alice point-to-point/host1_pp_alice.cc)
+build_qkd_example(p2p_host2_pp_bob point-to-point/host2_pp_bob.cc)
+build_qkd_example(p2p_host3_kms_alice point-to-point/host3_kms_alice.cc)
+build_qkd_example(p2p_host4_kms_bob point-to-point/host4_kms_bob.cc)
+build_qkd_example(p2p_host5_etsi014_alice point-to-point/host5_etsi014_alice.cc)
+build_qkd_example(p2p_host6_etsi014_bob point-to-point/host6_etsi014_bob.cc)
+
+# --- Key-relay scenario (Alice-Relay-Bob, sin enlace directo Alice-Bob) ---
+build_qkd_example(relay_host1_pp_alice key-relay/host1_pp_alice.cc)
+build_qkd_example(relay_host2_pp_relay_a key-relay/host2_pp_relay_a.cc)
+build_qkd_example(relay_host3_pp_relay_b key-relay/host3_pp_relay_b.cc)
+build_qkd_example(relay_host4_pp_bob key-relay/host4_pp_bob.cc)
+build_qkd_example(relay_host5_kms_alice key-relay/host5_kms_alice.cc)
+build_qkd_example(relay_host6_kms_relay key-relay/host6_kms_relay.cc)
+build_qkd_example(relay_host7_kms_bob key-relay/host7_kms_bob.cc)
+build_qkd_example(relay_host8_etsi014_alice key-relay/host8_etsi014_alice.cc)
+build_qkd_example(relay_host9_etsi014_bob key-relay/host9_etsi014_bob.cc)

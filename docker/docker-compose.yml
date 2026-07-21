@@ -1,11 +1,18 @@
-# Escenario de 6 hosts del paper (Fig. 3), cada uno un contenedor con un
-# proceso ns-3 independiente. Las IPs de cada red coinciden con los valores
-# por defecto ya escritos en los .cc de paper-6hosts/, asi que no hace falta
-# pasar --myIpXXX por linea de comandos.
+# Escenario point-to-point (Fig. 3 del paper, adaptada a contenedores), 6
+# hosts, cada uno un contenedor con un proceso ns-3 independiente. Las IPs de
+# cada red coinciden con los valores por defecto ya escritos en los .cc de
+# point-to-point/, asi que no hace falta pasar --myIpXXX por linea de comandos.
 #
 # Uso:
 #   docker compose -f docker/docker-compose.yml up
 #
+# "name" fija el nombre de proyecto explicitamente: sin esto, Docker Compose
+# usa el nombre de la carpeta ("docker") como proyecto por defecto, y como
+# docker-compose.key-relay.yml vive en la misma carpeta, ambos quedarian
+# fusionados en el mismo proyecto (con riesgo real de que un "up" de uno
+# recree/borre contenedores del otro si comparten alguna clave de servicio).
+name: qkdnetsim-fig3-6host
+
 # Nota sobre DEV_MAP_*: Docker no garantiza que el orden en que se conectan
 # las redes se traduzca siempre en el mismo eth0/eth1/eth2 dentro del
 # contenedor entre un "up" y otro. El entrypoint.sh detecta en arranque, por
@@ -66,7 +73,7 @@ services:
     networks:
       net_h1_h2: { ipv4_address: 192.168.11.1 }
       net_h1_h3: { ipv4_address: 192.168.13.1 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host1_pp_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host1_pp_alice-default"]
 
   host2_pp_bob:
     image: qkdnetsim-6vm-emulation:latest
@@ -79,7 +86,7 @@ services:
     networks:
       net_h1_h2: { ipv4_address: 192.168.11.2 }
       net_h2_h4: { ipv4_address: 192.168.24.2 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host2_pp_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host2_pp_bob-default"]
 
   host3_kms_alice:
     image: qkdnetsim-6vm-emulation:latest
@@ -94,7 +101,7 @@ services:
       net_h1_h3: { ipv4_address: 192.168.13.3 }
       net_h3_h4: { ipv4_address: 192.168.34.3 }
       net_h3_h5: { ipv4_address: 192.168.35.3 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host3_kms_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host3_kms_alice-default"]
 
   host4_kms_bob:
     image: qkdnetsim-6vm-emulation:latest
@@ -109,7 +116,7 @@ services:
       net_h2_h4: { ipv4_address: 192.168.24.4 }
       net_h3_h4: { ipv4_address: 192.168.34.4 }
       net_h4_h6: { ipv4_address: 192.168.46.4 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host4_kms_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host4_kms_bob-default"]
 
   host5_etsi014_alice:
     image: qkdnetsim-6vm-emulation:latest
@@ -122,7 +129,7 @@ services:
     networks:
       net_h5_h6: { ipv4_address: 192.168.56.5 }
       net_h3_h5: { ipv4_address: 192.168.35.5 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host5_etsi014_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host5_etsi014_alice-default"]
 
   host6_etsi014_bob:
     image: qkdnetsim-6vm-emulation:latest
@@ -135,4 +142,4 @@ services:
     networks:
       net_h5_h6: { ipv4_address: 192.168.56.6 }
       net_h4_h6: { ipv4_address: 192.168.46.6 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-paper_host6_etsi014_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host6_etsi014_bob-default"]

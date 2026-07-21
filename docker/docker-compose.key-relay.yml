@@ -1,0 +1,277 @@
+# Escenario "key relay" (Alice - Relay - Bob, sin enlace directo Alice-Bob),
+# 9 hosts. Usa la misma imagen que docker-compose.yml (escenario 1); ambos
+# binarios conviven en la misma imagen.
+#
+# Uso:
+#   docker compose -f docker/docker-compose.key-relay.yml up -d
+#
+# "name" explicito para no compartir proyecto con docker-compose.yml (ver
+# comentario alli sobre por que hace falta).
+name: qkdnetsim-key-relay
+
+networks:
+  net_1_2:   # HOST1 <-> HOST2  (sifting, Alice - Relay)
+    ipam:
+      config:
+        - subnet: 192.168.111.0/24
+          gateway: 192.168.111.254
+  net_1_5:   # HOST1 <-> HOST5  (post-processing Alice -> KMS Alice)
+    ipam:
+      config:
+        - subnet: 192.168.112.0/24
+          gateway: 192.168.112.254
+  net_2_6:   # HOST2 <-> HOST6  (post-processing Relay-A -> KMS Relay, lado Alice)
+    ipam:
+      config:
+        - subnet: 192.168.113.0/24
+          gateway: 192.168.113.254
+  net_3_4:   # HOST3 <-> HOST4  (sifting, Relay - Bob)
+    ipam:
+      config:
+        - subnet: 192.168.114.0/24
+          gateway: 192.168.114.254
+  net_3_6:   # HOST3 <-> HOST6  (post-processing Relay-B -> KMS Relay, lado Bob)
+    ipam:
+      config:
+        - subnet: 192.168.115.0/24
+          gateway: 192.168.115.254
+  net_4_7:   # HOST4 <-> HOST7  (post-processing Bob -> KMS Bob)
+    ipam:
+      config:
+        - subnet: 192.168.116.0/24
+          gateway: 192.168.116.254
+  net_5_6:   # HOST5 <-> HOST6  (KMS Alice <-> KMS Relay)
+    ipam:
+      config:
+        - subnet: 192.168.117.0/24
+          gateway: 192.168.117.254
+  net_6_7:   # HOST6 <-> HOST7  (KMS Relay <-> KMS Bob)
+    ipam:
+      config:
+        - subnet: 192.168.118.0/24
+          gateway: 192.168.118.254
+  net_5_8:   # HOST5 <-> HOST8  (KMS Alice -> ETSI014 Alice)
+    ipam:
+      config:
+        - subnet: 192.168.119.0/24
+          gateway: 192.168.119.254
+  net_7_9:   # HOST7 <-> HOST9  (KMS Bob -> ETSI014 Bob)
+    ipam:
+      config:
+        - subnet: 192.168.120.0/24
+          gateway: 192.168.120.254
+  net_8_9:   # HOST8 <-> HOST9  (trafico cifrado ETSI014 Alice-Bob)
+    ipam:
+      config:
+        - subnet: 192.168.121.0/24
+          gateway: 192.168.121.254
+
+services:
+
+  host1_pp_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host1
+    hostname: host1
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_SIFT: "192.168.111"
+      DEV_MAP_KMS: "192.168.112"
+    networks:
+      net_1_2: { ipv4_address: 192.168.111.1 }
+      net_1_5: { ipv4_address: 192.168.112.1 }
+    # Espera a que HOST5 confirme (via ListenReady/healthcheck) que su KMS ya
+    # esta en Listen() antes de arrancar -- evita la carrera de conexion
+    # documentada en el README (Connect() sin reintento en QKDPostprocessingApplication).
+    depends_on:
+      host5_kms_alice:
+        condition: service_healthy
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host1_pp_alice-default"]
+
+  host2_pp_relay_a:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host2
+    hostname: host2
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_SIFT: "192.168.111"
+      DEV_MAP_KMS: "192.168.113"
+    networks:
+      net_1_2: { ipv4_address: 192.168.111.2 }
+      net_2_6: { ipv4_address: 192.168.113.2 }
+    depends_on:
+      host6_kms_relay:
+        condition: service_healthy
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host2_pp_relay_a-default"]
+
+  host3_pp_relay_b:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host3
+    hostname: host3
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_SIFT: "192.168.114"
+      DEV_MAP_KMS: "192.168.115"
+    networks:
+      net_3_4: { ipv4_address: 192.168.114.3 }
+      net_3_6: { ipv4_address: 192.168.115.3 }
+    depends_on:
+      host6_kms_relay:
+        condition: service_healthy
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host3_pp_relay_b-default"]
+
+  host4_pp_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host4
+    hostname: host4
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_SIFT: "192.168.114"
+      DEV_MAP_KMS: "192.168.116"
+    networks:
+      net_3_4: { ipv4_address: 192.168.114.4 }
+      net_4_7: { ipv4_address: 192.168.116.4 }
+    depends_on:
+      host7_kms_bob:
+        condition: service_healthy
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host4_pp_bob-default"]
+
+  host5_kms_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host5
+    hostname: host5
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_PP: "192.168.112"
+      DEV_MAP_KMS: "192.168.117"
+      DEV_MAP_ETSI: "192.168.119"
+    networks:
+      net_1_5: { ipv4_address: 192.168.112.5 }
+      net_5_6: { ipv4_address: 192.168.117.5 }
+      net_5_8: { ipv4_address: 192.168.119.5 }
+    depends_on:
+      host6_kms_relay:
+        condition: service_healthy
+    # "escuchando" = marcador impreso via la traza ListenReady (ver
+    # qkd-key-manager-system-application.{h,cc}) cuando m_sinkSocket y
+    # m_sinkSocketKMS ya estan en Listen(). entrypoint.sh duplica todo el
+    # stdout a /tmp/qkdnetsim.log para que este healthcheck (que corre DENTRO
+    # del contenedor) pueda verlo -- "docker logs" no es visible desde aqui.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'KMS Alice escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host5_kms_alice-default"]
+
+  host6_kms_relay:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host6
+    hostname: host6
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      STARTUP_JITTER_MAX_MS: "6000"
+      DEV_MAP_PPA: "192.168.113"
+      DEV_MAP_PPB: "192.168.115"
+      DEV_MAP_KMSA: "192.168.117"
+      DEV_MAP_KMSB: "192.168.118"
+    networks:
+      net_2_6: { ipv4_address: 192.168.113.6 }
+      net_3_6: { ipv4_address: 192.168.115.6 }
+      net_5_6: { ipv4_address: 192.168.117.6 }
+      net_6_7: { ipv4_address: 192.168.118.6 }
+    depends_on:
+      host7_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'KMS Relay escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host6_kms_relay-default"]
+
+  host7_kms_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host7
+    hostname: host7
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_PP: "192.168.116"
+      DEV_MAP_KMS: "192.168.118"
+      DEV_MAP_ETSI: "192.168.120"
+    networks:
+      net_4_7: { ipv4_address: 192.168.116.7 }
+      net_6_7: { ipv4_address: 192.168.118.7 }
+      net_7_9: { ipv4_address: 192.168.120.7 }
+    # Raiz de la cadena de depends_on (nadie mas espera a nadie antes de
+    # llegar aqui) -- sin dependencias propias.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'KMS Bob escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host7_kms_bob-default"]
+
+  host8_etsi014_alice:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host8
+    hostname: host8
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_KMS: "192.168.119"
+      DEV_MAP_DATA: "192.168.121"
+      # WATCHDOG_TIMEOUT desactivado: reiniciar solo el PROCESO (mismo contenedor,
+      # mismo par veth) no basta cuando RealtimeSimulatorImpl se cuelga en el
+      # arranque - hace falta recrear el CONTENEDOR entero (veth nuevo). Ver
+      # docker/watchdog-host9.sh, que hace eso desde fuera del contenedor.
+    networks:
+      net_5_8: { ipv4_address: 192.168.119.8 }
+      net_8_9: { ipv4_address: 192.168.121.8 }
+    # HOST8 conecta como cliente hacia AMBOS: HOST5 (su KMS) y HOST9 (socket
+    # de datos de la app par) -- espera a que los dos confirmen que escuchan.
+    depends_on:
+      host5_kms_alice:
+        condition: service_healthy
+      host9_etsi014_bob:
+        condition: service_healthy
+    # appStartTime=20 (no 1): QKDApp014::ConnectionToKMSFailed() no reintenta
+    # la conexion TCP si el primer intento falla -- si HOST8 intenta conectar
+    # antes de que el listener KMS de HOST5 este realmente escuchando (muy
+    # posible con solo 1s de margen y 9 RealtimeSimulatorImpl arrancando a la
+    # vez), el socket queda roto para siempre y la app "envia" en bucle sobre
+    # un socket muerto sin producir NUNCA trafico real. Confirmado con tcpdump:
+    # 0 paquetes en el cable pese a la traza interna disparando sin parar.
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host8_etsi014_alice-default", "--appStartTime=20"]
+
+  host9_etsi014_bob:
+    image: qkdnetsim-6vm-emulation:latest
+    container_name: qkd-relay-host9
+    hostname: host9
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      DEV_MAP_KMS: "192.168.120"
+      DEV_MAP_DATA: "192.168.121"
+      # Ver nota en host8_etsi014_alice.
+    networks:
+      net_7_9: { ipv4_address: 192.168.120.9 }
+      net_8_9: { ipv4_address: 192.168.121.9 }
+    depends_on:
+      host7_kms_bob:
+        condition: service_healthy
+    # "escuchando" tarda ~appStartTime=20s en aparecer (SetStartTime retrasa
+    # TODA la app, no solo el socket hacia el KMS) -- start_period generoso
+    # para no contar como fallo mientras tanto.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Escuchando trafico de aplicacion' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 20s
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host9_etsi014_bob-default", "--appStartTime=20"]

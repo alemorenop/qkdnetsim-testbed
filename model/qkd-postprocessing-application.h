@@ -402,6 +402,15 @@ private:
   */
   Ptr<Socket>     m_sendSocketKMS;       //!< Associated socket
   Ptr<Socket>     m_sinkSocketKMS;       //!< Associated socket
+  // m_sendSocketKMS->Connect(m_kms) en StartApplication() se llama UNA sola
+  // vez; si la conexion TCP inicial pierde la carrera contra el listener del
+  // KMS (aun no escuchando), el socket queda roto en silencio para siempre:
+  // StoreKey() sigue llamando Send() sobre el (sin comprobar m_connected,
+  // a diferencia de SendPacket()), y el KMS nunca recibe la clave. Mismo
+  // patron de bug ya visto y arreglado en QKDApp014/QKDKeyManagerSystem.
+  bool            m_kmsSocketConnected {false};
+  EventId         m_kmsConnectCheckEvent;
+  void            KmsConnectCheck();
 
   Ptr<Socket>     m_sinkSocketQiskit;       //!< Associated socket
 
