@@ -223,7 +223,7 @@ private:
    * @brief Process data received
    * @param Packet to be processed
    */
-  void ProcessIncomingPacket(Ptr<Packet> packet);
+  void ProcessIncomingPacket(const std::string& payload);
 
   // inherited from Application base class.
   void StartApplication() override;    //!< Called at time specified by Start
@@ -392,6 +392,9 @@ private:
   */
   Ptr<Socket>     m_sendSocket;       //!< Associated socket
   Ptr<Socket>     m_sinkSocket;       //!< Associated socket
+  bool            m_peerSocketConnected {false};
+  EventId         m_peerConnectCheckEvent;
+  void            PeerConnectCheck();
   /**
   * Sockets used for SIFTING
   */
@@ -442,6 +445,7 @@ private:
 
   std::string     m_lastUUID;     //!< The latest UUID of the key
   std::unordered_map<Address, Ptr<Packet>, AddressHash> m_buffer; //!< Buffer for received packets(TCP segmentation)
+  std::unordered_map<Address, std::string, AddressHash> m_peerBuffer; //!< Delimited post-processing stream per TCP peer
 
   /// Traced Callback: received packets, source address.
   TracedCallback<Ptr<const Packet>, const Address &> m_rxTrace;
@@ -449,6 +453,7 @@ private:
 
   TracedCallback<Ptr<const Packet>, const Address &> m_rxTraceKMS;
   TracedCallback<Ptr<const Packet> > m_txTraceKMS;
+  TracedCallback<const uint32_t&> m_listenReadyTrace;
 
   uint32_t        m_packetNumber_sifting; //!< How many sifting packets have been sent
   uint32_t        m_maxPackets_sifting;   //!< Limitation for the number of sifting packets

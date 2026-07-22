@@ -25,6 +25,13 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("HOST4_PP_BOB");
 
 static void
+KeepAlive(Time period, Time stopTime)
+{
+    if(Simulator::Now() < stopTime)
+        Simulator::Schedule(period, &KeepAlive, period, stopTime);
+}
+
+static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
 {
     EmuFdNetDeviceHelper emu;
@@ -144,7 +151,12 @@ main(int argc, char* argv[])
                      MakeCallback(+[](std::string ctx, Ptr<const Packet> p) {
                          std::cout << "[HOST4] Clave entregada a KMS Bob, bytes=" << p->GetSize() << std::endl;
                      }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/ListenReady",
+                     MakeCallback(+[](std::string ctx, const uint32_t& node) {
+                         std::cout << "[HOST4] Post-processing Bob escuchando" << std::endl;
+                     }));
 
+    Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
     Simulator::Stop(Seconds(simulationTime));
     Simulator::Run();
     Simulator::Destroy();

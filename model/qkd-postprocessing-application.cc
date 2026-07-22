@@ -99,6 +99,9 @@ namespace ns3 {
       .AddTraceSource("RxKMS", "A packet has been received from LKMS",
                      MakeTraceSourceAccessor(&QKDPostprocessingApplication::m_rxTraceKMS),
                      "ns3::QKDPostprocessingApplication::RxLKMS")
+      .AddTraceSource("ListenReady", "The post-processing TCP listener completed Bind and Listen",
+                     MakeTraceSourceAccessor(&QKDPostprocessingApplication::m_listenReadyTrace),
+                     "ns3::QKDPostprocessingApplication::ListenReady")
     ;
     return tid;
   }
@@ -226,6 +229,7 @@ std::string bitsToBytes(const std::string& bits) {
 
     m_sinkSocketList.clear();
     Simulator::Cancel(m_sendEvent);
+    Simulator::Cancel(m_peerConnectCheckEvent);
     Simulator::Cancel(m_kmsConnectCheckEvent);
     // chain up
     Application::DoDispose();
@@ -245,6 +249,7 @@ std::string bitsToBytes(const std::string& bits) {
     );
     if(m_sinkSocket->Bind(sinkAddress) == -1) NS_FATAL_ERROR("Failed to bind socket " << m_local);
     m_sinkSocket->Listen();
+    m_listenReadyTrace(GetNode()->GetId());
     m_sinkSocket->ShutdownSend();
     m_sinkSocket->SetRecvCallback(MakeCallback(&QKDPostprocessingApplication::HandleRead, this));
     m_sinkSocket->SetAcceptCallback(
@@ -270,8 +275,14 @@ std::string bitsToBytes(const std::string& bits) {
     m_sendSocket->SetDataSentCallback(
       MakeCallback(&QKDPostprocessingApplication::DataSend, this)
     );
+    m_sendSocket->SetCloseCallbacks(
+      MakeCallback(&QKDPostprocessingApplication::HandlePeerClose, this),
+      MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this)
+    );
     m_sendSocket->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
     m_sendSocket->Connect(m_peer);
+    m_peerSocketConnected = false;
+    m_peerConnectCheckEvent = Simulator::Schedule(Seconds(1.0), &QKDPostprocessingApplication::PeerConnectCheck, this);
 
     NS_LOG_FUNCTION(
       this <<
@@ -341,6 +352,9 @@ std::string bitsToBytes(const std::string& bits) {
         MakeCallback(&QKDPostprocessingApplication::ConnectionFailedKMS, this));
     m_sendSocketKMS->SetDataSentCallback(
         MakeCallback(&QKDPostprocessingApplication::DataSendKMS, this));
+    m_sendSocketKMS->SetCloseCallbacks(
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerCloseKMS, this),
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerErrorKMS, this));
     m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
     m_sendSocketKMS->Connect(m_kms);
     m_kmsSocketConnected = false;
@@ -791,40 +805,69 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
 
 
         m_rxTrace(packet, from);
-        if(!m_master) ProcessIncomingPacket(packet);
+        if(!m_master)
+        {
+          // TCP is a byte stream: one Recv() is not necessarily one Send().
+          // PrepareOutput() terminates every logical message with ';' and then
+          // adds zero padding, so accumulate bytes and extract complete frames.
+          std::string chunk(packet->GetSize(), '\0');
+          packet->CopyData(reinterpret_cast<uint8_t*>(&chunk[0]), chunk.size());
+          std::string& stream = m_peerBuffer[from];
+          stream.append(chunk);
+
+          while(!stream.empty())
+          {
+            // Discard the zero padding left between two logical messages.
+            const std::size_t jsonStart = stream.find('{');
+            if(jsonStart == std::string::npos)
+            {
+              stream.clear();
+              break;
+            }
+            if(jsonStart > 0)
+              stream.erase(0, jsonStart);
+
+            const std::size_t delimiter = stream.find(';');
+            if(delimiter == std::string::npos)
+              break; // Fragmented JSON: wait for the next TCP receive callback.
+
+            const std::string payload = stream.substr(0, delimiter);
+            stream.erase(0, delimiter + 1);
+            ProcessIncomingPacket(payload);
+          }
+
+          // A malformed peer must not be able to grow the process indefinitely.
+          if(stream.size() > 1024 * 1024)
+          {
+            NS_LOG_ERROR("Discarding oversized post-processing TCP frame");
+            stream.clear();
+          }
+        }
 
     }
   }
 
 
   void
-  QKDPostprocessingApplication::ProcessIncomingPacket(Ptr<Packet> packet)
+  QKDPostprocessingApplication::ProcessIncomingPacket(const std::string& payloadRaw)
   {
       /**
       *  POST PROCESSING
       */
-      uint8_t *buffer = new uint8_t[packet->GetSize()];
-      packet->CopyData(buffer, packet->GetSize());
-      std::string s = std::string((char*)buffer);
-      delete[] buffer;
+      if(payloadRaw.size() > 5){
 
-      if(s.size() > 5){
-
-        NS_LOG_FUNCTION(this << "payload:" << s);
-        std::size_t pos = s.find(";");
-        std::string payloadRaw = s.substr(0,pos); //remove padding zeros
         NS_LOG_FUNCTION(this << "payloadRaw:" << payloadRaw);
 
         std::string label;
-        nlohmann::json jresponse;
-        try{
-          jresponse = nlohmann::json::parse(payloadRaw);
-        }catch(...){
-          NS_FATAL_ERROR(this << "JSON parse error!");
+        nlohmann::json jresponse = nlohmann::json::parse(payloadRaw, nullptr, false);
+        if(jresponse.is_discarded())
+        {
+          NS_LOG_ERROR(this << "Discarding malformed post-processing JSON: " << payloadRaw);
+          return;
         }
 
         if(jresponse.contains("ACTION")) label = jresponse["ACTION"];
-        NS_LOG_DEBUG(this << "\tLABEL:\t" <<  jresponse["ACTION"] << "\tPACKETVALUE:\t" << s);
+        NS_LOG_DEBUG(this << "\tLABEL:\t" <<  jresponse["ACTION"] << "\tPACKETVALUE:\t" << payloadRaw);
 
         if(label == "ADDKEY"){
 
@@ -868,12 +911,27 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   QKDPostprocessingApplication::HandlePeerClose(Ptr<Socket> socket)
   {
     NS_LOG_FUNCTION(this << socket);
+    if(socket == m_sendSocket)
+    {
+      m_connected = false;
+      m_peerSocketConnected = false;
+      m_sendSocket = nullptr;
+      if(!m_peerConnectCheckEvent.IsPending())
+        m_peerConnectCheckEvent = Simulator::Schedule(Seconds(0.1), &QKDPostprocessingApplication::PeerConnectCheck, this);
+    }
   }
 
   void
   QKDPostprocessingApplication::HandlePeerCloseKMS(Ptr<Socket> socket)
   {
     NS_LOG_FUNCTION(this << socket);
+    if(socket == m_sendSocketKMS)
+    {
+      m_kmsSocketConnected = false;
+      m_sendSocketKMS = nullptr;
+      if(!m_kmsConnectCheckEvent.IsPending())
+        m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(0.1), &QKDPostprocessingApplication::KmsConnectCheck, this);
+    }
   }
 
   void
@@ -886,6 +944,7 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   QKDPostprocessingApplication::HandlePeerError(Ptr<Socket> socket)
   {
     NS_LOG_FUNCTION(this << socket);
+    HandlePeerClose(socket);
   }
 
   void
@@ -899,6 +958,7 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   QKDPostprocessingApplication::HandlePeerErrorKMS(Ptr<Socket> socket)
   {
     NS_LOG_FUNCTION(this << socket);
+    HandlePeerCloseKMS(socket);
   }
 
   void
@@ -940,6 +1000,13 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
       if(m_sendSocket == socket || m_sinkSocket == socket){
         m_connected = true;
 
+        if(m_sendSocket == socket)
+        {
+          m_peerSocketConnected = true;
+          if(m_peerConnectCheckEvent.IsPending())
+            Simulator::Cancel(m_peerConnectCheckEvent);
+        }
+
         if(m_master){
 
           NS_LOG_FUNCTION(this << "m_master:" << m_master);
@@ -968,6 +1035,37 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication, Connection Failed");
+  }
+
+  void
+  QKDPostprocessingApplication::PeerConnectCheck()
+  {
+    NS_LOG_FUNCTION(this << m_peerSocketConnected);
+    if(m_peerSocketConnected)
+      return;
+
+    if(!m_sendSocket)
+    {
+      m_sendSocket = Socket::CreateSocket(GetNode(), m_tid);
+      m_sendSocket->ShutdownRecv();
+      m_sendSocket->SetConnectCallback(
+        MakeCallback(&QKDPostprocessingApplication::ConnectionSucceeded, this),
+        MakeCallback(&QKDPostprocessingApplication::ConnectionFailed, this));
+      m_sendSocket->SetDataSentCallback(
+        MakeCallback(&QKDPostprocessingApplication::DataSend, this));
+      m_sendSocket->SetCloseCallbacks(
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerClose, this),
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this));
+      m_sendSocket->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
+    }
+
+    // Do not destroy a socket while TCP is still in SYN_SENT: delayed packets
+    // for the discarded endpoint can trip TcpSocketBase assertions. Calling
+    // Connect again is harmless while it is pending and retries once TCP has
+    // returned the socket to CLOSED after a failed attempt.
+    m_sendSocket->Connect(m_peer);
+
+    m_peerConnectCheckEvent = Simulator::Schedule(Seconds(1.0), &QKDPostprocessingApplication::PeerConnectCheck, this);
   }
 
   void
@@ -1003,23 +1101,21 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
     if(m_kmsSocketConnected)
       return; //Conexion ya establecida, nada que hacer
 
-    //Socket roto en silencio (Connect() nunca disparo ConnectionSucceededKMS
-    //ni ConnectionFailedKMS): lo descartamos y creamos uno nuevo con los
-    //mismos callbacks, reintentando la conexion hacia el KMS.
-    if(m_sendSocketKMS)
+    if(!m_sendSocketKMS)
     {
-      m_sendSocketKMS->Close();
-      m_sendSocketKMS = nullptr;
+      m_sendSocketKMS = Socket::CreateSocket(GetNode(), m_tid);
+      m_sendSocketKMS->Bind();
+      m_sendSocketKMS->ShutdownRecv();
+      m_sendSocketKMS->SetConnectCallback(
+          MakeCallback(&QKDPostprocessingApplication::ConnectionSucceededKMS, this),
+          MakeCallback(&QKDPostprocessingApplication::ConnectionFailedKMS, this));
+      m_sendSocketKMS->SetDataSentCallback(
+          MakeCallback(&QKDPostprocessingApplication::DataSendKMS, this));
+      m_sendSocketKMS->SetCloseCallbacks(
+          MakeCallback(&QKDPostprocessingApplication::HandlePeerCloseKMS, this),
+          MakeCallback(&QKDPostprocessingApplication::HandlePeerErrorKMS, this));
+      m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
     }
-    m_sendSocketKMS = Socket::CreateSocket(GetNode(), m_tid);
-    m_sendSocketKMS->Bind();
-    m_sendSocketKMS->ShutdownRecv();
-    m_sendSocketKMS->SetConnectCallback(
-        MakeCallback(&QKDPostprocessingApplication::ConnectionSucceededKMS, this),
-        MakeCallback(&QKDPostprocessingApplication::ConnectionFailedKMS, this));
-    m_sendSocketKMS->SetDataSentCallback(
-        MakeCallback(&QKDPostprocessingApplication::DataSendKMS, this));
-    m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
     m_sendSocketKMS->Connect(m_kms);
 
     m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(2.0), &QKDPostprocessingApplication::KmsConnectCheck, this);

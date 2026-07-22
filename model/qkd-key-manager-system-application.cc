@@ -1452,6 +1452,10 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
             targetSize -= candidateKey->GetSizeInBits();
         }
 
+        // The split loop below consumes mergedKey. Keep the exact material
+        // that must also be installed at the remote SAE before doing so.
+        const std::string relayKeyMaterial = mergedKey;
+
         NS_LOG_FUNCTION(this << "Now create supply keys!");
         std::vector<std::string> supplyKeyIds {};
         std::vector<Ptr<QKDKey>> supplyKeys {};
@@ -1537,7 +1541,7 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
           std::string hopKeyMaterial {};
           std::vector<std::string> hopKeyIds {};
           bool hopKeyOk = true;
-          uint32_t hopRemaining = uint32_t(mergedKey.size() * 8);
+          uint32_t hopRemaining = uint32_t(relayKeyMaterial.size() * 8);
           while(hopRemaining > 0)
           {
             uint32_t tempTarget {0};
@@ -1557,18 +1561,21 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
               hopRemaining -= candidateKey->GetSizeInBits();
           }
 
-          if(!hopKeyOk || hopKeyMaterial.size() < mergedKey.size())
+          if(relayKeyMaterial.empty() ||
+             relayKeyMaterial.size() != (keySize * keyNumber) / 8 ||
+             !hopKeyOk ||
+             hopKeyMaterial.size() < relayKeyMaterial.size())
           {
             NS_LOG_FUNCTION(this << "No hay suficiente clave local para cifrar el salto hacia" << conn.GetNextHop() << "-- SKEY_CREATE abandonado (la respuesta al app local se envia igualmente)");
             canSendTransform = false;
           }
           else
           {
-            hopKeyMaterial.resize(mergedKey.size()); //COTP exige misma longitud exacta; el ultimo candidato puede sobrar
+            hopKeyMaterial.resize(relayKeyMaterial.size()); //COTP exige misma longitud exacta; el ultimo candidato puede sobrar
             Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>();
             for(const auto& id : hopKeyIds)
               jtransform["hop_key_ID"].push_back({{"key_ID", id}});
-            jtransform["ekey"] = encryptor->COTP(hopKeyMaterial, mergedKey);
+            jtransform["ekey"] = encryptor->COTP(hopKeyMaterial, relayKeyMaterial);
 
             nextHopKmsAddress = GetPeerKmAddress(conn.GetNextHop());
           }

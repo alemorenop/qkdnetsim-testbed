@@ -31,6 +31,14 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("HOST5_ETSI014_ALICE");
 
 static void
+KeepAlive(Time period, Time stopTime)
+{
+    if(Simulator::Now() >= stopTime)
+        return;
+    Simulator::Schedule(period, &KeepAlive, period, stopTime);
+}
+
+static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
 {
     EmuFdNetDeviceHelper emu;
@@ -77,7 +85,7 @@ main(int argc, char* argv[])
     uint32_t authenticationType = 0; // 0-sin autenticacion, 1-VMAC, 2-MD5, 3-SHA1
     uint32_t encryptionType = 1;     // 0-sin cifrar, 1-OTP, 2-AES
     uint32_t aesLifetime = 10000;
-    uint32_t useCrypto = 0;
+    uint32_t useCrypto = 1;
 
     uint32_t appStartTime = 50;
     uint32_t simulationTime = 5000;
@@ -134,6 +142,8 @@ main(int argc, char* argv[])
     node->AddApplication(app);
     app->SetStartTime(Seconds(appStartTime));
     app->SetStopTime(Seconds(simulationTime));
+
+    Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 

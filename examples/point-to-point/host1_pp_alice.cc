@@ -29,6 +29,13 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("HOST1_PP_ALICE");
 
 static void
+KeepAlive(Time period, Time stopTime)
+{
+    if(Simulator::Now() < stopTime)
+        Simulator::Schedule(period, &KeepAlive, period, stopTime);
+}
+
+static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
 {
     EmuFdNetDeviceHelper emu;
@@ -143,6 +150,8 @@ main(int argc, char* argv[])
 
     app->SetStartTime(Seconds(qkdStartTime));
     app->SetStopTime(Seconds(simulationTime));
+
+    Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 

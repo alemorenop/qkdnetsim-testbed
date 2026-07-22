@@ -24,6 +24,14 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("HOST6_ETSI014_BOB");
 
 static void
+KeepAlive(Time period, Time stopTime)
+{
+    if(Simulator::Now() >= stopTime)
+        return;
+    Simulator::Schedule(period, &KeepAlive, period, stopTime);
+}
+
+static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
 {
     EmuFdNetDeviceHelper emu;
@@ -66,7 +74,7 @@ main(int argc, char* argv[])
     uint32_t authenticationType = 0;
     uint32_t encryptionType = 1;
     uint32_t aesLifetime = 10000;
-    uint32_t useCrypto = 0;
+    uint32_t useCrypto = 1;
 
     uint32_t appStartTime = 50;
     uint32_t simulationTime = 5000;
@@ -122,11 +130,17 @@ main(int argc, char* argv[])
     app->SetStartTime(Seconds(appStartTime));
     app->SetStopTime(Seconds(simulationTime));
 
+    Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
+
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/TxKMS",
                      MakeCallback(+[](std::string ctx, const std::string& appId, Ptr<const Packet> p) {
                          std::cout << "[HOST6] Peticion GET_KEY a KMS Bob, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
+                     }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/AppListenReady",
+                     MakeCallback(+[](std::string ctx, const uint32_t& node) {
+                         std::cout << "[HOST6] Escuchando trafico de aplicacion" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

@@ -171,6 +171,10 @@ main(int argc, char* argv[])
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
                          std::cout << "[HOST3] KMS Alice sirve clave appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
+                     MakeCallback(+[](std::string ctx, const uint32_t& node) {
+                         std::cout << "[HOST3] KMS Alice escuchando" << std::endl;
+                     }));
 
     Simulator::Stop(Seconds(simulationTime));
     Simulator::Run();

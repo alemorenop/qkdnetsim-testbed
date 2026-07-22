@@ -764,8 +764,7 @@ private:
   // Se dispara una vez, cuando m_sinkSocket y m_sinkSocketKMS ya estan en
   // Listen(). Pensada para que un healthcheck externo (Docker depends_on)
   // sepa cuando este KMS ya puede aceptar conexiones entrantes, en vez de
-  // depender solo de temporizacion/reintentos (ver watchdogs en qkd-app-014
-  // y qkd-postprocessing-application).
+  // depender solo de temporizacion.
   TracedCallback<const uint32_t&> m_listenReadyTrace;
 
   uint32_t m_maxKeyPerRequest; //Maximal number of keys per request QKDApp can ask for

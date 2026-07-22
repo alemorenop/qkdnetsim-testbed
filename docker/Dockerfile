@@ -38,10 +38,16 @@ COPY . /opt/ns-3-dev/contrib/qkdnetsim
 WORKDIR /opt/ns-3-dev
 
 # --- Patches oficiales sobre src/stats/model/gnuplot.{cc,h} ---
-RUN git apply --check contrib/qkdnetsim/patches/gnuplot_cc.patches && \
+RUN sed -i 's/\r$//' \
+        contrib/qkdnetsim/patches/gnuplot_cc.patches \
+        contrib/qkdnetsim/patches/gnuplot_h.patches \
+        contrib/qkdnetsim/patches/realtime-simulator-clamp.patch && \
+    git apply --check contrib/qkdnetsim/patches/gnuplot_cc.patches && \
     git apply --check contrib/qkdnetsim/patches/gnuplot_h.patches && \
+    git apply --check contrib/qkdnetsim/patches/realtime-simulator-clamp.patch && \
     git apply contrib/qkdnetsim/patches/gnuplot_h.patches && \
-    git apply contrib/qkdnetsim/patches/gnuplot_cc.patches
+    git apply contrib/qkdnetsim/patches/gnuplot_cc.patches && \
+    git apply contrib/qkdnetsim/patches/realtime-simulator-clamp.patch
 
 # --- Configura y compila SOLO los binarios de nuestros escenarios ---
 # (--enable-examples es obligatorio: ahi viven, pero "./ns3 build" a secas
@@ -67,7 +73,7 @@ RUN ./ns3 configure --enable-examples && \
 
 # --- Entrypoint: pone en promiscuo y limpia la IP de kernel de cada interfaz ---
 COPY docker/entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/entrypoint.sh
+RUN sed -i 's/\r$//' /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
 
 WORKDIR /opt/ns-3-dev
 ENTRYPOINT ["/opt/entrypoint.sh"]

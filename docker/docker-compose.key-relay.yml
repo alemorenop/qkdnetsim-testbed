@@ -74,16 +74,18 @@ services:
     hostname: host1
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.111"
       DEV_MAP_KMS: "192.168.112"
     networks:
       net_1_2: { ipv4_address: 192.168.111.1 }
       net_1_5: { ipv4_address: 192.168.112.1 }
     # Espera a que HOST5 confirme (via ListenReady/healthcheck) que su KMS ya
-    # esta en Listen() antes de arrancar -- evita la carrera de conexion
-    # documentada en el README (Connect() sin reintento en QKDPostprocessingApplication).
+    # esta en Listen() antes de arrancar. El reintento de conexion del modelo
+    # cubre ademas reinicios o perdidas transitorias posteriores.
     depends_on:
+      host2_pp_relay_a:
+        condition: service_healthy
       host5_kms_alice:
         condition: service_healthy
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host1_pp_alice-default"]
@@ -94,7 +96,7 @@ services:
     hostname: host2
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.111"
       DEV_MAP_KMS: "192.168.113"
     networks:
@@ -103,6 +105,12 @@ services:
     depends_on:
       host6_kms_relay:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Post-processing Relay-A escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host2_pp_relay_a-default"]
 
   host3_pp_relay_b:
@@ -111,13 +119,15 @@ services:
     hostname: host3
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.114"
       DEV_MAP_KMS: "192.168.115"
     networks:
       net_3_4: { ipv4_address: 192.168.114.3 }
       net_3_6: { ipv4_address: 192.168.115.3 }
     depends_on:
+      host4_pp_bob:
+        condition: service_healthy
       host6_kms_relay:
         condition: service_healthy
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host3_pp_relay_b-default"]
@@ -128,7 +138,7 @@ services:
     hostname: host4
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.114"
       DEV_MAP_KMS: "192.168.116"
     networks:
@@ -137,6 +147,12 @@ services:
     depends_on:
       host7_kms_bob:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Post-processing Bob escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host4_pp_bob-default"]
 
   host5_kms_alice:
@@ -145,7 +161,6 @@ services:
     hostname: host5
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
       DEV_MAP_PP: "192.168.112"
       DEV_MAP_KMS: "192.168.117"
       DEV_MAP_ETSI: "192.168.119"
@@ -175,7 +190,6 @@ services:
     hostname: host6
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
-      STARTUP_JITTER_MAX_MS: "6000"
       DEV_MAP_PPA: "192.168.113"
       DEV_MAP_PPB: "192.168.115"
       DEV_MAP_KMSA: "192.168.117"
@@ -227,10 +241,6 @@ services:
     environment:
       DEV_MAP_KMS: "192.168.119"
       DEV_MAP_DATA: "192.168.121"
-      # WATCHDOG_TIMEOUT desactivado: reiniciar solo el PROCESO (mismo contenedor,
-      # mismo par veth) no basta cuando RealtimeSimulatorImpl se cuelga en el
-      # arranque - hace falta recrear el CONTENEDOR entero (veth nuevo). Ver
-      # docker/watchdog-host9.sh, que hace eso desde fuera del contenedor.
     networks:
       net_5_8: { ipv4_address: 192.168.119.8 }
       net_8_9: { ipv4_address: 192.168.121.8 }
@@ -258,7 +268,6 @@ services:
     environment:
       DEV_MAP_KMS: "192.168.120"
       DEV_MAP_DATA: "192.168.121"
-      # Ver nota en host8_etsi014_alice.
     networks:
       net_7_9: { ipv4_address: 192.168.120.9 }
       net_8_9: { ipv4_address: 192.168.121.9 }

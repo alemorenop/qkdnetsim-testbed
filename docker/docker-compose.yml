@@ -68,11 +68,17 @@ services:
     hostname: host1
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.11"
       DEV_MAP_KMS: "192.168.13"
     networks:
       net_h1_h2: { ipv4_address: 192.168.11.1 }
       net_h1_h3: { ipv4_address: 192.168.13.1 }
+    depends_on:
+      host2_pp_bob:
+        condition: service_healthy
+      host3_kms_alice:
+        condition: service_healthy
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host1_pp_alice-default"]
 
   host2_pp_bob:
@@ -81,11 +87,21 @@ services:
     hostname: host2
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
+      NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.11"
       DEV_MAP_KMS: "192.168.24"
     networks:
       net_h1_h2: { ipv4_address: 192.168.11.2 }
       net_h2_h4: { ipv4_address: 192.168.24.2 }
+    depends_on:
+      host4_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Post-processing Bob escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host2_pp_bob-default"]
 
   host3_kms_alice:
@@ -101,6 +117,15 @@ services:
       net_h1_h3: { ipv4_address: 192.168.13.3 }
       net_h3_h4: { ipv4_address: 192.168.34.3 }
       net_h3_h5: { ipv4_address: 192.168.35.3 }
+    depends_on:
+      host4_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'KMS Alice escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host3_kms_alice-default"]
 
   host4_kms_bob:
@@ -116,6 +141,12 @@ services:
       net_h2_h4: { ipv4_address: 192.168.24.4 }
       net_h3_h4: { ipv4_address: 192.168.34.4 }
       net_h4_h6: { ipv4_address: 192.168.46.4 }
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'KMS Bob escuchando' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host4_kms_bob-default"]
 
   host5_etsi014_alice:
@@ -129,7 +160,12 @@ services:
     networks:
       net_h5_h6: { ipv4_address: 192.168.56.5 }
       net_h3_h5: { ipv4_address: 192.168.35.5 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host5_etsi014_alice-default"]
+    depends_on:
+      host3_kms_alice:
+        condition: service_healthy
+      host6_etsi014_bob:
+        condition: service_healthy
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host5_etsi014_alice-default", "--appStartTime=20"]
 
   host6_etsi014_bob:
     image: qkdnetsim-6vm-emulation:latest
@@ -142,4 +178,13 @@ services:
     networks:
       net_h5_h6: { ipv4_address: 192.168.56.6 }
       net_h4_h6: { ipv4_address: 192.168.46.6 }
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host6_etsi014_bob-default"]
+    depends_on:
+      host4_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Escuchando trafico de aplicacion' /tmp/qkdnetsim.log"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 20s
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host6_etsi014_bob-default", "--appStartTime=20"]

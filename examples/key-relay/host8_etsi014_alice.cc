@@ -83,7 +83,7 @@ main(int argc, char* argv[])
     uint32_t authenticationType = 0;
     uint32_t encryptionType = 1;     // OTP
     uint32_t aesLifetime = 10000;
-    uint32_t useCrypto = 0;
+    uint32_t useCrypto = 1;
 
     uint32_t appStartTime = 50;
     uint32_t simulationTime = 5000;

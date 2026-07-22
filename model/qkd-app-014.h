@@ -601,8 +601,8 @@ private:
 
     //Sockets
     std::string     m_socketType;
-    bool            m_isSignalingConnectedToApp;
-    bool            m_isDataConnectedToApp;
+    bool            m_isSignalingConnectedToApp {false};
+    bool            m_isDataConnectedToApp {false};
     Ptr<Socket>     m_signalingSocketApp;
     Ptr<Socket>     m_dataSocketApp;
     Ptr<Socket>     m_socketToKMS;

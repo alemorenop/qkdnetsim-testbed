@@ -1,30 +1,30 @@
-# QKDNetSim — Laboratorio de escenarios de emulación en Docker
+# QKDNetSim Testbed
 
-Este repositorio es un entorno de pruebas (testbed) construido sobre **QKDNetSim** (ver más abajo la documentación original del proyecto) al que se le van añadiendo distintos **escenarios de emulación en red real**, cada uno con sus propios contenedores Docker, uno por nodo/rol, comunicándose por red de verdad en vez de estar todo simulado dentro de un único proceso ns-3.
+This repository is a testbed built on top of **QKDNetSim** (see the original project documentation below). It provides real-network emulation scenarios in which every node or role runs in its own Docker container and communicates over actual network interfaces instead of being simulated inside a single ns-3 process.
 
-## Escenarios
+## Scenarios
 
-### 1. Point-to-point — enlace directo Alice-Bob (`examples/point-to-point/`)
+### 1. Point-to-point — direct Alice–Bob link (`examples/point-to-point/`)
 
-Adaptación a contenedores del experimento de emulación de red descrito en la Fig. 3 de:
+Container-based adaptation of the network emulation experiment shown in Fig. 3 of:
 
 > Mehic, M., Dervisevic, E., Burdiak, P., Lipovac, V., Fazio, P. and Voznak, M., 2024. *Emulation of quantum key distribution networks*. IEEE Network, 39(1), pp.116-123. https://doi.org/10.1109/MNET.2024.3398404
 
-El paper describe el experimento simulando ambos extremos de cada enlace dentro de un único proceso ns-3; aquí cada rol vive en su propio contenedor Docker, comunicándose por red real (`EmuFdNetDevice`) en vez de estar todo dentro del mismo proceso — mismo escenario lógico, pero desplegado como 6 nodos independientes de verdad.
+The paper simulates both ends of every link inside a single ns-3 process. In this testbed, every role runs in a separate Docker container and communicates through real network interfaces using `EmuFdNetDevice`. The logical scenario is the same, but it is deployed as six independent nodes.
 
-6 contenedores: post-processing Alice/Bob, KMS Alice/Bob, apps ETSI 014 Alice/Bob, con Alice y Bob comunicándose directamente (sin nodo intermedio).
+The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob ETSI 014 applications. Alice and Bob communicate directly, without an intermediate node.
 
 ```
 HOST1 (post-processing Alice) ──sifting──> HOST2 (post-processing Bob)
-        │ entrega clave                          entrega clave │
+        │ key delivery                            key delivery │
         v                                                       v
 HOST3 (KMS Alice) <────────── transform_keys ──────────> HOST4 (KMS Bob)
         │ GET_KEY (ETSI 014)                    GET_KEY (ETSI 014) │
         v                                                       v
-HOST5 (ETSI 014 Alice) ──────── tráfico cifrado ──────> HOST6 (ETSI 014 Bob)
+HOST5 (ETSI 014 Alice) ─────── encrypted traffic ─────> HOST6 (ETSI 014 Bob)
 ```
 
-| Host | Rol | IPs (red ↔ vecino) |
+| Host | Role | IPs (network ↔ peer) |
 |---|---|---|
 | HOST1 | post-processing Alice | 192.168.11.1 (↔H2), 192.168.13.1 (↔H3) |
 | HOST2 | post-processing Bob | 192.168.11.2 (↔H1), 192.168.24.2 (↔H4) |
@@ -33,19 +33,24 @@ HOST5 (ETSI 014 Alice) ──────── tráfico cifrado ─────
 | HOST5 | ETSI014 Alice | 192.168.35.5 (↔H3), 192.168.56.5 (↔H6) |
 | HOST6 | ETSI014 Bob | 192.168.46.6 (↔H4), 192.168.56.6 (↔H5) |
 
-Arranque rápido:
+Quick start:
+
 ```bash
-cd contrib/qkdnetsim
+cd contrib/qkdnetsim-testbed
 docker build -t qkdnetsim-6vm-emulation:latest -f docker/Dockerfile .
 docker compose -f docker/docker-compose.yml up -d
 ./docker/verify.sh
 ```
 
-### 2. Key relay — nodo intermedio sin enlace directo Alice-Bob (`examples/key-relay/`)
+Container creation order does not affect the scenario. Readiness traces from the PP, KMS, and ETSI 014 applications ensure that listeners start before their clients. The dependency chain is HOST4 → HOST3/HOST2/HOST6 → HOST1/HOST5. The first PP link may take about one minute to converge because of ns-3 TCP backoff; no container restart is required.
 
-Variante en la que Alice y Bob no tienen enlace QKD directo, sino que pasan por un nodo intermedio ("trusted node") con su propio KMS, que hace de relay entre ambos usando la funcionalidad de relay ya integrada en `QKDKeyManagerSystemApplication` (`RelayConsumption`/`WasteRelay`, `ConfigureRSBuffers`, etc.), más un mecanismo de cifrado salto-a-salto (`skey_create`, tipo OTP) para que Alice y Bob acaben compartiendo una clave real sin que ninguno de los dos vea la clave "en crudo" del otro tramo. Funciona de extremo a extremo, con tráfico cifrado real fluyendo entre HOST8 y HOST9 (verificado con `tcpdump`).
+`verify.sh` requires all six processes to be running with zero restarts, checks that both KMS instances served the same `keyId`, and temporarily samples port 8081 to verify that application traffic exists and the body is no longer visible as plaintext. HOST5 and HOST6 use OTP with `useCrypto=1`.
 
-Topología (9 hosts):
+### 2. Key relay — intermediate node without a direct Alice–Bob link (`examples/key-relay/`)
+
+In this scenario, Alice and Bob do not have a direct QKD link. They communicate through a trusted intermediate node with its own KMS. The node relays keys using the functionality already provided by `QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`, `ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP encryption through `skey_create`. Alice and Bob ultimately share actual key material without either endpoint seeing the raw key from the other QKD segment. End-to-end encrypted traffic flows between HOST8 and HOST9 and is verified with temporary `tcpdump` samples.
+
+Topology (9 hosts):
 
 ```
 HOST1 (PP Alice) ──qkd──> HOST2 (PP Relay-A)          HOST3 (PP Relay-B) <──qkd── HOST4 (PP Bob)
@@ -54,105 +59,93 @@ HOST1 (PP Alice) ──qkd──> HOST2 (PP Relay-A)          HOST3 (PP Relay-B)
 HOST5 (KMS Alice) ─────────────── relay ───────────> HOST6 (KMS Relay) <─── relay ─────── HOST7 (KMS Bob)
        │                                                                                  │
        v                                                                                  v
-HOST8 (ETSI014 Alice) ─────────────────── tráfico cifrado ───────────────────> HOST9 (ETSI014 Bob)
+HOST8 (ETSI014 Alice) ───────────────── encrypted traffic ─────────────────> HOST9 (ETSI014 Bob)
 ```
 
-| Host | Rol | IPs (red ↔ vecino) |
+| Host | Role | IPs (network ↔ peer) |
 |---|---|---|
 | HOST1 | PP Alice | 192.168.111.1 (↔H2), 192.168.112.1 (↔H5) |
 | HOST2 | PP Relay-A | 192.168.111.2 (↔H1), 192.168.113.2 (↔H6) |
 | HOST3 | PP Relay-B | 192.168.114.3 (↔H4), 192.168.115.3 (↔H6) |
 | HOST4 | PP Bob | 192.168.114.4 (↔H3), 192.168.116.4 (↔H7) |
 | HOST5 | **KMS Alice** | 192.168.112.5 (↔H1), 192.168.117.5 (↔H6), 192.168.119.5 (↔H8) |
-| HOST6 | **KMS Relay** (nodo intermedio) | 192.168.113.6 (↔H2), 192.168.115.6 (↔H3), 192.168.117.6 (↔H5), 192.168.118.6 (↔H7) |
+| HOST6 | **KMS Relay** (intermediate node) | 192.168.113.6 (↔H2), 192.168.115.6 (↔H3), 192.168.117.6 (↔H5), 192.168.118.6 (↔H7) |
 | HOST7 | **KMS Bob** | 192.168.116.7 (↔H4), 192.168.118.7 (↔H6), 192.168.120.7 (↔H9) |
 | HOST8 | ETSI014 Alice | 192.168.119.8 (↔H5), 192.168.121.8 (↔H9) |
 | HOST9 | ETSI014 Bob | 192.168.120.9 (↔H7), 192.168.121.9 (↔H8) |
 
-Arranque:
+Start the scenario:
+
 ```bash
-cd contrib/qkdnetsim
+cd contrib/qkdnetsim-testbed
 docker build -t qkdnetsim-6vm-emulation:latest -f docker/Dockerfile .
 docker compose -f docker/docker-compose.key-relay.yml up -d
 ```
-Con el `depends_on` de más abajo, `up -d` ya intenta arrancar los 9 hosts en el orden correcto por si solo (ver "Arranque ordenado" más abajo); aun así, si algún contenedor se queda colgado sin dar señales de vida (la otra carrera conocida, ver caveat), lanza el watchdog externo para que lo recree:
+
+`depends_on` and the health checks start hosts according to the readiness of their actual listeners. PP links use TCP reconnection and may take about one minute to converge because of ns-3 TCP backoff. Do not restart containers during this window.
+
+#### End-to-end verification
+
+Seeing all nine containers in the `Up` state only proves that their processes have not exited. To check the expected activity for every host and sample the relevant traffic, run:
+
 ```bash
-./docker/watchdog-all.sh 30 15   # 30s por ronda: hay hosts con appStartTime=20, un timeout mas corto los recrea sin necesidad (ver leccion de watchdog-all.sh mas abajo)
+./docker/verify-key-relay.sh [sample_seconds]   # default: 10s
 ```
 
-#### Cómo comprobar que funciona de verdad
+The verifier reports whether all nine hosts produce the expected role-specific activity (`Clave entregada`, `almacena clave`, `sirve clave`, or `Peticion GET_KEY`), confirms that HOST5 and HOST7 serve the same `keyId` to the applications, and temporarily samples the four relevant links. Packet captures remain under `/tmp` inside the containers and are neither copied to nor stored in the repository. Traffic between HOST8 and HOST9 confirms the final result between the ETSI 014 applications.
 
-No basta con ver los 9 contenedores en `Up` — eso solo dice que el proceso no ha muerto. Para una comprobación real (logs esperados por host + una muestra de tráfico) usa:
-```bash
-./docker/verify-key-relay.sh [segundos_de_captura]   # por defecto 10s
-```
-Esto imprime, por cada uno de los 9 hosts, si está generando la actividad esperada (`Clave entregada`, `almacena clave`, `sirve clave`, `Peticion GET_KEY`, según el rol), confirma que HOST5/HOST7 están **sirviendo** claves a las apps (no solo relayando), y genera capturas `.pcap` reales en `docker/captures/` para 4 enlaces clave de la cadena (HOST1→HOST5, HOST5→HOST6, HOST6→HOST7, HOST8↔HOST9) que puedes abrir con Wireshark de verdad:
-```bash
-wireshark docker/captures/*.pcap
-```
-El HOST8↔HOST9 es el que demuestra el resultado final: tráfico TCP cifrado con secuencias creciendo de forma continua entre las dos apps ETSI014, que es justo lo que Alice y Bob consiguen sin tener enlace QKD directo entre ellos.
+#### Library issues fixed for this scenario
 
-#### Bugs de la librería encontrados y corregidos para que este escenario funcione
+- **TCP sockets and startup ordering.** PP, KMS, and ETSI listeners publish readiness traces used by the health checks. `QKDPostprocessingApplication` preserves its socket during `SYN_SENT`, allows TCP backoff to proceed, and reconnects after a failure or closure. Periodically destroying a socket during the handshake caused `TcpSocketBase` assertions when delayed packets arrived.
+- **Incorrect framing of the post-processing TCP stream.** The receiver assumed that every `Recv()` call contained exactly one sent packet and constructed a `std::string` without an explicit length. TCP fragmentation or coalescing consequently caused `JSON parse error` and terminated the process. The receiver now keeps a buffer per connection, extracts frames delimited by `;`, preserves incomplete fragments, and discards malformed JSON without aborting the container.
+- **Empty key material in `skey_create`.** `mergedKey` was consumed while splitting the local response and was then reused empty for the relay operation. An exact copy is now preserved, its size is validated, and the key is encrypted hop by hop. HOST5 and HOST7 serve the same 6400-bit `keyId`.
+- **Uninitialized ETSI 014 state.** `m_isSignalingConnectedToApp` and `m_isDataConnectedToApp` were read before initialization, causing some runs to skip socket creation. Both now start explicitly as `false`.
+- **Encryption disabled in the scenario.** HOST8 and HOST9 used `useCrypto=0`, so traffic described as OTP-protected was actually plaintext. The key-relay scenario now uses `useCrypto=1`.
+- **Bit accounting stuck in READY.** In `Relay()`, `StoreKey(key,true)` followed by `MarkKey(id,INIT)` has a net-zero effect on `m_currentKeyBit`. As a result, `CheckState()` stopped reflecting actual relay-buffer depletion after the threshold was crossed for the first time. `SBufferClientCheck` now also checks `GetSBitCount()`, which is the current count rather than historical accumulated state.
+- **`skey_create` assumed one exact-size key.** Hop-by-hop encryption material was requested as a single key with an exact bit length, while the buffer only contained default 2048-bit keys. It now uses the same multi-key merge pattern through `GetTransformCandidate` that is already used elsewhere in the implementation.
+- **Unbalanced HTTP request bookkeeping.** Multi-hop forwarding of `skey_create` sent the request to the next hop without adding it to `m_httpRequestsQueryKMS`. Processing the response then attempted to `pop()` an empty queue and terminated the process with `NS_FATAL_ERROR("HTTP query for this KMS is empty!")`.
 
-- **Socket TCP roto en silencio, sin reintento.** `Connect()` se llama una única vez al arrancar; si la conexión inicial pierde la carrera contra el listener remoto (que puede no estar escuchando todavía), el socket queda muerto para siempre sin que ningún callback de error se dispare — la app sigue "enviando" en bucle sin que llegue un solo paquete real al otro lado. Confirmado con `strace` (cero `write()`/`read()` reales pese a actividad interna continua) en **tres puntos distintos** del pipeline, cada uno arreglado con un watchdog de aplicación que detecta la ausencia de confirmación de conexión/respuesta y fuerza un socket nuevo:
-  - App ETSI014 (`QKDApp014`) → su KMS local (`qkd-app-014.{h,cc}`).
-  - KMS → KMS del siguiente salto en el relay (`qkd-key-manager-system-application.{h,cc}`).
-  - Post-processing (`QKDPostprocessingApplication`) → su KMS local (`qkd-postprocessing-application.{h,cc}`).
-- **Contabilidad de bits atascada en READY.** En `Relay()`, `StoreKey(key,true)` seguido de `MarkKey(id,INIT)` tiene efecto neto cero sobre `m_currentKeyBit`, con lo que `CheckState()` deja de reflejar el vaciado real del buffer de relay una vez cruzado el umbral por primera vez. Mitigado comprobando también `GetSBitCount()` (el recuento real, no el acumulado histórico) en `SBufferClientCheck`.
-- **`skey_create` asumía una única clave de tamaño exacto.** El material de cifrado salto-a-salto se buscaba como una sola clave de tamaño exacto en bits, pero el buffer solo contiene claves de tamaño por defecto (2048 bits); se sustituyó por el mismo patrón de fusión de varias claves (`GetTransformCandidate`) que ya se usaba en otras partes del fichero.
-- **Bookkeeping de peticiones HTTP desbalanceado.** El reenvío multi-salto de `skey_create` mandaba la petición al siguiente salto sin registrarla en `m_httpRequestsQueryKMS`, y la respuesta hacía `pop()` de una cola vacía → **caída del proceso** (`NS_FATAL_ERROR("HTTP query for this KMS is empty!")`).
-- **Watchdog de relay con condición de carrera propia.** El watchdog del socket KMS↔KMS (primer punto de la lista, tramo relay) podía disparar sobre un intento ya completado si una respuesta real llegaba justo antes de que venciera su timeout de 5s y ya había arrancado un intento nuevo, intentando marcar como obsoleta una clave que ya no existía → **otra caída del proceso** (`NS_FATAL_ERROR("Key not found for marking!")`). Arreglado con un contador de generación por destino: el watchdog comprueba si sigue siendo el intento vigente antes de tocar nada.
+**Timing requirement:** keep `--appStartTime=20` for HOST8 and HOST9 (see the comments in `docker-compose.key-relay.yml`). `QKDApp014` establishes its KMS connection during startup; reducing the delay may make it connect before the KMS listener is ready.
 
-**Requisito de temporización:** `--appStartTime=20` en HOST8/HOST9 (no baja, ver comentarios en `docker-compose.key-relay.yml`) — `QKDApp014` conecta con su KMS una sola vez al arrancar; con menos margen puede intentarlo antes de que el KMS esté escuchando, perdiendo la carrera igual que los sockets de arriba.
+#### Ordered startup with `depends_on`
 
-#### Arranque ordenado (`depends_on`) para reducir la carrera de conexión
+Originally, there was no guarantee that a server had reached `Listen()` before its client called `Connect()`. The following mechanisms now enforce the real dependency graph:
 
-Los watchdogs de arriba son la solución **reactiva** (detectar el silencio y reintentar) a un problema de fondo que es siempre el mismo: no había ninguna garantía de que un KMS estuviera ya en `Listen()` antes de que su(s) cliente(s) intentaran `Connect()` — `docker-compose.key-relay.yml` no tenía `depends_on`, y dentro de ns-3 tanto los KMS como las apps de post-processing arrancan en el instante 0 de simulación, exactamente a la vez que sus clientes.
-
-Para atacarlo de forma **proactiva**, además de los watchdogs (que se mantienen como red de seguridad, no se han quitado), se añadió:
-- Dos trazas nuevas — `ListenReady` en `QKDKeyManagerSystemApplication` y `AppListenReady` en `QKDApp014` — que se disparan justo cuando los sockets de escucha relevantes ya están en `Bind()+Listen()`.
-- Un marcador de texto por host enganchado a esas trazas (p.ej. `"[HOST5] KMS Alice escuchando"`), igual que los marcadores `almacena clave`/`sirve clave` que ya existían.
-- `entrypoint.sh` ahora duplica todo su stdout a `/tmp/qkdnetsim.log` **dentro de cada contenedor** — necesario porque un `HEALTHCHECK` de Docker se ejecuta en el namespace del propio contenedor y no tiene visibilidad sobre `docker logs` (eso es una vista del lado del host sobre el log driver).
-- Un `HEALTHCHECK` por host (HOST5, HOST6, HOST7, HOST9) que hace `grep` de su marcador en ese fichero, y una cadena de `depends_on: condition: service_healthy` en `docker-compose.key-relay.yml` que sigue la topología real (grafo acíclico, sin ciclos):
+- Readiness traces in `QKDKeyManagerSystemApplication`, `QKDPostprocessingApplication`, and `QKDApp014`, emitted after `Bind()` and `Listen()` complete.
+- A host-specific text marker attached to each trace, such as `"[HOST5] KMS Alice escuchando"`, alongside the existing `almacena clave` and `sirve clave` markers.
+- `entrypoint.sh` mirrors stdout to `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside the container namespace and cannot read the host-side `docker logs` view provided by the logging driver.
+- Health checks on HOST2, HOST4, HOST5, HOST6, HOST7, and HOST9, plus a `depends_on: condition: service_healthy` chain that follows the actual topology:
 
 ```
-HOST7 (raiz, sin dependencias)
-  ← HOST6            ← HOST2, HOST3
-  ← HOST4
-  ← HOST9            ← HOST8 (tambien depende de HOST5)
-       ← HOST5        ← HOST1, HOST8
+HOST7
+  ├─ HOST6
+  │    ├─ HOST2 ─ HOST1
+  │    └─ HOST5 ─ HOST8
+  ├─ HOST4 ─ HOST3
+  └─ HOST9 ─ HOST8
 ```
 
-Con esto, `docker compose up -d` arranca HOST7 primero, espera a que confirme que escucha, luego HOST6/HOST4/HOST9, y así sucesivamente — en vez de lanzar los 9 a ciegas y confiar en que la suerte (o el reintento del watchdog) lo arregle después. En las pruebas de esta sesión, con `depends_on` activo los hosts que antes necesitaban el watchdog de reconexión (HOST1-4, sobre el enlace post-processing→KMS) arrancaron con **0 reconexiones** — la conexión se estableció bien a la primera siempre.
+All four PP applications schedule a lightweight event every 100 ms so that `RealtimeSimulatorImpl` always has a nearby event. The entrypoint applies a fixed veth stabilization delay. There is no random jitter and no watchdog that terminates processes or recreates containers.
 
-**Importante — esto NO sustituye a `watchdog-all.sh`.** `depends_on` solo ordena *cuándo* arranca cada contenedor; no puede hacer nada contra la otra carrera (`RealtimeSimulatorImpl`, ver caveat justo abajo), que cuelga un proceso *antes* de que intente conectar con nadie. De hecho, durante las pruebas de esta misma sesión, con `depends_on` ya funcionando, HOST1 se quedó colgado por esa segunda carrera varias veces en despliegues distintos — en unos casos recuperado por `watchdog-all.sh`, en otro se recuperó solo tras arrancar más lento de lo normal. Los dos mecanismos son complementarios: uno reduce la carrera de conexión, el otro sigue haciendo falta para la carrera de arranque del hilo de `RealtimeSimulatorImpl`.
+The image also applies `patches/realtime-simulator-clamp.patch` to ns-3.46. Under sustained load, the external `FdNetDevice` thread may observe a timestamp a few ticks behind `m_currentTs`. The original implementation aborts with `schedule for time < m_currentTs`; the patch schedules an already-late frame at the current valid timestamp and prevents the corresponding exit-code-139 failure.
 
-#### Caveat conocido, no arreglado: carrera de arranque de `RealtimeSimulatorImpl`
+PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after HOST1–HOST4 begin reporting `Clave entregada`.
 
-Confirmada con `gdb`/`strace`: dos hilos en bucle de futex sin avanzar el reloj simulado ni hacer ninguna syscall de red, que a veces deja algún contenedor colgado desde el primer instante, sin producir ninguna salida (ni siquiera el marcador `ListenReady` de arriba, porque ocurre antes de que el proceso llegue a montar ningún socket). No es específico de este escenario, de estos fixes ni del `depends_on` — es interno al núcleo de ns-3 (`realtime-simulator-impl.cc`/`wall-clock-synchronizer.cc`), usado por todos los escenarios en tiempo real, y tocarlo ahí es demasiado arriesgado. Se mitiga (no se corrige de raíz) con dos mecanismos combinados:
-- `STARTUP_JITTER_MAX_MS` (variable de entorno en `docker-compose.key-relay.yml`, ya activada por defecto para HOST1-7): retraso aleatorio antes de arrancar cada binario, para no lanzar todos los procesos exactamente en el mismo instante y reducir la contención que dispara la carrera.
-- `./docker/watchdog-all.sh [timeout_s] [rondas]`: vigila los 9 contenedores tras el `docker compose up -d` y **recrea el contenedor entero** (no solo el proceso — un simple restart del binario dentro del mismo contenedor casi nunca recupera el hilo colgado) de cualquiera que no muestre actividad real dentro del timeout. `watchdog-host9.sh` es la misma lógica aplicada a un único host/contenedor, útil para recrear uno concreto suelto sin tocar el resto.
+## Testbed additions to QKDNetSim
 
-**Lección de `watchdog-all.sh`:** el `timeout_s` por ronda tiene que ser mayor que el `appStartTime` más alto en juego (20s para HOST8/HOST9). Con un timeout más corto (p.ej. 15s, usado en pruebas iniciales de esta sesión) el watchdog recreaba HOST8/HOST9 en bucle **sin necesidad** — no porque estuvieran colgados, sino porque su marcador de actividad (`Peticion GET_KEY`) no puede aparecer antes de que pase su `appStartTime`, y cada recreación reinicia esa cuenta desde cero. Por eso el ejemplo de arriba usa `30`, no `15`.
-
-**Lección operativa (recreación parcial):** si necesitas recrear contenedores a mano para depurar algo, hazlo con `docker compose down --remove-orphans && docker compose up -d` (todos a la vez), no con `--force-recreate hostX` sobre unos pocos. Un peer que se queda vivo mientras el otro extremo de su enlace se recrea puede quedarse con una conexión TCP apuntando al contenedor viejo (ya destruido), y sigue "recibiendo" sin error aparente mientras en realidad no llega nada — mismo síntoma que los bugs de arriba, pero causado por el despliegue, no por el código. En las pruebas de esta sesión, un caso de un único host (HOST9, luego también HOST1) atascado en la carrera de `RealtimeSimulatorImpl` tras varias recreaciones individuales solo se resolvió con un reset completo (`down` + `up` de los 9 a la vez) — recrear una y otra vez el mismo contenedor en solitario, mientras sus 8 hermanos llevan minutos corriendo, no parece ayudar a esquivar la carrera.
-
-## Qué se ha añadido sobre QKDNetSim
-
-- **[`contrib/qkdnetsim/examples/point-to-point/`](examples/point-to-point/)** — 6 programas ns-3 independientes (`host1_pp_alice.cc` ... `host6_etsi014_bob.cc`), uno por rol/contenedor (escenario 1, adaptación en contenedores de la Fig. 3 del paper). A diferencia de los ejemplos originales del módulo (que modelan ambos extremos de cada enlace en un único proceso), estos usan la API de bajo nivel de QKDNetSim para que cada rol viva en su propio proceso, comunicándose por red real vía `EmuFdNetDevice`.
-- **[`contrib/qkdnetsim/examples/key-relay/`](examples/key-relay/)** — escenario 2, mismo patrón aplicado a una topología de 3 sitios con relay (9 binarios, ver `examples/CMakeLists.txt` y las reglas de compilación añadidas en `docker/Dockerfile`).
-- **[`contrib/qkdnetsim/docker/`](docker/)** — imagen Docker compartida (`Dockerfile`), definición de los 6 contenedores y las 7 redes punto a punto entre ellos del escenario 1 (`docker-compose.yml`), script de arranque que detecta automáticamente qué interfaz real corresponde a qué rol (`entrypoint.sh`, necesario porque Docker no garantiza el orden de conexión de redes entre reinicios), y un script de verificación end-to-end (`verify.sh`).
-- **[`docker-compose.key-relay.yml`](docker/docker-compose.key-relay.yml)** — definición de los 9 contenedores y las 10 redes del escenario 2 (proyecto Docker Compose separado del escenario 1, ver comentario en el propio archivo), incluida la cadena `depends_on`/`healthcheck` descrita más arriba.
-- **`entrypoint.sh` ampliado** con: (a) dos mecanismos opt-in (activados vía variables de entorno, sin efecto si no se definen) para mitigar la carrera de arranque de `RealtimeSimulatorImpl` que afecta al escenario 2 por tener 9 procesos arrancando a la vez en vez de 6 — arranque escalonado con retraso aleatorio (`STARTUP_JITTER_MAX_MS`) y un watchdog interno que reinicia el binario si no produce salida a tiempo (`WATCHDOG_TIMEOUT`) —; y (b) duplicado de todo el stdout a `/tmp/qkdnetsim.log` dentro del contenedor, para que los `HEALTHCHECK` de Docker (que no ven `docker logs`) puedan comprobar los marcadores de arranque.
-- **[`watchdog-all.sh`](docker/watchdog-all.sh) / [`watchdog-host9.sh`](docker/watchdog-host9.sh)** — watchdogs *externos* (se ejecutan en el host, no dentro del contenedor) para la misma carrera de arranque: cuando el `WATCHDOG_TIMEOUT` interno no basta porque el hilo colgado no responde ni a un reinicio del proceso, estos recrean el contenedor entero (par veth nuevo) hasta que arranca con normalidad. `watchdog-all.sh` vigila los 9 a la vez; `watchdog-host9.sh` apunta a uno solo.
-- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — comprobación end-to-end del escenario 2 (mismo espíritu que `verify.sh` del escenario 1, adaptado a 9 hosts): chequeo de logs esperados por host, confirmación de que HOST5/HOST7 sirven claves, y capturas `.pcap` reales de 4 enlaces de la cadena en `docker/captures/` para inspeccionar con Wireshark.
-- **Trazas `ListenReady`** (en [`model/qkd-key-manager-system-application.{h,cc}`](model/qkd-key-manager-system-application.h)) y **`AppListenReady`** (en [`model/qkd-app-014.{h,cc}`](model/qkd-app-014.h)) — se disparan cuando los sockets de escucha relevantes ya están activos; alimentan los marcadores que usan los `HEALTHCHECK` de `depends_on`.
-- **Fix en [`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h)**: `m_numberOfQueues` se usaba sin inicializar en el constructor de `QKDKMSQueueLogic`, causando una reserva de memoria descontrolada (varios GB) al arrancar cualquier KMS. Se le da el valor por defecto documentado (3) directamente en la declaración.
-- **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)**: entradas de build para los binarios de cada escenario.
+- **[`examples/point-to-point/`](examples/point-to-point/)** — six independent ns-3 programs (`host1_pp_alice.cc` through `host6_etsi014_bob.cc`), one per role and container. Unlike the original module examples, which model both ends of every link in one process, these programs use the low-level QKDNetSim API and communicate over real networks through `EmuFdNetDevice`.
+- **[`examples/key-relay/`](examples/key-relay/)** — the same pattern applied to a three-site relay topology with nine binaries. See `examples/CMakeLists.txt` and the build targets in `docker/Dockerfile`.
+- **[`docker/`](docker/)** — the shared image, the six-container point-to-point definition and its seven networks, interface-aware entrypoint, and end-to-end verifier.
+- **[`docker-compose.key-relay.yml`](docker/docker-compose.key-relay.yml)** — the nine-container, ten-network key-relay definition, maintained as a separate Compose project and including the readiness dependency chain described above.
+- **`entrypoint.sh`** — detects interfaces by subnet, normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or random jitter.
+- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that HOST5 and HOST7 serve the same `keyId`, and samples traffic without storing captures in the repository.
+- **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
+- **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
+- **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for every scenario binary.
 
 ---
 
-# Documentación original de QKDNetSim
+# Original QKDNetSim documentation
 
 ## Quantum Key Distribution Network Simulation Module for NS-3
 

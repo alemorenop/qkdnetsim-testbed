@@ -25,6 +25,13 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE("HOST3_PP_RELAY_B");
 
 static void
+KeepAlive(Time period, Time stopTime)
+{
+    if(Simulator::Now() < stopTime)
+        Simulator::Schedule(period, &KeepAlive, period, stopTime);
+}
+
+static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
 {
     EmuFdNetDeviceHelper emu;
@@ -145,6 +152,7 @@ main(int argc, char* argv[])
                          std::cout << "[HOST3] Clave entregada a KMS Relay (lado Bob), bytes=" << p->GetSize() << std::endl;
                      }));
 
+    Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
     Simulator::Stop(Seconds(simulationTime));
     Simulator::Run();
     Simulator::Destroy();

@@ -1,0 +1,45 @@
+diff --git a/src/core/model/realtime-simulator-impl.cc b/src/core/model/realtime-simulator-impl.cc
+--- a/src/core/model/realtime-simulator-impl.cc
++++ b/src/core/model/realtime-simulator-impl.cc
+@@ -548,8 +548,13 @@ RealtimeSimulatorImpl::ScheduleWithContext(uint32_t context, const Time& delay,
+             ts += delay.GetTimeStep();
+         }
+ 
+-        NS_ASSERT_MSG(ts >= m_currentTs,
+-                      "RealtimeSimulatorImpl::ScheduleRealtime(): schedule for time < m_currentTs");
++        // An external I/O thread can observe the wall clock a few ticks behind
++        // m_currentTs after the simulator thread has advanced.  Such an event
++        // cannot be inserted in the past; process it immediately instead.
++        if (ts < m_currentTs)
++        {
++            ts = m_currentTs;
++        }
+         Scheduler::Event ev;
+         ev.impl = impl;
+         ev.key.m_ts = ts;
+@@ -589,8 +594,10 @@ RealtimeSimulatorImpl::ScheduleRealtimeWithContext(uint32_t context,
+         std::unique_lock lock{m_mutex};
+ 
+         uint64_t ts = m_synchronizer->GetCurrentRealtime() + time.GetTimeStep();
+-        NS_ASSERT_MSG(ts >= m_currentTs,
+-                      "RealtimeSimulatorImpl::ScheduleRealtime(): schedule for time < m_currentTs");
++        if (ts < m_currentTs)
++        {
++            ts = m_currentTs;
++        }
+         Scheduler::Event ev;
+         ev.impl = impl;
+         ev.key.m_ts = ts;
+@@ -621,8 +628,9 @@ RealtimeSimulatorImpl::ScheduleRealtimeNowWithContext(uint32_t context, EventImp
+         //
+         uint64_t ts = m_running ? m_synchronizer->GetCurrentRealtime() : m_currentTs;
+-        NS_ASSERT_MSG(ts >= m_currentTs,
+-                      "RealtimeSimulatorImpl::ScheduleRealtimeNowWithContext(): schedule for time "
+-                      "< m_currentTs");
++        if (ts < m_currentTs)
++        {
++            ts = m_currentTs;
++        }
+         Scheduler::Event ev;
+         ev.impl = impl;
+         ev.key.m_ts = ts;
