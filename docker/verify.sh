@@ -1,6 +1,6 @@
 #!/bin/bash
-# Verificacion end-to-end del escenario point-to-point de 6 hosts.
-# Uso: ./docker/verify.sh [duracion_captura_s]
+# End-to-end verification of the 6-host point-to-point scenario.
+# Usage: ./docker/verify.sh [capture_seconds]
 
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
@@ -15,87 +15,106 @@ log_count() {
     docker exec "$container_id" grep -cE "$pattern" /tmp/qkdnetsim.log 2>/dev/null || true
 }
 
-echo "=== 1) Estado de los 6 contenedores ==="
+echo "=== 1) Status of the 6 containers ==="
 docker ps --filter "name=qkd-host" --format "table {{.Names}}\t{{.Status}}"
 echo
 
 for service in $($COMPOSE config --services); do
     container_id=$($COMPOSE ps -q "$service")
     if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null)" != "true" ]; then
-        echo "  [FALLO] $service no esta ejecutandose"
+        echo "  [FAIL] $service is not running"
         failures=$((failures + 1))
         continue
     fi
     restarts=$(docker inspect -f '{{.RestartCount}}' "$container_id")
     if [ "$restarts" -ne 0 ]; then
-        echo "  [FALLO] $service se ha reiniciado $restarts veces"
+        echo "  [FAIL] $service has restarted $restarts time(s)"
         failures=$((failures + 1))
     fi
 done
 echo
 
-echo "=== 2) Actividad esperada por host ==="
+echo "=== 2) Expected activity per host ==="
 declare -A PATTERNS=(
-    [host1_pp_alice]="Clave entregada a KMS Alice"
-    [host2_pp_bob]="Clave entregada a KMS Bob"
-    [host3_kms_alice]="almacena clave|sirve clave"
-    [host4_kms_bob]="almacena clave|sirve clave"
-    [host5_etsi014_alice]="Peticion GET_KEY a KMS Alice"
-    [host6_etsi014_bob]="Peticion GET_KEY a KMS Bob"
+    [host1_pp_alice]="Key delivered to KMS Alice"
+    [host2_pp_bob]="Key delivered to KMS Bob"
+    [host3_kms_alice]="stores key|serves key"
+    [host4_kms_bob]="stores key|serves key"
+    [host5_etsi014_alice]="GET_KEY request to KMS Alice"
+    [host6_etsi014_bob]="GET_KEY request to KMS Bob"
 )
 
 for service in "${!PATTERNS[@]}"; do
     count=$(log_count "$service" "${PATTERNS[$service]}")
     count=${count:-0}
     if [ "$count" -gt 0 ]; then
-        echo "  [OK]    $service: $count lineas"
+        echo "  [OK]    $service: $count lines"
     else
-        echo "  [FALLO] $service: sin actividad esperada"
+        echo "  [FAIL]  $service: no expected activity"
         failures=$((failures + 1))
     fi
 done
 echo
 
-echo "=== 3) Misma clave servida en Alice y Bob ==="
-alice_ids=$(docker exec qkd-host3 sed -n 's/.*sirve clave.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
-bob_ids=$(docker exec qkd-host4 sed -n 's/.*sirve clave.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
+echo "=== 3) Same key served to Alice and Bob ==="
+alice_ids=$(docker exec qkd-host3 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
+bob_ids=$(docker exec qkd-host4 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
 common_ids=$(comm -12 <(printf '%s\n' "$alice_ids") <(printf '%s\n' "$bob_ids") | sed '/^$/d')
 if [ -n "$common_ids" ]; then
-    echo "  [OK] keyId comun: $(printf '%s' "$common_ids" | tr '\n' ' ')"
+    echo "  [OK] common keyId: $(printf '%s' "$common_ids" | tr '\n' ' ')"
 else
-    echo "  [FALLO] los KMS no han servido ningun keyId comun"
+    echo "  [FAIL] the KMS instances have not served any common keyId"
     failures=$((failures + 1))
 fi
 echo
 
-echo "=== 4) Trafico cifrado Alice-Bob (${CAPTURE_S}s) ==="
+echo "=== 4) Encrypted Alice-Bob traffic (${CAPTURE_S}s) ==="
+# tcpdump opens the raw socket as root and then drops privileges to a
+# dedicated user (Debian/Ubuntu package) before writing -w. If a file with
+# that same name is left over from a previous run with different
+# owner/permissions, the next attempt fails silently with "Permission
+# denied" (exit 1, zero packets), unrelated to whether there is real
+# traffic. Remove the file before each attempt so it never depends on its
+# previous state.
+docker exec qkd-host5 rm -f /tmp/p2p-verify-app.pcap
 docker exec qkd-host5 timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
     -w /tmp/p2p-verify-app.pcap 'tcp port 8081' >/dev/null 2>&1
 
 app_packets=$(docker exec qkd-host5 tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
+# Steps 1-3 (grepping logs that already have thousands of lines) can take a
+# few seconds, so this capture window may start right in a gap between
+# bursts of the periodic send. A retry covers that case without flagging as
+# a failure a scenario that is actually sending traffic.
+if [ "$app_packets" -le 3 ]; then
+    echo "  [INFO] empty sample; retrying for ${CAPTURE_S}s"
+    docker exec qkd-host5 rm -f /tmp/p2p-verify-app.pcap
+    docker exec qkd-host5 timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
+        -w /tmp/p2p-verify-app.pcap 'tcp port 8081' >/dev/null 2>&1
+    app_packets=$(docker exec qkd-host5 tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
+fi
 wire_text=$(docker exec qkd-host5 tcpdump -nn -A -s 0 -r /tmp/p2p-verify-app.pcap 2>/dev/null)
 if [ "$app_packets" -gt 3 ]; then
-    echo "  [OK] $app_packets paquetes de aplicacion capturados"
+    echo "  [OK] $app_packets application packets captured"
 else
-    echo "  [FALLO] trafico insuficiente: $app_packets paquetes"
+    echo "  [FAIL] insufficient traffic: $app_packets packet(s)"
     failures=$((failures + 1))
 fi
 
-# Sin UseCrypto, la carga generada tras "Cookie." es una cadena alfanumerica
-# larga y visible. Con OTP activo aparecen bytes no imprimibles casi de inmediato.
-if grep -qE 'Cookie\.[[:alnum:]]{100}' <<<"$wire_text"; then
-    echo "  [FALLO] el cuerpo de aplicacion conserva texto en claro"
+# GetPacketContent() generates ONLY pure alphanumeric noise as the starting
+# plaintext (see model/qkd-app-014.cc) -- it does not insert any text
+# marker of its own into the packet. Without encryption, that alphanumeric
+# noise travels as-is and shows up as a long readable [[:alnum:]] run in the
+# -A dump. With OTP active, those same bytes become non-printable noise.
+if grep -qE '[[:alnum:]]{100}' <<<"$wire_text"; then
+    echo "  [FAIL] the application body still contains plaintext"
     failures=$((failures + 1))
-elif grep -q 'Cookie\.' <<<"$wire_text"; then
-    echo "  [OK] encabezado identificable y cuerpo binario cifrado"
 else
-    echo "  [FALLO] no se encontro un mensaje de aplicacion completo"
-    failures=$((failures + 1))
+    echo "  [OK] encrypted binary body, no recognizable plaintext"
 fi
 echo
 
 if [ "$failures" -ne 0 ]; then
-    echo "RESULTADO: FALLO ($failures comprobaciones)" >&2
+    echo "RESULT: FAIL ($failures check(s))" >&2
     exit 1
 fi
-echo "RESULTADO: OK"
+echo "RESULT: OK"

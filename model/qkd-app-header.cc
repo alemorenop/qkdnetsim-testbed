@@ -213,7 +213,21 @@ void
 QKDAppHeader::SetAuthTag(std::string value){
 
     NS_LOG_FUNCTION (this << value << value.size());
-    m_authTag = value;
+
+    // GetSerializedSize() reserves a fixed 32 bytes for this field (see wire
+    // layout above) and Serialize() writes exactly value.size() bytes into
+    // that reservation. Without padding, a shorter tag (e.g. an empty string
+    // when authentication is disabled, since QKDEncryptor::Authenticate()
+    // returns "" for UNAUTHENTICATED) leaves the remainder of the reserved
+    // bytes untouched, i.e. whatever the ns-3 Buffer previously held is sent
+    // on the wire as-is. Pad/truncate here the same way SetEncryptionKeyId()
+    // and SetAuthenticationKeyId() already do for their own 32-byte fields.
+    NS_ASSERT(value.size() <= 32);
+    if(value.size() < 32) {
+        uint32_t diff = 32-value.size();
+        m_authTag = std::string(diff, '0') + value;
+    } else
+        m_authTag = value;
 }
 
 std::string

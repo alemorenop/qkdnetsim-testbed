@@ -1,28 +1,30 @@
-# Escenario point-to-point (Fig. 3 del paper, adaptada a contenedores), 6
-# hosts, cada uno un contenedor con un proceso ns-3 independiente. Las IPs de
-# cada red coinciden con los valores por defecto ya escritos en los .cc de
-# point-to-point/, asi que no hace falta pasar --myIpXXX por linea de comandos.
+# Point-to-point scenario (Fig. 3 from the paper, adapted to containers), 6
+# hosts, each one a container with an independent ns-3 process. The IPs of
+# each network match the defaults already written in the point-to-point/
+# .cc files, so there is no need to pass --myIpXXX on the command line.
 #
-# Uso:
+# Usage:
 #   docker compose -f docker/docker-compose.yml up
 #
-# "name" fija el nombre de proyecto explicitamente: sin esto, Docker Compose
-# usa el nombre de la carpeta ("docker") como proyecto por defecto, y como
-# docker-compose.key-relay.yml vive en la misma carpeta, ambos quedarian
-# fusionados en el mismo proyecto (con riesgo real de que un "up" de uno
-# recree/borre contenedores del otro si comparten alguna clave de servicio).
+# "name" sets the project name explicitly: without this, Docker Compose
+# uses the folder name ("docker") as the default project, and since
+# docker-compose.key-relay.yml lives in the same folder, both would end up
+# merged into the same project (with a real risk that an "up" of one
+# recreates/removes containers of the other if they share a service key).
 name: qkdnetsim-fig3-6host
 
-# Nota sobre DEV_MAP_*: Docker no garantiza que el orden en que se conectan
-# las redes se traduzca siempre en el mismo eth0/eth1/eth2 dentro del
-# contenedor entre un "up" y otro. El entrypoint.sh detecta en arranque, por
-# cada interfaz, la IP que le asigno Docker, la compara contra estas
-# variables (prefijo /24) y le pasa el --devXXX correcto a ns-3 el solo, asi
-# que el mapeo real de red->interfaz no importa.
+# Note on DEV_MAP_*: Docker does not guarantee that the order in which a
+# service's networks are attached translates into the same eth0/eth1/eth2
+# inside the container between one "up" and the next. entrypoint.sh detects
+# at startup, for each interface, the IP Docker assigned it, compares it
+# against these variables (/24 prefix), and passes the correct --devXXX
+# flag to ns-3 on its own, so the real network->interface mapping does not
+# matter.
 
-# Todas las redes fijan su gateway en ".254", fuera del rango .1-.6 que usan
-# los contenedores, para que Docker no reserve por defecto una IP (".1") que
-# ya le hemos asignado a alguno de los hosts (eso causaba "Address already in use").
+# All networks fix their gateway at ".254", outside the .1-.6 range used by
+# the containers, so Docker does not reserve by default an IP (".1") that
+# has already been assigned to one of the hosts (that caused "Address
+# already in use").
 networks:
   net_h1_h2:   # HOST1 <-> HOST2  (sifting, post-processing Alice-Bob)
     ipam:
@@ -97,7 +99,7 @@ services:
       host4_kms_bob:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Post-processing Bob escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'Post-processing Bob listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -121,7 +123,7 @@ services:
       host4_kms_bob:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'KMS Alice escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'KMS Alice listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -142,7 +144,7 @@ services:
       net_h3_h4: { ipv4_address: 192.168.34.4 }
       net_h4_h6: { ipv4_address: 192.168.46.4 }
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'KMS Bob escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'KMS Bob listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -182,7 +184,7 @@ services:
       host4_kms_bob:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Escuchando trafico de aplicacion' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'Listening for application traffic' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 15

@@ -292,30 +292,31 @@ public:
   }
 
   /**
-   * @brief Pre-crea (bootstrap) el S-Buffer de tipo RELAY hacia un KM alcanzable
-   * solo mediante relay (no vecino directo).
+   * @brief Pre-creates (bootstraps) the RELAY-type S-Buffer toward a KM only
+   * reachable via relay (not a direct neighbor).
    *
-   * En el flujo normal, este buffer lo crea el propio KMS bajo demanda al procesar
-   * una peticion GET_STATUS entrante o el primer mensaje de relay entrante. Como
-   * QKDApp014 nunca envia GET_STATUS, en un escenario de relay puro (sin ese
-   * bootstrap implicito) SBufferClientCheck() fallaria al no encontrar la entrada.
-   * Llamar a esta funcion durante la configuracion evita ese problema. Es
-   * idempotente: si el buffer ya existe, no hace nada.
+   * In the normal flow, the KMS itself creates this buffer on demand while
+   * processing an incoming GET_STATUS request or the first incoming relay
+   * message. Since QKDApp014 never sends GET_STATUS, in a pure relay
+   * scenario (without that implicit bootstrap) SBufferClientCheck() would
+   * fail to find the entry. Calling this function during setup avoids that
+   * problem. It is idempotent: if the buffer already exists, it does
+   * nothing.
    *
-   * @param peerNodeId ID del nodo KM remoto alcanzable por relay
+   * @param peerNodeId ID of the remote KM node reachable via relay
    */
   void BootstrapRelaySBuffer(uint32_t peerNodeId);
 
   /**
-   * @brief Fuerza la comprobacion/reposicion de un S-Buffer (local o de relay).
+   * @brief Forces the check/replenishment of an S-Buffer (local or relay).
    *
-   * Envoltorio publico de SBufferClientCheck() (privado). Para un S-Buffer LOCAL
-   * esto se dispara solo automaticamente al llegar material nuevo del enlace QKD
-   * directo; para un S-Buffer RELAY no hay ningun disparador automatico en el
-   * flujo actual (ver BootstrapRelaySBuffer), asi que hay que invocarlo desde
-   * fuera, p.ej. con un Simulator::Schedule periodico.
+   * Public wrapper around SBufferClientCheck() (private). For a LOCAL
+   * S-Buffer this is only triggered automatically when new material arrives
+   * from the direct QKD link; for a RELAY S-Buffer there is no automatic
+   * trigger in the current flow (see BootstrapRelaySBuffer), so it must be
+   * invoked externally, e.g. with a periodic Simulator::Schedule.
    *
-   * @param peerNodeId ID del nodo KM remoto (vecino directo o alcanzable por relay)
+   * @param peerNodeId ID of the remote KM node (direct neighbor or reachable via relay)
    */
   void CheckBufferReplenishment(uint32_t peerNodeId){
     SBufferClientCheck(peerNodeId);
@@ -493,15 +494,15 @@ private:
   void Relay(uint32_t dstKmNodeId, uint32_t amount);
 
   /**
-   * @brief Mitigacion: la conexion KMS-KMS usada por Relay()/ProcessRelayRequest
-   * a veces deja de transmitir en silencio (misma clase de fallo confirmada
-   * con strace en las conexiones app-KMS: el socket TCP subyacente de ns-3
-   * deja de escribir sin disparar ningun callback de error), dejando
-   * relayBuffer->IsRelayActive()==true para siempre y bloqueando todo intento
-   * futuro de relay hacia ese destino. Si la respuesta no llega en un plazo
-   * tras iniciar un relay, se fuerza el reseteo del estado para que la
-   * siguiente comprobacion periodica pueda reintentar.
-   * @param dstKmNodeId destino cuyo relay puede haberse quedado colgado
+   * @brief Mitigation: the KMS-KMS connection used by Relay()/ProcessRelayRequest
+   * sometimes silently stops transmitting (same class of failure confirmed
+   * via strace on app-KMS connections: the underlying ns-3 TCP socket stops
+   * writing without firing any error callback), leaving
+   * relayBuffer->IsRelayActive()==true forever and blocking every future
+   * relay attempt toward that destination. If the response doesn't arrive
+   * within a deadline after starting a relay, the state is force-reset so
+   * the next periodic check can retry.
+   * @param dstKmNodeId destination whose relay may have gotten stuck
    */
   void RelayTimeoutCheck(uint32_t dstKmNodeId, uint32_t generation);
 
@@ -736,9 +737,9 @@ private:
 
   std::map<uint32_t, Ptr<SBuffer> > m_keys_dec; //!< LOCAL S-buffers for the inbound point-to-poit usage
 
-  std::map<uint32_t, std::vector<std::string> > m_pendingRelayKeyIds; //!< IDs marcados INIT por el ultimo Relay() hacia cada destino, para poder obsoletarlos si RelayTimeoutCheck() dispara (ver comentario en RelayTimeoutCheck)
+  std::map<uint32_t, std::vector<std::string> > m_pendingRelayKeyIds; //!< IDs marked INIT by the last Relay() toward each destination, so they can be invalidated if RelayTimeoutCheck() fires (see comment in RelayTimeoutCheck)
 
-  std::map<uint32_t, uint32_t> m_relayGeneration; //!< Contador por destino: se incrementa en cada Relay() real. Permite a un RelayTimeoutCheck() detectar si es obsoleto (la respuesta real ya llego y arranco un intento nuevo antes de que este disparara) y no tocar nada.
+  std::map<uint32_t, uint32_t> m_relayGeneration; //!< Counter per destination: incremented on each real Relay(). Lets a RelayTimeoutCheck() detect that it is stale (the real response already arrived and started a new attempt before this one fired) and do nothing.
 
   std::map<std::string, uint32_t> m_qkdmodules;    //!< QKD modules and KM node ID they connect to
 
@@ -761,10 +762,10 @@ private:
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
-  // Se dispara una vez, cuando m_sinkSocket y m_sinkSocketKMS ya estan en
-  // Listen(). Pensada para que un healthcheck externo (Docker depends_on)
-  // sepa cuando este KMS ya puede aceptar conexiones entrantes, en vez de
-  // depender solo de temporizacion.
+  // Fires once, when m_sinkSocket and m_sinkSocketKMS are already in
+  // Listen(). Meant for an external healthcheck (Docker depends_on) to know
+  // when this KMS can already accept incoming connections, instead of
+  // relying on timing alone.
   TracedCallback<const uint32_t&> m_listenReadyTrace;
 
   uint32_t m_maxKeyPerRequest; //Maximal number of keys per request QKDApp can ask for

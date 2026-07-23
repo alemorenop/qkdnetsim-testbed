@@ -64,7 +64,7 @@ build_qkd_example(examples_qkdnetsim_secoqc examples_qkdnetsim_secoqc.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation_tap examples_qkdnetsim_etsi_014_emulation_tap.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation examples_qkdnetsim_etsi_014_emulation.cc)
 
-# --- Point-to-point scenario (Fig. 3 del paper, un proceso independiente por host/contenedor) ---
+# --- Point-to-point scenario (Fig. 3 from the paper, one independent process per host/container) ---
 build_qkd_example(p2p_host1_pp_alice point-to-point/host1_pp_alice.cc)
 build_qkd_example(p2p_host2_pp_bob point-to-point/host2_pp_bob.cc)
 build_qkd_example(p2p_host3_kms_alice point-to-point/host3_kms_alice.cc)
@@ -72,7 +72,7 @@ build_qkd_example(p2p_host4_kms_bob point-to-point/host4_kms_bob.cc)
 build_qkd_example(p2p_host5_etsi014_alice point-to-point/host5_etsi014_alice.cc)
 build_qkd_example(p2p_host6_etsi014_bob point-to-point/host6_etsi014_bob.cc)
 
-# --- Key-relay scenario (Alice-Relay-Bob, sin enlace directo Alice-Bob) ---
+# --- Key-relay scenario (Alice-Relay-Bob, no direct Alice-Bob link) ---
 build_qkd_example(relay_host1_pp_alice key-relay/host1_pp_alice.cc)
 build_qkd_example(relay_host2_pp_relay_a key-relay/host2_pp_relay_a.cc)
 build_qkd_example(relay_host3_pp_relay_b key-relay/host3_pp_relay_b.cc)

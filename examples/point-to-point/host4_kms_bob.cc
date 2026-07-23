@@ -1,15 +1,15 @@
 /*
  * HOST4 - KMS BOB
  *
- * Simetrico a HOST3 (host3_kms_alice.cc). Un unico nodo real con tres interfaces:
- *   --devPP   / --myIpPP    enlace hacia HOST2 (post-processing Bob)
- *   --devKms  / --myIpKms   enlace hacia HOST3 (KMS Alice)         [relay/transform_keys]
- *   --devEtsi / --myIpEtsi  enlace hacia HOST6 (ETSI014 Bob)       [GET_KEY]
+ * Symmetric to HOST3 (host3_kms_alice.cc). A single real node with three interfaces:
+ *   --devPP   / --myIpPP    link to HOST2 (post-processing Bob)
+ *   --devKms  / --myIpKms   link to HOST3 (KMS Alice)         [relay/transform_keys]
+ *   --devEtsi / --myIpEtsi  link to HOST6 (ETSI014 Bob)       [GET_KEY]
  *
- * Contrato compartido con las demas VMs (deben coincidir exactamente):
- *   ppBobId     -> debe coincidir con el "SetId" que usa HOST2
- *   etsiBobId   -> debe coincidir con el "appId" que usa HOST6
- *   etsiAliceId -> debe coincidir con el "appId" que usa HOST5
+ * Contract shared with the other VMs (must match exactly):
+ *   ppBobId     -> must match the "SetId" used by HOST2
+ *   etsiBobId   -> must match the "appId" used by HOST6
+ *   etsiAliceId -> must match the "appId" used by HOST5
  */
 
 #include "ns3/core-module.h"
@@ -54,7 +54,7 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Interfaces reales de esta VM (ajusta a tu laboratorio) ----
+    // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devPP    = "eth0";
     std::string devKms   = "eth1";
     std::string devEtsi  = "eth2";
@@ -62,15 +62,15 @@ main(int argc, char* argv[])
     std::string myIpKms  = "192.168.34.4";
     std::string myIpEtsi = "192.168.46.4";
 
-    // ---- Peers (IPs reales de las otras VMs) ----
-    std::string peerKmsAliceIp = "192.168.34.3"; // HOST3, enlace KM-KM
+    // ---- Peers (real IPs of the other VMs) ----
+    std::string peerKmsAliceIp = "192.168.34.3"; // HOST3, KM-KM link
 
-    // ---- Contrato de identificadores compartido entre VMs ----
-    std::string ppBobId     = "aaaaaaaa-0000-0000-0000-000000000002"; // modulo de HOST2
-    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // app de HOST5
-    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // app de HOST6
+    // ---- Identifier contract shared between VMs ----
+    std::string ppBobId     = "aaaaaaaa-0000-0000-0000-000000000002"; // HOST2's module
+    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // HOST5's app
+    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // HOST6's app
 
-    // ---- Configuracion del Q-Buffer ----
+    // ---- Q-Buffer configuration ----
     uint32_t qbMin = 1024;
     uint32_t qbThr = 51200;
     uint32_t qbMax = 500000000;
@@ -79,17 +79,17 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devPP", "NIC real hacia HOST2", devPP);
-    cmd.AddValue("devKms", "NIC real hacia HOST3", devKms);
-    cmd.AddValue("devEtsi", "NIC real hacia HOST6", devEtsi);
-    cmd.AddValue("myIpPP", "IP local en el enlace hacia HOST2", myIpPP);
-    cmd.AddValue("myIpKms", "IP local en el enlace hacia HOST3", myIpKms);
-    cmd.AddValue("myIpEtsi", "IP local en el enlace hacia HOST6", myIpEtsi);
-    cmd.AddValue("peerKmsAliceIp", "IP real de HOST3 (KMS Alice)", peerKmsAliceIp);
-    cmd.AddValue("ppBobId", "UUID del modulo de post-processing de HOST2", ppBobId);
-    cmd.AddValue("etsiAliceId", "UUID de la app ETSI014 de HOST5", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID de la app ETSI014 de HOST6", etsiBobId);
-    cmd.AddValue("simTime", "Duracion de la simulacion (s)", simulationTime);
+    cmd.AddValue("devPP", "Real NIC toward HOST2", devPP);
+    cmd.AddValue("devKms", "Real NIC toward HOST3", devKms);
+    cmd.AddValue("devEtsi", "Real NIC toward HOST6", devEtsi);
+    cmd.AddValue("myIpPP", "Local IP on the link toward HOST2", myIpPP);
+    cmd.AddValue("myIpKms", "Local IP on the link toward HOST3", myIpKms);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward HOST6", myIpEtsi);
+    cmd.AddValue("peerKmsAliceIp", "Real IP of HOST3 (KMS Alice)", peerKmsAliceIp);
+    cmd.AddValue("ppBobId", "UUID of HOST2's post-processing module", ppBobId);
+    cmd.AddValue("etsiAliceId", "UUID of HOST5's ETSI014 app", etsiAliceId);
+    cmd.AddValue("etsiBobId", "UUID of HOST6's ETSI014 app", etsiBobId);
+    cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
     NodeContainer self;
@@ -116,45 +116,46 @@ main(int argc, char* argv[])
     QAHelper.InstallKeyManager(node, Ipv4Address(myIpKms.c_str()), 80, control);
     Ptr<QKDKeyManagerSystemApplication> kms = control->GetKeyManagerSystemApplication(node);
 
-    // Identificador local para "KMS Alice" (HOST3)
+    // Local identifier for "KMS Alice" (HOST3)
     Ptr<Node> kmsAliceHandle = CreateObject<Node>();
     uint32_t kmsAliceId = kmsAliceHandle->GetId();
 
     kms->CreateQBuffer(kmsAliceId, control->GetQBufferConf(kmsAliceId));
     kms->SetPeerKmAddress(kmsAliceId, Ipv4Address(peerKmsAliceIp.c_str()));
 
-    // Entrada de ruta directa (1 salto, sin relay) hacia KMS Alice. Sin esto,
-    // QKDControl::GetRoute() no encuentra nada en la tabla de rutas (vacia) y
-    // devuelve una QKDLocationRegisterEntry por defecto con campos sin inicializar,
-    // lo que acaba provocando un puntero nulo al procesar la primera peticion GET_KEY.
+    // Direct route entry (1 hop, no relay) toward KMS Alice. Without this,
+    // QKDControl::GetRoute() finds nothing in the (empty) routing table and
+    // returns a default QKDLocationRegisterEntry with uninitialized fields,
+    // which ends up causing a null pointer when processing the first GET_KEY
+    // request.
     control->AddRouteEntry(QKDLocationRegisterEntry(
-        kmsAliceId,                              // nextHopKmNodeId (salto directo)
+        kmsAliceId,                              // nextHopKmNodeId (direct hop)
         Ipv4Address(peerKmsAliceIp.c_str()),     // nextHopKmNodeAddress
         1,                                        // hops
         kmsAliceId,                               // dstKmNodeId
         Ipv4Address(peerKmsAliceIp.c_str()),      // dstKmAddress
-        "kms-alice"                               // dstKmId (solo descriptivo)
+        "kms-alice"                               // dstKmId (descriptive only)
     ));
 
-    // El modulo de post-processing de HOST2 alimenta el buffer que sirve para llegar a KMS Alice
+    // HOST2's post-processing module feeds the buffer used to reach KMS Alice
     kms->RegisterQKDModule(kmsAliceId, ppBobId);
 
-    // Desde el punto de vista de KMS Bob, la app remota (HOST5) se alcanza "via KMS Alice"
+    // From KMS Bob's point of view, the remote app (HOST5) is reached "via KMS Alice"
     control->RegisterQKDApplicationPair(etsiBobId, etsiAliceId, kmsAliceHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST4] KMS Bob almacena clave appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[HOST4] KMS Bob stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST4] KMS Bob sirve clave appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[HOST4] KMS Bob serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST4] KMS Bob escuchando" << std::endl;
+                         std::cout << "[HOST4] KMS Bob listening" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

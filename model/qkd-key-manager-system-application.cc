@@ -378,16 +378,16 @@ QKDKeyManagerSystemApplication::SBufferClientCheck(uint32_t dstKmNodeId)
     uint32_t encState = ie->second->GetState(); //Check s-buffer state
     NS_LOG_FUNCTION(this << "RELAY_SBUFFER::State" << encState); //testing
 
-    // BUG de la libreria: en Relay(), StoreKey(key,true) (key aun en READY)
-    // suma 'size' a bitCount, y el MarkKey(id,INIT) inmediatamente posterior
-    // lo resta de vuelta (transicion READY->no-READY) -- efecto neto CERO
-    // sobre bitCount, que es justo lo que CheckState()/GetState() miran para
-    // decidir "READY". Asi que en cuanto bitCount cruza el umbral UNA vez, se
-    // queda ahi para siempre pase lo que pase despues (relays exitosos o
-    // atascados no lo mueven), aunque el material REALMENTE disponible
-    // (sBitCount = bitCount - notReadyBitCount) se vaya vaciando con cada
-    // intento que se queda a medias. encState deja de ser fiable para un
-    // RELAY_SBUFFER; comprobamos tambien sBitCount directamente.
+    // Library bug: in Relay(), StoreKey(key,true) (key still READY) adds
+    // 'size' to bitCount, and the immediately following MarkKey(id,INIT)
+    // subtracts it right back (READY->non-READY transition) -- net ZERO
+    // effect on bitCount, which is exactly what CheckState()/GetState() look
+    // at to decide "READY". So once bitCount crosses the threshold ONE time,
+    // it stays there forever no matter what happens afterward (successful or
+    // stuck relays don't move it), even though the material that is REALLY
+    // available (sBitCount = bitCount - notReadyBitCount) keeps draining with
+    // every attempt that ends up half-finished. encState stops being
+    // reliable for a RELAY_SBUFFER; we also check sBitCount directly.
     uint32_t sBitCount = ie->second->GetSBitCount();
     if(encState || sBitCount < ie->second->GetMthr())
     { //Triger relay to fill
@@ -480,7 +480,7 @@ QKDKeyManagerSystemApplication::Relay(uint32_t dstKmNodeId, uint32_t amount)
       amount -= key->GetSizeInBits();
   }
 
-  m_pendingRelayKeyIds[dstKmNodeId] = keyIds; //Recordar que IDs quedaron en INIT, por si RelayTimeoutCheck() tiene que obsoletarlos
+  m_pendingRelayKeyIds[dstKmNodeId] = keyIds; //Remember which IDs were left in INIT, in case RelayTimeoutCheck() needs to invalidate them
 
   if(GetNode()->GetId() > conn.GetNextHop()) //this is master KMS //if not master, the relay request will trigger check
     SBufferClientCheck(conn.GetNextHop()); //run sbuffer client check for LOCAL Sbuffer
@@ -532,12 +532,13 @@ QKDKeyManagerSystemApplication::RelayTimeoutCheck(uint32_t dstKmNodeId, uint32_t
 {
   NS_LOG_FUNCTION(this << dstKmNodeId << generation);
 
-  // Si mientras esperabamos ya llego una respuesta real (buena o mala) y eso
-  // arranco OTRO intento de relay, m_relayGeneration[dstKmNodeId] ya no
-  // coincide con la generacion para la que se programo este chequeo. Este
-  // vigilante quedo obsoleto -- si tocasemos m_pendingRelayKeyIds/el estado
-  // ahora, estariamos marcando claves del intento NUEVO (o ya inexistentes),
-  // lo que puede hacer NS_FATAL_ERROR en MarkKey() ("Key not found").
+  // If a real response (good or bad) already arrived while we were waiting,
+  // and that started ANOTHER relay attempt, m_relayGeneration[dstKmNodeId]
+  // no longer matches the generation this check was scheduled for. This
+  // watchdog is now stale -- if we touched m_pendingRelayKeyIds/the state
+  // now, we would be marking keys from the NEW attempt (or ones that no
+  // longer exist), which can trigger NS_FATAL_ERROR in MarkKey() ("Key not
+  // found").
   if(m_relayGeneration[dstKmNodeId] != generation)
     return;
 
@@ -547,17 +548,17 @@ QKDKeyManagerSystemApplication::RelayTimeoutCheck(uint32_t dstKmNodeId, uint32_t
 
   Ptr<SBuffer> relayBuffer = it->second;
   if(!relayBuffer->IsRelayActive())
-    return; //La respuesta ya llego (o nunca se llego a activar); nada que hacer.
+    return; //The response already arrived (or was never activated); nothing to do.
 
-  NS_LOG_FUNCTION(this << "RELAY hacia" << dstKmNodeId << "sin respuesta tras el plazo -- reseteando estado para permitir reintento");
+  NS_LOG_FUNCTION(this << "RELAY towards" << dstKmNodeId << "no response after the deadline -- resetting state to allow a retry");
 
-  // Sin esto, las claves que Relay() marco INIT quedan contando para siempre
-  // en m_currentKeyBit (bitCount), haciendo que CheckState() crea que el
-  // buffer sigue por encima del umbral (READY) aunque casi nada de ese
-  // material sea realmente utilizable (sbitCount, solo claves READY) --
-  // bloqueando cualquier intento futuro de relay aunque el buffer este casi
-  // vacio en la practica. Las obsoletamos, igual que hace ProcessRelayResponse()
-  // cuando SI llega una respuesta de fallo.
+  // Without this, the keys that Relay() marked INIT keep counting forever
+  // in m_currentKeyBit (bitCount), making CheckState() believe the buffer is
+  // still above the threshold (READY) even though almost none of that
+  // material is actually usable (sbitCount, READY keys only) -- blocking any
+  // future relay attempt even though the buffer is practically empty. We
+  // mark them obsolete, the same way ProcessRelayResponse() does when a
+  // failure response DOES arrive.
   auto pendingIt = m_pendingRelayKeyIds.find(dstKmNodeId);
   if(pendingIt != m_pendingRelayKeyIds.end())
   {
@@ -1513,31 +1514,31 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
         Ipv4Address nextHopKmsAddress;
         bool canSendTransform {true};
 
-        // Camino de key-relay: el destino no es un vecino directo (2+ saltos).
-        // El formato original de este mensaje solo manda candidate_set_ID (un
-        // ID sin el contenido), asumiendo que el KM destino tiene un buffer
-        // "espejo" con exactamente esos mismos IDs -- valido unicamente en QKD
-        // punto a punto directo (mismo enlace cuantico visto por ambos lados).
-        // En relay, el RELAY_SBUFFER de cada extremo se alimenta de un enlace
-        // cuantico *distinto*, asi que esos IDs nunca coinciden. En su lugar,
-        // mandamos el contenido real (mergedKey) cifrado con material propio
-        // hacia el siguiente salto (mismo patron OTP salto-a-salto que
-        // Relay()/ProcessRelayRequest), para que el destino final reciba el
-        // contenido exacto sin depender de tener el mismo ID localmente.
+        // Key-relay path: the destination is not a direct neighbor (2+ hops).
+        // The original format of this message only sends candidate_set_ID (an
+        // ID with no content), assuming the destination KM has a "mirror"
+        // buffer with exactly those same IDs -- only valid for direct
+        // point-to-point QKD (same quantum link seen by both sides). In
+        // relay, each end's RELAY_SBUFFER is fed by a *different* quantum
+        // link, so those IDs never match. Instead, we send the real content
+        // (mergedKey) encrypted with our own material toward the next hop
+        // (same hop-by-hop OTP pattern as Relay()/ProcessRelayRequest), so
+        // the final destination receives the exact content without depending
+        // on having the same ID locally.
         //
-        // IMPORTANTE: si esto falla (p.ej. sin clave local disponible en ese
-        // instante), NO debemos abortar la funcion entera -- la respuesta
-        // GET_KEY al app local (mas abajo) tiene que salir siempre, indepen-
-        // dientemente de si el aviso SKEY_CREATE a la KMS par pudo enviarse.
+        // IMPORTANT: if this fails (e.g. no local key available at that
+        // moment), we must NOT abort the whole function -- the GET_KEY
+        // response to the local app (below) must always go out, regardless
+        // of whether the SKEY_CREATE notice to the peer KMS could be sent.
         if(conn.GetNextHop() != conn.GetDestinationKmNodeId())
         {
           Ptr<SBuffer> hopEncBuffer = GetSBuffer(conn.GetNextHop(), "enc");
           NS_ASSERT(hopEncBuffer);
 
-          // El material a cifrar (mergedKey, p.ej. 6400 bits = tamano OTP de
-          // la app) casi nunca coincide con el tamano por defecto de las
-          // claves locales (2048 bits) -- hay que fusionar varias, igual que
-          // el bucle de arriba hace con sBuffer/candidateSetIds.
+          // The material to encrypt (mergedKey, e.g. 6400 bits = the app's
+          // OTP size) almost never matches the default size of local keys
+          // (2048 bits) -- several must be merged, same as the loop above
+          // does with sBuffer/candidateSetIds.
           std::string hopKeyMaterial {};
           std::vector<std::string> hopKeyIds {};
           bool hopKeyOk = true;
@@ -1566,12 +1567,12 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
              !hopKeyOk ||
              hopKeyMaterial.size() < relayKeyMaterial.size())
           {
-            NS_LOG_FUNCTION(this << "No hay suficiente clave local para cifrar el salto hacia" << conn.GetNextHop() << "-- SKEY_CREATE abandonado (la respuesta al app local se envia igualmente)");
+            NS_LOG_FUNCTION(this << "Not enough local key to encrypt the hop toward" << conn.GetNextHop() << "-- SKEY_CREATE abandoned (the response to the local app is still sent)");
             canSendTransform = false;
           }
           else
           {
-            hopKeyMaterial.resize(relayKeyMaterial.size()); //COTP exige misma longitud exacta; el ultimo candidato puede sobrar
+            hopKeyMaterial.resize(relayKeyMaterial.size()); //COTP requires an exact matching length; the last candidate may be longer than needed
             Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>();
             for(const auto& id : hopKeyIds)
               jtransform["hop_key_ID"].push_back({{"key_ID", id}});
@@ -2207,7 +2208,7 @@ QKDKeyManagerSystemApplication::BootstrapRelaySBuffer(uint32_t peerNodeId)
   NS_LOG_FUNCTION(this << peerNodeId);
 
   if(m_keys_enc.find(peerNodeId) != m_keys_enc.end())
-    return; // Ya existe (creado por el flujo normal o por una llamada anterior), nada que hacer.
+    return; // Already exists (created by the normal flow or a previous call), nothing to do.
 
   uint32_t srcNodeId = GetNode()->GetId();
   Ptr<SBuffer> sBuffer = CreateRelaySBuffer(srcNodeId, peerNodeId, "(RELAY)");
@@ -2311,16 +2312,16 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
       SBufferClientCheck(previousNodeId); //run sbuffer client check for LOCAL Sbuffer
   }
 
-  // BUG de la libreria: si falta alguna clave localmente (terminateRelay=true),
-  // el codigo original no entraba en NINGUNA de las dos ramas de abajo (avanzar
-  // el relay / responder al origen) y la funcion simplemente retornaba sin
-  // enviar nada. Quien inicio el relay (Relay(), mas arriba) deja marcado
-  // relayBuffer->SetRelayState(true) y SOLO se resetea a false al procesar una
-  // respuesta real en ProcessRelayResponse() -- sin respuesta, el buffer queda
-  // bloqueado para siempre y ningun reintento periodico vuelve a progresar.
-  // Reutilizamos el mismo formato de respuesta de error que ya se envia mas
-  // abajo para el caso "sin material suficiente", para desbloquear siempre al
-  // nodo anterior.
+  // Library bug: if a key is missing locally (terminateRelay=true), the
+  // original code did not enter EITHER of the two branches below (advance
+  // the relay / respond to the origin) and the function simply returned
+  // without sending anything. Whoever started the relay (Relay(), above)
+  // leaves relayBuffer->SetRelayState(true) marked, and it is ONLY reset to
+  // false when a real response is processed in ProcessRelayResponse() --
+  // with no response, the buffer stays blocked forever and no periodic
+  // retry ever makes progress. We reuse the same error-response format
+  // already sent further below for the "insufficient material" case, to
+  // always unblock the previous node.
   if(terminateRelay)
   {
     NS_LOG_FUNCTION(this << "Relay terminated locally (missing key), notifying previous hop" << terminateRelayPrevHop);
@@ -3178,10 +3179,10 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
     if(jPayload.contains("ekey"))
       ekey = jPayload["ekey"];
 
-    // "destination_node_id"/"repeater_node_id" solo estan presentes en mensajes
-    // conscientes de relay (ver comentario completo en el emisor, mas arriba en
-    // el handler de ETSI_QKD_014_GET_KEY). Si faltan, es un mensaje P2P directo
-    // (compatibilidad con el escenario 1, sin relay).
+    // "destination_node_id"/"repeater_node_id" are only present in
+    // relay-aware messages (see the full comment on the sender side, above
+    // in the ETSI_QKD_014_GET_KEY handler). If missing, this is a direct P2P
+    // message (compatibility with scenario 1, no relay).
     uint32_t destinationNodeId = GetNode()->GetId();
     bool haveDestination = jPayload.contains("destination_node_id");
     if(haveDestination)
@@ -3195,13 +3196,13 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
     NS_ASSERT(keySize || keyNumber);
     NS_ASSERT(!supplyKeyIds.empty() || !candidateSetIds.empty() || !targetSaeId.empty() || !hopKeyIds.empty());
 
-    // --- Soy un salto intermedio del relay (no el destino final): descifro con
-    //     mi enlace local hacia quien me lo mando, vuelvo a cifrar con mi enlace
-    //     local hacia el siguiente salto real, y reenvio -- mismo patron OTP
-    //     salto-a-salto que Relay()/ProcessRelayRequest.
+    // --- I am an intermediate relay hop (not the final destination): I
+    //     decrypt with my local link to whoever sent it to me, re-encrypt
+    //     with my local link to the real next hop, and forward -- same
+    //     hop-by-hop OTP pattern as Relay()/ProcessRelayRequest.
     if(haveDestination && destinationNodeId != GetNode()->GetId())
     {
-      NS_LOG_FUNCTION(this << "SKEY_CREATE: reenviando hacia" << destinationNodeId);
+      NS_LOG_FUNCTION(this << "SKEY_CREATE: forwarding toward" << destinationNodeId);
 
       uint32_t previousNodeId = haveRepeater ? repeaterNodeId : peerNodeId;
       Ptr<SBuffer> decBuffer = GetSBuffer(previousNodeId, "dec");
@@ -3217,7 +3218,7 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       }
       if(!hopOk || hopKeyMaterial.size() < ekey.size())
       {
-        NS_LOG_FUNCTION(this << "SKEY_CREATE: clave(s) de salto no encontrada(s) -- reenvio abandonado");
+        NS_LOG_FUNCTION(this << "SKEY_CREATE: hop key(s) not found -- forwarding abandoned");
         return;
       }
       hopKeyMaterial.resize(ekey.size());
@@ -3249,7 +3250,7 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       }
       if(!encOk || encKeyMaterial.size() < mergedKey.size())
       {
-        NS_LOG_FUNCTION(this << "SKEY_CREATE: sin clave local suficiente hacia" << nextHop << "-- reenvio abandonado");
+        NS_LOG_FUNCTION(this << "SKEY_CREATE: not enough local key toward" << nextHop << "-- forwarding abandoned");
         return;
       }
       encKeyMaterial.resize(mergedKey.size());
@@ -3288,12 +3289,12 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       HttpQuery fwdQuery;
       fwdQuery.method_type = TRANSFORM_KEYS;
       fwdQuery.peerNodeId = destinationNodeId;
-      HttpKMSAddQuery(nextHopAddress, fwdQuery); //Necesario: ProcessSKeyCreateResponse() siempre hace pop en HttpKMSCompleteQuery() al recibir la respuesta del siguiente salto
+      HttpKMSAddQuery(nextHopAddress, fwdQuery); //Necessary: ProcessSKeyCreateResponse() always pops in HttpKMSCompleteQuery() when the next hop's response arrives
 
       fwdSocket->Send(fwdPacket);
-      NS_LOG_FUNCTION(this << "SKEY_CREATE reenviado hacia" << nextHop << fwdPacket->GetUid() << fwdPacket->GetSize());
+      NS_LOG_FUNCTION(this << "SKEY_CREATE forwarded toward" << nextHop << fwdPacket->GetUid() << fwdPacket->GetSize());
 
-      //ACK inmediato a quien me lo mando (no esperamos a que el destino final responda)
+      //Immediate ACK to whoever sent it to me (we don't wait for the final destination to respond)
       HTTPMessage httpAck;
       httpAck.CreateResponse(HTTPMessage::HttpStatus::Ok, "", {
         {"Content-Type", "application/json; charset=utf-8"},
@@ -3329,10 +3330,11 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
 
       if(haveRepeater && !hopKeyIds.empty())
       {
-        // Llegado por relay: el material real viaja cifrado hop-a-hop (ver
-        // emisor). Descifro con mi enlace local hacia quien me lo reenvio
-        // (el ultimo salto), en vez de buscar candidate_set_ID en mi propio
-        // buffer -- ese patron solo es valido en P2P directo (ver rama else).
+        // Arrived via relay: the real material travels encrypted hop-by-hop
+        // (see the sender side). I decrypt with my local link to whoever
+        // forwarded it to me (the last hop), instead of looking up
+        // candidate_set_ID in my own buffer -- that pattern is only valid in
+        // direct P2P (see the else branch).
         Ptr<SBuffer> decBuffer = GetSBuffer(repeaterNodeId, "dec");
         NS_ASSERT(decBuffer);
 
@@ -3346,7 +3348,7 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
         }
         if(!hopOk || hopKeyMaterial.size() < ekey.size())
         {
-          NS_LOG_FUNCTION(this << "SKEY_CREATE: clave(s) de salto no encontrada(s) en destino final -- abandonado");
+          NS_LOG_FUNCTION(this << "SKEY_CREATE: hop key(s) not found at final destination -- abandoned");
           return;
         }
         hopKeyMaterial.resize(ekey.size());
@@ -3392,8 +3394,9 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       );
       NS_ASSERT(packet);
 
-      // Si llegue por relay, respondo a quien me lo reenvio (el ultimo salto),
-      // no directamente al origen -- puede no ser vecino directo mio.
+      // If this arrived via relay, I respond to whoever forwarded it to me
+      // (the last hop), not directly to the origin -- it may not be my
+      // direct neighbor.
       Ipv4Address dstKms;
       if(haveRepeater)
         dstKms = GetPeerKmAddress(repeaterNodeId);

@@ -1,18 +1,18 @@
 /*
  * HOST1 - QKD Post-processing ALICE (master)
  *
- * Un unico nodo ns-3 real, con dos interfaces bridgeadas al mundo real:
- *   --devSift / --myIpSift   enlace hacia HOST2 (post-processing Bob)   [sifting, UDP+TCP]
- *   --devKms  / --myIpKms    enlace hacia HOST3 (KMS Alice)             [entrega de claves]
+ * A single real ns-3 node, with two interfaces bridged to the real world:
+ *   --devSift / --myIpSift   link to HOST2 (post-processing Bob)   [sifting, UDP+TCP]
+ *   --devKms  / --myIpKms    link to HOST3 (KMS Alice)             [key delivery]
  *
- * "Bob" (HOST2) NO se instancia aqui: solo se crea un Node local vacio
- * (bobHandle) que sirve de identificador para SetDst(); el trafico real
- * de sifting viaja por la direccion Remote/Remote_Sifting (IP real de HOST2)
- * sobre el EmuFdNetDevice.
+ * "Bob" (HOST2) is NOT instantiated here: only an empty local Node
+ * (bobHandle) is created as an identifier for SetDst(); the real sifting
+ * traffic travels over the Remote/Remote_Sifting address (HOST2's real IP)
+ * on top of EmuFdNetDevice.
  *
- * Contrato compartido con las demas VMs (deben coincidir exactamente):
- *   ppAliceId  -> tambien usado en HOST3 (KMS Alice) al registrar el modulo
- *   ppBobId    -> debe coincidir con el "SetId" que use HOST2
+ * Contract shared with the other VMs (must match exactly):
+ *   ppAliceId  -> also used on HOST3 (KMS Alice) when registering the module
+ *   ppBobId    -> must match the "SetId" used by HOST2
  */
 
 #include "ns3/core-module.h"
@@ -59,22 +59,22 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Interfaces reales de esta VM (ajusta a tu laboratorio) ----
+    // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devSift  = "eth0";
     std::string devKms   = "eth1";
     std::string myIpSift = "192.168.11.1";
     std::string myIpKms  = "192.168.13.1";
     uint16_t    siftPort = 7102;
 
-    // ---- Peers (IPs reales de las otras VMs) ----
-    std::string peerBobIp  = "192.168.11.2"; // HOST2, mismo enlace de sifting
+    // ---- Peers (real IPs of the other VMs) ----
+    std::string peerBobIp  = "192.168.11.2"; // HOST2, same sifting link
     std::string kmsAliceIp = "192.168.13.3"; // HOST3 (KMS Alice)
 
-    // ---- Contrato de identificadores compartido entre VMs ----
-    std::string ppAliceId = "aaaaaaaa-0000-0000-0000-000000000001"; // debe coincidir con HOST3
-    std::string ppBobId   = "aaaaaaaa-0000-0000-0000-000000000002"; // debe coincidir con HOST2/HOST4
+    // ---- Identifier contract shared between VMs ----
+    std::string ppAliceId = "aaaaaaaa-0000-0000-0000-000000000001"; // must match HOST3
+    std::string ppBobId   = "aaaaaaaa-0000-0000-0000-000000000002"; // must match HOST2/HOST4
 
-    // ---- Parametros del enlace QKD (valores del paper) ----
+    // ---- QKD link parameters (values from the paper) ----
     uint32_t ppKeySize     = 256;    // bytes (2048 bits)
     uint32_t ppKeyRateBps  = 150000; // 150 kbps
     uint32_t ppPacketSize  = 300;    // bytes
@@ -84,17 +84,17 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devSift", "NIC real hacia HOST2", devSift);
-    cmd.AddValue("devKms", "NIC real hacia HOST3", devKms);
-    cmd.AddValue("myIpSift", "IP local en el enlace hacia HOST2", myIpSift);
-    cmd.AddValue("myIpKms", "IP local en el enlace hacia HOST3", myIpKms);
-    cmd.AddValue("peerBobIp", "IP real de HOST2", peerBobIp);
-    cmd.AddValue("kmsAliceIp", "IP real de HOST3 (KMS Alice)", kmsAliceIp);
-    cmd.AddValue("ppAliceId", "UUID de este modulo (debe coincidir con HOST3)", ppAliceId);
-    cmd.AddValue("ppBobId", "UUID del modulo par en HOST2", ppBobId);
-    cmd.AddValue("ppKeySize", "Tamano de clave (bytes)", ppKeySize);
-    cmd.AddValue("ppKeyRateBps", "Tasa media de generacion de claves (bps)", ppKeyRateBps);
-    cmd.AddValue("simTime", "Duracion de la simulacion (s)", simulationTime);
+    cmd.AddValue("devSift", "Real NIC toward HOST2", devSift);
+    cmd.AddValue("devKms", "Real NIC toward HOST3", devKms);
+    cmd.AddValue("myIpSift", "Local IP on the link toward HOST2", myIpSift);
+    cmd.AddValue("myIpKms", "Local IP on the link toward HOST3", myIpKms);
+    cmd.AddValue("peerBobIp", "Real IP of HOST2", peerBobIp);
+    cmd.AddValue("kmsAliceIp", "Real IP of HOST3 (KMS Alice)", kmsAliceIp);
+    cmd.AddValue("ppAliceId", "UUID of this module (must match HOST3)", ppAliceId);
+    cmd.AddValue("ppBobId", "UUID of the peer module on HOST2", ppBobId);
+    cmd.AddValue("ppKeySize", "Key size (bytes)", ppKeySize);
+    cmd.AddValue("ppKeyRateBps", "Average key generation rate (bps)", ppKeyRateBps);
+    cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
     NodeContainer self;
@@ -127,7 +127,7 @@ main(int argc, char* argv[])
     app->SetAttribute("DataRate", DataRateValue(DataRate(ppDataRateBps)));
     node->AddApplication(app);
 
-    // Identificador local para "Bob" - nunca corre codigo, solo da un GetId()
+    // Local identifier for "Bob" - never runs code, only provides a GetId()
     Ptr<Node> bobHandle = CreateObject<Node>();
     app->SetSrc(node);
     app->SetDst(bobHandle);
@@ -157,7 +157,7 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/TxKMS",
                      MakeCallback(+[](std::string ctx, Ptr<const Packet> p) {
-                         std::cout << "[HOST1] Clave entregada a KMS Alice, bytes=" << p->GetSize() << std::endl;
+                         std::cout << "[HOST1] Key delivered to KMS Alice, bytes=" << p->GetSize() << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

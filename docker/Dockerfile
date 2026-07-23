@@ -1,15 +1,15 @@
-# Imagen base compartida por los escenarios de emulacion (point-to-point y key-relay).
-# Build context = raiz de este checkout de qkdnetsim (contrib/qkdnetsim), p.ej.:
+# Base image shared by the emulation scenarios (point-to-point and key-relay).
+# Build context = root of this qkdnetsim checkout (contrib/qkdnetsim), e.g.:
 #   docker build -t qkdnetsim-6vm-emulation:latest -f docker/Dockerfile .
-# (ejecutado desde dentro de contrib/qkdnetsim)
+# (run from inside contrib/qkdnetsim)
 
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- Dependencias oficiales de QKDNetSim ---
-# build-essential + ninja-build: ./ns3 necesita un generador (make o ninja) que
-# la imagen base ubuntu:22.04 no trae por defecto (a diferencia de un Ubuntu de escritorio).
+# --- Official QKDNetSim dependencies ---
+# build-essential + ninja-build: ./ns3 needs a generator (make or ninja) that
+# the ubuntu:22.04 base image doesn't ship by default (unlike a desktop Ubuntu).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ninja-build \
     gcc g++ python3 python3-dev mercurial bzr gdb valgrind gsl-bin doxygen graphviz imagemagick \
@@ -19,25 +19,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Extras solo necesarios para el modo emulacion dentro del contenedor ---
-# iproute2 -> "ip link set ethX promisc on"   (obligatorio para EmuFdNetDevice)
-# ethtool   -> desactivar offload de checksum/segmentacion en la interfaz real
-# iputils-ping -> depuracion de conectividad entre contenedores
+# --- Extras only needed for the emulation mode inside the container ---
+# iproute2 -> "ip link set ethX promisc on"   (required for EmuFdNetDevice)
+# ethtool   -> disable checksum/segmentation offload on the real interface
+# iputils-ping -> connectivity debugging between containers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 ethtool iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
 
-# --- ns-3.46 (clon limpio, sin patches todavia) ---
+# --- ns-3.46 (clean clone, no patches yet) ---
 RUN git clone -b ns-3.46 https://gitlab.com/nsnam/ns-3-dev.git
 
-# --- QKDNetSim: se copia el checkout local (ya incluye point-to-point/, key-relay/ y el CMakeLists.txt actualizado) ---
+# --- QKDNetSim: copies the local checkout (already includes point-to-point/, key-relay/ and the updated CMakeLists.txt) ---
 COPY . /opt/ns-3-dev/contrib/qkdnetsim
 
 WORKDIR /opt/ns-3-dev
 
-# --- Patches oficiales sobre src/stats/model/gnuplot.{cc,h} ---
+# --- Official patches on src/stats/model/gnuplot.{cc,h} ---
 RUN sed -i 's/\r$//' \
         contrib/qkdnetsim/patches/gnuplot_cc.patches \
         contrib/qkdnetsim/patches/gnuplot_h.patches \
@@ -49,10 +49,11 @@ RUN sed -i 's/\r$//' \
     git apply contrib/qkdnetsim/patches/gnuplot_cc.patches && \
     git apply contrib/qkdnetsim/patches/realtime-simulator-clamp.patch
 
-# --- Configura y compila SOLO los binarios de nuestros escenarios ---
-# (--enable-examples es obligatorio: ahi viven, pero "./ns3 build" a secas
-# compilaria tambien el resto de ejemplos de qkdnetsim, y uno de ellos
-# [examples_qkdnetsim_etsi_combined_input.cc] requiere --enable-mpi, que no usamos)
+# --- Configure and build ONLY the binaries for our scenarios ---
+# (--enable-examples is mandatory: that's where they live, but a plain
+# "./ns3 build" would also build the rest of qkdnetsim's examples, and one of
+# them [examples_qkdnetsim_etsi_combined_input.cc] requires --enable-mpi,
+# which we don't use)
 RUN ./ns3 configure --enable-examples && \
     ./ns3 build \
         p2p_host1_pp_alice \
@@ -71,7 +72,7 @@ RUN ./ns3 configure --enable-examples && \
         relay_host8_etsi014_alice \
         relay_host9_etsi014_bob
 
-# --- Entrypoint: pone en promiscuo y limpia la IP de kernel de cada interfaz ---
+# --- Entrypoint: sets each interface to promiscuous mode and clears its kernel IP ---
 COPY docker/entrypoint.sh /opt/entrypoint.sh
 RUN sed -i 's/\r$//' /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
 

@@ -92,7 +92,7 @@ Seeing all nine containers in the `Up` state only proves that their processes ha
 ./docker/verify-key-relay.sh [sample_seconds]   # default: 10s
 ```
 
-The verifier reports whether all nine hosts produce the expected role-specific activity (`Clave entregada`, `almacena clave`, `sirve clave`, or `Peticion GET_KEY`), confirms that HOST5 and HOST7 serve the same `keyId` to the applications, and temporarily samples the four relevant links. Packet captures remain under `/tmp` inside the containers and are neither copied to nor stored in the repository. Traffic between HOST8 and HOST9 confirms the final result between the ETSI 014 applications.
+The verifier reports whether all nine hosts produce the expected role-specific activity (`Key delivered`, `stores key`, `serves key`, or `GET_KEY request`), confirms that HOST5 and HOST7 serve the same `keyId` to the applications, and temporarily samples the four relevant links. Packet captures remain under `/tmp` inside the containers and are neither copied to nor stored in the repository. Traffic between HOST8 and HOST9 confirms the final result between the ETSI 014 applications.
 
 #### Library issues fixed for this scenario
 
@@ -101,6 +101,7 @@ The verifier reports whether all nine hosts produce the expected role-specific a
 - **Empty key material in `skey_create`.** `mergedKey` was consumed while splitting the local response and was then reused empty for the relay operation. An exact copy is now preserved, its size is validated, and the key is encrypted hop by hop. HOST5 and HOST7 serve the same 6400-bit `keyId`.
 - **Uninitialized ETSI 014 state.** `m_isSignalingConnectedToApp` and `m_isDataConnectedToApp` were read before initialization, causing some runs to skip socket creation. Both now start explicitly as `false`.
 - **Encryption disabled in the scenario.** HOST8 and HOST9 used `useCrypto=0`, so traffic described as OTP-protected was actually plaintext. The key-relay scenario now uses `useCrypto=1`.
+- **Uninitialized bytes leaked into the wire (applies to both scenarios).** `QKDAppHeader::GetSerializedSize()` reserves a fixed 32 bytes for the authentication tag field, but `SetAuthTag()` wrote exactly `value.size()` bytes with no padding. With authentication disabled (`authenticationType=0`, the default in both scenarios), `QKDEncryptor::Authenticate()` returns an empty string, so the remaining 32 bytes of that reservation were left untouched — whatever the ns-3 `Buffer` previously held (in one observed case, a literal fragment of an unrelated HTTP response, `"Vary: Accept-Encoding, Cookie"`) was sent on the wire as-is. `SetAuthTag()` now pads with leading `'0'` characters the same way `SetEncryptionKeyId()`/`SetAuthenticationKeyId()` already did.
 - **Bit accounting stuck in READY.** In `Relay()`, `StoreKey(key,true)` followed by `MarkKey(id,INIT)` has a net-zero effect on `m_currentKeyBit`. As a result, `CheckState()` stopped reflecting actual relay-buffer depletion after the threshold was crossed for the first time. `SBufferClientCheck` now also checks `GetSBitCount()`, which is the current count rather than historical accumulated state.
 - **`skey_create` assumed one exact-size key.** Hop-by-hop encryption material was requested as a single key with an exact bit length, while the buffer only contained default 2048-bit keys. It now uses the same multi-key merge pattern through `GetTransformCandidate` that is already used elsewhere in the implementation.
 - **Unbalanced HTTP request bookkeeping.** Multi-hop forwarding of `skey_create` sent the request to the next hop without adding it to `m_httpRequestsQueryKMS`. Processing the response then attempted to `pop()` an empty queue and terminated the process with `NS_FATAL_ERROR("HTTP query for this KMS is empty!")`.
@@ -112,7 +113,7 @@ The verifier reports whether all nine hosts produce the expected role-specific a
 Originally, there was no guarantee that a server had reached `Listen()` before its client called `Connect()`. The following mechanisms now enforce the real dependency graph:
 
 - Readiness traces in `QKDKeyManagerSystemApplication`, `QKDPostprocessingApplication`, and `QKDApp014`, emitted after `Bind()` and `Listen()` complete.
-- A host-specific text marker attached to each trace, such as `"[HOST5] KMS Alice escuchando"`, alongside the existing `almacena clave` and `sirve clave` markers.
+- A host-specific text marker attached to each trace, such as `"[HOST5] KMS Alice listening"`, alongside the existing `stores key` and `serves key` markers.
 - `entrypoint.sh` mirrors stdout to `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside the container namespace and cannot read the host-side `docker logs` view provided by the logging driver.
 - Health checks on HOST2, HOST4, HOST5, HOST6, HOST7, and HOST9, plus a `depends_on: condition: service_healthy` chain that follows the actual topology:
 
@@ -129,7 +130,7 @@ All four PP applications schedule a lightweight event every 100 ms so that `Real
 
 The image also applies `patches/realtime-simulator-clamp.patch` to ns-3.46. Under sustained load, the external `FdNetDevice` thread may observe a timestamp a few ticks behind `m_currentTs`. The original implementation aborts with `schedule for time < m_currentTs`; the patch schedules an already-late frame at the current valid timestamp and prevents the corresponding exit-code-139 failure.
 
-PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after HOST1–HOST4 begin reporting `Clave entregada`.
+PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after HOST1–HOST4 begin reporting `Key delivered`.
 
 ## Testbed additions to QKDNetSim
 
@@ -138,7 +139,7 @@ PP convergence may take approximately one minute because ns-3 backs off after th
 - **[`docker/`](docker/)** — the shared image, the six-container point-to-point definition and its seven networks, interface-aware entrypoint, and end-to-end verifier.
 - **[`docker-compose.key-relay.yml`](docker/docker-compose.key-relay.yml)** — the nine-container, ten-network key-relay definition, maintained as a separate Compose project and including the readiness dependency chain described above.
 - **`entrypoint.sh`** — detects interfaces by subnet, normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or random jitter.
-- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that HOST5 and HOST7 serve the same `keyId`, and samples traffic without storing captures in the repository.
+- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that HOST5 and HOST7 serve the same `keyId`, and samples traffic without storing captures in the repository. Both this script and `verify.sh` remove any pre-existing capture file before writing a new one — `tcpdump` opens the raw socket as root and then drops privileges to a dedicated user before writing `-w`, so a leftover file from a previous run with different ownership made the capture fail silently (`Permission denied`, zero packets) regardless of whether traffic was actually flowing. `verify.sh`'s plaintext check no longer looks for a specific marker string — that check happened to depend on the same uninitialized-memory leak described above, not on anything the application actually sends — and instead only asserts the absence of any long readable run in the captured payload.
 - **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
 - **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
 - **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for every scenario binary.

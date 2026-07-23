@@ -84,9 +84,9 @@ private:
 
   uint32_t m_maxSize;
 
-  uint32_t m_numberOfQueues = 3; //!< Debe coincidir con el valor por defecto del atributo "NumberOfQueues";
-                                  //!< sin este inicializador, el constructor la usa sin inicializar antes
-                                  //!< de que el sistema de atributos de ns-3 la asigne.
+  uint32_t m_numberOfQueues = 3; //!< Must match the default value of the "NumberOfQueues" attribute;
+                                  //!< without this initializer, the constructor uses it uninitialized
+                                  //!< before ns-3's attribute system assigns it.
 
   std::vector<std::vector<QKDKMSQueueEntry> > m_queues;
 

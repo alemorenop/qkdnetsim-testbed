@@ -1,12 +1,12 @@
-# Escenario "key relay" (Alice - Relay - Bob, sin enlace directo Alice-Bob),
-# 9 hosts. Usa la misma imagen que docker-compose.yml (escenario 1); ambos
-# binarios conviven en la misma imagen.
+# "Key relay" scenario (Alice - Relay - Bob, no direct Alice-Bob link),
+# 9 hosts. Uses the same image as docker-compose.yml (scenario 1); both
+# binaries live in the same image.
 #
-# Uso:
+# Usage:
 #   docker compose -f docker/docker-compose.key-relay.yml up -d
 #
-# "name" explicito para no compartir proyecto con docker-compose.yml (ver
-# comentario alli sobre por que hace falta).
+# "name" set explicitly so this does not share a project with
+# docker-compose.yml (see the comment there for why it's needed).
 name: qkdnetsim-key-relay
 
 networks:
@@ -20,7 +20,7 @@ networks:
       config:
         - subnet: 192.168.112.0/24
           gateway: 192.168.112.254
-  net_2_6:   # HOST2 <-> HOST6  (post-processing Relay-A -> KMS Relay, lado Alice)
+  net_2_6:   # HOST2 <-> HOST6  (post-processing Relay-A -> KMS Relay, Alice side)
     ipam:
       config:
         - subnet: 192.168.113.0/24
@@ -30,7 +30,7 @@ networks:
       config:
         - subnet: 192.168.114.0/24
           gateway: 192.168.114.254
-  net_3_6:   # HOST3 <-> HOST6  (post-processing Relay-B -> KMS Relay, lado Bob)
+  net_3_6:   # HOST3 <-> HOST6  (post-processing Relay-B -> KMS Relay, Bob side)
     ipam:
       config:
         - subnet: 192.168.115.0/24
@@ -60,7 +60,7 @@ networks:
       config:
         - subnet: 192.168.120.0/24
           gateway: 192.168.120.254
-  net_8_9:   # HOST8 <-> HOST9  (trafico cifrado ETSI014 Alice-Bob)
+  net_8_9:   # HOST8 <-> HOST9  (encrypted ETSI014 Alice-Bob traffic)
     ipam:
       config:
         - subnet: 192.168.121.0/24
@@ -80,9 +80,9 @@ services:
     networks:
       net_1_2: { ipv4_address: 192.168.111.1 }
       net_1_5: { ipv4_address: 192.168.112.1 }
-    # Espera a que HOST5 confirme (via ListenReady/healthcheck) que su KMS ya
-    # esta en Listen() antes de arrancar. El reintento de conexion del modelo
-    # cubre ademas reinicios o perdidas transitorias posteriores.
+    # Waits for HOST5 to confirm (via ListenReady/healthcheck) that its KMS is
+    # already in Listen() before starting. The model's own connection retry
+    # also covers restarts or transient losses afterward.
     depends_on:
       host2_pp_relay_a:
         condition: service_healthy
@@ -106,7 +106,7 @@ services:
       host6_kms_relay:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Post-processing Relay-A escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'Post-processing Relay-A listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -148,7 +148,7 @@ services:
       host7_kms_bob:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Post-processing Bob escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'Post-processing Bob listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -171,13 +171,13 @@ services:
     depends_on:
       host6_kms_relay:
         condition: service_healthy
-    # "escuchando" = marcador impreso via la traza ListenReady (ver
-    # qkd-key-manager-system-application.{h,cc}) cuando m_sinkSocket y
-    # m_sinkSocketKMS ya estan en Listen(). entrypoint.sh duplica todo el
-    # stdout a /tmp/qkdnetsim.log para que este healthcheck (que corre DENTRO
-    # del contenedor) pueda verlo -- "docker logs" no es visible desde aqui.
+    # "listening" = marker printed via the ListenReady trace (see
+    # qkd-key-manager-system-application.{h,cc}) once m_sinkSocket and
+    # m_sinkSocketKMS are already in Listen(). entrypoint.sh mirrors all
+    # stdout to /tmp/qkdnetsim.log so this healthcheck (which runs INSIDE the
+    # container) can see it -- "docker logs" is not visible from in here.
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'KMS Alice escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'KMS Alice listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -203,7 +203,7 @@ services:
       host7_kms_bob:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'KMS Relay escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'KMS Relay listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -223,10 +223,10 @@ services:
       net_4_7: { ipv4_address: 192.168.116.7 }
       net_6_7: { ipv4_address: 192.168.118.7 }
       net_7_9: { ipv4_address: 192.168.120.7 }
-    # Raiz de la cadena de depends_on (nadie mas espera a nadie antes de
-    # llegar aqui) -- sin dependencias propias.
+    # Root of the depends_on chain (nobody else waits on anyone before
+    # reaching here) -- no dependencies of its own.
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'KMS Bob escuchando' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'KMS Bob listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
@@ -244,20 +244,21 @@ services:
     networks:
       net_5_8: { ipv4_address: 192.168.119.8 }
       net_8_9: { ipv4_address: 192.168.121.8 }
-    # HOST8 conecta como cliente hacia AMBOS: HOST5 (su KMS) y HOST9 (socket
-    # de datos de la app par) -- espera a que los dos confirmen que escuchan.
+    # HOST8 connects as a client to BOTH: HOST5 (its KMS) and HOST9 (data
+    # socket of the peer app) -- waits for both to confirm they are listening.
     depends_on:
       host5_kms_alice:
         condition: service_healthy
       host9_etsi014_bob:
         condition: service_healthy
-    # appStartTime=20 (no 1): QKDApp014::ConnectionToKMSFailed() no reintenta
-    # la conexion TCP si el primer intento falla -- si HOST8 intenta conectar
-    # antes de que el listener KMS de HOST5 este realmente escuchando (muy
-    # posible con solo 1s de margen y 9 RealtimeSimulatorImpl arrancando a la
-    # vez), el socket queda roto para siempre y la app "envia" en bucle sobre
-    # un socket muerto sin producir NUNCA trafico real. Confirmado con tcpdump:
-    # 0 paquetes en el cable pese a la traza interna disparando sin parar.
+    # appStartTime=20 (not 1): QKDApp014::ConnectionToKMSFailed() does not
+    # retry the TCP connection if the first attempt fails -- if HOST8 tries to
+    # connect before HOST5's KMS listener is actually listening (quite
+    # possible with only 1s of margin and 9 RealtimeSimulatorImpl instances
+    # starting at once), the socket stays broken forever and the app "sends"
+    # in a loop over a dead socket without EVER producing real traffic.
+    # Confirmed with tcpdump: 0 packets on the wire despite the internal trace
+    # firing nonstop.
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host8_etsi014_alice-default", "--appStartTime=20"]
 
   host9_etsi014_bob:
@@ -274,11 +275,11 @@ services:
     depends_on:
       host7_kms_bob:
         condition: service_healthy
-    # "escuchando" tarda ~appStartTime=20s en aparecer (SetStartTime retrasa
-    # TODA la app, no solo el socket hacia el KMS) -- start_period generoso
-    # para no contar como fallo mientras tanto.
+    # "listening" takes ~appStartTime=20s to show up (SetStartTime delays THE
+    # WHOLE app, not just the socket to the KMS) -- generous start_period so
+    # it doesn't count as a failure in the meantime.
     healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Escuchando trafico de aplicacion' /tmp/qkdnetsim.log"]
+      test: ["CMD-SHELL", "grep -q 'Listening for application traffic' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 15

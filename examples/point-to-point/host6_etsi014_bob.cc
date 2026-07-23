@@ -1,13 +1,13 @@
 /*
  * HOST6 - ETSI 014 BOB (slave)
  *
- * Simetrico a HOST5 (host5_etsi014_alice.cc). Un unico nodo real con dos interfaces:
- *   --devData / --myIpData  enlace hacia HOST5 (ETSI014 Alice)
- *   --devKms  / --myIpKms   enlace hacia HOST4 (KMS Bob)
+ * Symmetric to HOST5 (host5_etsi014_alice.cc). A single real node with two interfaces:
+ *   --devData / --myIpData  link to HOST5 (ETSI014 Alice)
+ *   --devKms  / --myIpKms   link to HOST4 (KMS Bob)
  *
- * Contrato compartido con las demas VMs (deben coincidir exactamente):
- *   etsiBobId   -> tambien usado en HOST4 al registrar el par de apps
- *   etsiAliceId -> debe coincidir con el "appId" que usa HOST5
+ * Contract shared with the other VMs (must match exactly):
+ *   etsiBobId   -> also used on HOST4 when registering the app pair
+ *   etsiAliceId -> must match the "appId" used by HOST5
  */
 
 #include "ns3/core-module.h"
@@ -55,20 +55,20 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Interfaces reales de esta VM (ajusta a tu laboratorio) ----
+    // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devData  = "eth0";
     std::string devKms   = "eth1";
     std::string myIpData = "192.168.56.6";
     std::string myIpKms  = "192.168.46.6";
     uint16_t    dataPort = 8081;
 
-    // ---- Peers (IPs reales de las otras VMs) ----
+    // ---- Peers (real IPs of the other VMs) ----
     std::string peerAliceIp = "192.168.56.5"; // HOST5
     std::string kmsBobIp    = "192.168.46.4"; // HOST4 (KMS Bob)
 
-    // ---- Contrato de identificadores compartido entre VMs ----
-    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // debe coincidir con HOST5
-    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // debe coincidir con HOST4
+    // ---- Identifier contract shared between VMs ----
+    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // must match HOST5
+    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // must match HOST4
 
     uint32_t numberOfKeyToFetchFromKMS = 1;
     uint32_t authenticationType = 0;
@@ -80,20 +80,20 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devData", "NIC real hacia HOST5", devData);
-    cmd.AddValue("devKms", "NIC real hacia HOST4", devKms);
-    cmd.AddValue("myIpData", "IP local en el enlace hacia HOST5", myIpData);
-    cmd.AddValue("myIpKms", "IP local en el enlace hacia HOST4", myIpKms);
-    cmd.AddValue("peerAliceIp", "IP real de HOST5", peerAliceIp);
-    cmd.AddValue("kmsBobIp", "IP real de HOST4 (KMS Bob)", kmsBobIp);
-    cmd.AddValue("etsiAliceId", "UUID de la app par en HOST5", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID de esta app (debe coincidir con HOST4)", etsiBobId);
-    cmd.AddValue("numberOfKeyToFetchFromKMS", "Claves a pedir por peticion GET_KEY", numberOfKeyToFetchFromKMS);
-    cmd.AddValue("encryptionType", "0-sin cifrar 1-OTP 2-AES", encryptionType);
-    cmd.AddValue("authenticationType", "0-ninguna 1-VMAC 2-MD5 3-SHA1", authenticationType);
-    cmd.AddValue("useCrypto", "Ejecutar funciones criptograficas reales", useCrypto);
-    cmd.AddValue("appStartTime", "Instante de inicio (s)", appStartTime);
-    cmd.AddValue("simTime", "Duracion de la simulacion (s)", simulationTime);
+    cmd.AddValue("devData", "Real NIC toward HOST5", devData);
+    cmd.AddValue("devKms", "Real NIC toward HOST4", devKms);
+    cmd.AddValue("myIpData", "Local IP on the link toward HOST5", myIpData);
+    cmd.AddValue("myIpKms", "Local IP on the link toward HOST4", myIpKms);
+    cmd.AddValue("peerAliceIp", "Real IP of HOST5", peerAliceIp);
+    cmd.AddValue("kmsBobIp", "Real IP of HOST4 (KMS Bob)", kmsBobIp);
+    cmd.AddValue("etsiAliceId", "UUID of the peer app on HOST5", etsiAliceId);
+    cmd.AddValue("etsiBobId", "UUID of this app (must match HOST4)", etsiBobId);
+    cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
+    cmd.AddValue("encryptionType", "0-unencrypted 1-OTP 2-AES", encryptionType);
+    cmd.AddValue("authenticationType", "0-none 1-VMAC 2-MD5 3-SHA1", authenticationType);
+    cmd.AddValue("useCrypto", "Run real cryptographic functions", useCrypto);
+    cmd.AddValue("appStartTime", "Start instant (s)", appStartTime);
+    cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
     Config::SetDefault("ns3::QKDApp014::NumberOfKeyToFetchFromKMS", UintegerValue(numberOfKeyToFetchFromKMS));
@@ -136,11 +136,11 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/TxKMS",
                      MakeCallback(+[](std::string ctx, const std::string& appId, Ptr<const Packet> p) {
-                         std::cout << "[HOST6] Peticion GET_KEY a KMS Bob, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
+                         std::cout << "[HOST6] GET_KEY request to KMS Bob, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/AppListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST6] Escuchando trafico de aplicacion" << std::endl;
+                         std::cout << "[HOST6] Listening for application traffic" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

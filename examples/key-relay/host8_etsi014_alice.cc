@@ -1,12 +1,12 @@
 /*
- * HOST8 - ETSI 014 ALICE (master), escenario key relay
+ * HOST8 - ETSI 014 ALICE (master), key relay scenario
  *
- *   --devData / --myIpData  enlace hacia HOST9 (ETSI014 Bob)     [trafico cifrado]
- *   --devKms  / --myIpKms   enlace hacia HOST5 (KMS Alice)       [GET_KEY]
+ *   --devData / --myIpData  link to HOST9 (ETSI014 Bob)     [encrypted traffic]
+ *   --devKms  / --myIpKms   link to HOST5 (KMS Alice)       [GET_KEY]
  *
- * Contrato compartido con las demas VMs (deben coincidir exactamente):
- *   etsiAliceId -> tambien usado en HOST5 al registrar el par de apps
- *   etsiBobId   -> debe coincidir con el "appId" que usa HOST9
+ * Contract shared with the other VMs (must match exactly):
+ *   etsiAliceId -> also used on HOST5 when registering the app pair
+ *   etsiBobId   -> must match the "appId" used by HOST9
  */
 
 #include "ns3/core-module.h"
@@ -22,13 +22,13 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("HOST8_ETSI014_ALICE");
 
-// Mitigacion (no arregla la causa raiz) de una condicion de carrera conocida
-// en el arranque de RealtimeSimulatorImpl (confirmada con strace: bucle de
-// futex entre 2 hilos sin avanzar el reloj simulado ni hacer ninguna syscall
-// de red). Sospecha: el hilo sincronizador es mas vulnerable cuando no hay
-// NINGUN evento programado hasta appStartTime (aqui la app no hace nada hasta
-// entonces). Mantenemos el bucle de eventos ocupado desde t=0 con un evento
-// trivial de alta frecuencia, por si eso reduce la probabilidad de la carrera.
+// Mitigation (does not fix the root cause) for a known race condition at
+// RealtimeSimulatorImpl startup (confirmed via strace: a futex loop between
+// 2 threads with the simulated clock not advancing and no network syscalls
+// being made). Suspicion: the synchronizer thread is more vulnerable when
+// there is NO event scheduled until appStartTime (here the app does nothing
+// until then). We keep the event loop busy from t=0 with a trivial
+// high-frequency event, in case that reduces the probability of the race.
 static void
 KeepAlive(Time period, Time stopTime)
 {
@@ -61,24 +61,24 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Interfaces reales de esta VM (ajusta a tu laboratorio) ----
+    // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devData  = "eth0";
     std::string devKms   = "eth1";
     std::string myIpData = "192.168.121.8";
     std::string myIpKms  = "192.168.119.8";
     uint16_t    dataPort = 8081;
 
-    // ---- Peers (IPs reales de las otras VMs) ----
+    // ---- Peers (real IPs of the other VMs) ----
     std::string peerBobIp  = "192.168.121.9"; // HOST9
     std::string kmsAliceIp = "192.168.119.5"; // HOST5 (KMS Alice)
 
-    // ---- Contrato de identificadores compartido entre VMs ----
-    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // debe coincidir con HOST5
-    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // debe coincidir con HOST9/HOST7
+    // ---- Identifier contract shared between VMs ----
+    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // must match HOST5
+    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // must match HOST9/HOST7
 
-    // ---- Parametros de la app criptografica (mismos que en el escenario 1) ----
+    // ---- Cryptographic app parameters (same as scenario 1) ----
     uint32_t appPacketSize = 800;  // bytes
-    uint32_t appRateBps    = 6400; // bps (~1 paquete/s)
+    uint32_t appRateBps    = 6400; // bps (~1 packet/s)
     uint32_t numberOfKeyToFetchFromKMS = 1;
     uint32_t authenticationType = 0;
     uint32_t encryptionType = 1;     // OTP
@@ -89,20 +89,20 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devData", "NIC real hacia HOST9", devData);
-    cmd.AddValue("devKms", "NIC real hacia HOST5", devKms);
-    cmd.AddValue("myIpData", "IP local en el enlace hacia HOST9", myIpData);
-    cmd.AddValue("myIpKms", "IP local en el enlace hacia HOST5", myIpKms);
-    cmd.AddValue("peerBobIp", "IP real de HOST9", peerBobIp);
-    cmd.AddValue("kmsAliceIp", "IP real de HOST5 (KMS Alice)", kmsAliceIp);
-    cmd.AddValue("etsiAliceId", "UUID de esta app (debe coincidir con HOST5)", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID de la app par en HOST9", etsiBobId);
-    cmd.AddValue("numberOfKeyToFetchFromKMS", "Claves a pedir por peticion GET_KEY", numberOfKeyToFetchFromKMS);
-    cmd.AddValue("encryptionType", "0-sin cifrar 1-OTP 2-AES", encryptionType);
-    cmd.AddValue("authenticationType", "0-ninguna 1-VMAC 2-MD5 3-SHA1", authenticationType);
-    cmd.AddValue("useCrypto", "Ejecutar funciones criptograficas reales", useCrypto);
-    cmd.AddValue("appStartTime", "Instante de inicio (s)", appStartTime);
-    cmd.AddValue("simTime", "Duracion de la simulacion (s)", simulationTime);
+    cmd.AddValue("devData", "Real NIC toward HOST9", devData);
+    cmd.AddValue("devKms", "Real NIC toward HOST5", devKms);
+    cmd.AddValue("myIpData", "Local IP on the link toward HOST9", myIpData);
+    cmd.AddValue("myIpKms", "Local IP on the link toward HOST5", myIpKms);
+    cmd.AddValue("peerBobIp", "Real IP of HOST9", peerBobIp);
+    cmd.AddValue("kmsAliceIp", "Real IP of HOST5 (KMS Alice)", kmsAliceIp);
+    cmd.AddValue("etsiAliceId", "UUID of this app (must match HOST5)", etsiAliceId);
+    cmd.AddValue("etsiBobId", "UUID of the peer app on HOST9", etsiBobId);
+    cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
+    cmd.AddValue("encryptionType", "0-unencrypted 1-OTP 2-AES", encryptionType);
+    cmd.AddValue("authenticationType", "0-none 1-VMAC 2-MD5 3-SHA1", authenticationType);
+    cmd.AddValue("useCrypto", "Run real cryptographic functions", useCrypto);
+    cmd.AddValue("appStartTime", "Start instant (s)", appStartTime);
+    cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
     Config::SetDefault("ns3::QKDApp014::NumberOfKeyToFetchFromKMS", UintegerValue(numberOfKeyToFetchFromKMS));
@@ -147,7 +147,7 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/TxKMS",
                      MakeCallback(+[](std::string ctx, const std::string& appId, Ptr<const Packet> p) {
-                         std::cout << "[HOST8] Peticion GET_KEY a KMS Alice, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
+                         std::cout << "[HOST8] GET_KEY request to KMS Alice, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

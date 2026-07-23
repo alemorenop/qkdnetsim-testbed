@@ -1099,7 +1099,7 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
     NS_LOG_FUNCTION(this << m_kmsSocketConnected);
     if(m_kmsSocketConnected)
-      return; //Conexion ya establecida, nada que hacer
+      return; //Connection already established, nothing to do
 
     if(!m_sendSocketKMS)
     {

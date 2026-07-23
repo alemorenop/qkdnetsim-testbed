@@ -115,7 +115,7 @@ QKDApp014::GetTypeId()
     .AddTraceSource("Mx", "Missed send packet call",
                      MakeTraceSourceAccessor(&QKDApp014::m_mxTrace),
                      "ns3::Packet::TracedCallback")
-    .AddTraceSource("AppListenReady", "El socket de datos hacia la app par (no master) ya esta en Listen()",
+    .AddTraceSource("AppListenReady", "The data socket toward the peer app (non-master) is already in Listen()",
                      MakeTraceSourceAccessor(&QKDApp014::m_appListenReadyTrace),
                      "ns3::QKDApp014::AppListenReady")
   ;
@@ -1316,13 +1316,13 @@ QKDApp014::KmsRequestTimeout()
   if(m_socketToKMS)
   {
     m_socketToKMS->Close();
-    m_socketToKMS = nullptr; //Fuerza que PrepareSocketToKMS() cree un socket nuevo en el proximo intento
+    m_socketToKMS = nullptr; //Forces PrepareSocketToKMS() to create a new socket on the next attempt
   }
 
   if(m_master)
-    ManageStores(); //Reintenta enc_keys si el store de claves esta vacio (mismo camino que un error real)
+    ManageStores(); //Retries enc_keys if the key store is empty (same path as a real error)
   else
-    SendKeyIds({}, HTTPMessage::HttpStatus::BadRequest); //Avisa a Alice como si dec_keys hubiera fallado
+    SendKeyIds({}, HTTPMessage::HttpStatus::BadRequest); //Notifies Alice as if dec_keys had failed
 }
 
 void
@@ -1330,7 +1330,7 @@ QKDApp014::ProcessResponseFromKMS(HTTPMessage& header, Ptr<Packet> packet, Ptr<S
 {
   NS_LOG_FUNCTION(this << header.GetRequestUri() << header.GetStatus());
 
-  if(m_kmsRequestTimeoutEvent.IsPending()) //Llego respuesta real: el socket esta vivo, cancelar el vigilante
+  if(m_kmsRequestTimeoutEvent.IsPending()) //A real response arrived: the socket is alive, cancel the watchdog
     Simulator::Cancel(m_kmsRequestTimeoutEvent);
 
   std::string reqMethod = ReadUri(header.GetRequestUri())[5]; //Get method from request URI field!
