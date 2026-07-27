@@ -1,0 +1,72 @@
+# Override for docker-compose.yml: replaces the toy ETSI014 apps (HOST5,
+# HOST6) with real strongSwan IPsec/IKEv2 VPN endpoints whose PSK is
+# periodically rekeyed from real ETSI GS QKD 004 key material fetched from
+# the SAME KMS containers (HOST3, HOST4) already used by the base
+# point-to-point scenario. HOST1-4 and their networks are entirely
+# untouched -- this file only redefines the two ETSI-app services.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.vpn.yml up
+#
+# HOST5/HOST6 keep their existing IPs from docker-compose.yml (192.168.35.5
+# / 192.168.56.5 for HOST5, 192.168.46.6 / 192.168.56.6 for HOST6): the
+# "networks" key is intentionally omitted below so Compose leaves the base
+# file's network attachments untouched, it only overrides the keys listed
+# here.
+name: qkdnetsim-fig3-6host
+
+services:
+
+  host5_etsi014_alice:
+    image: qkdnetsim-vpn-endpoint:latest
+    container_name: qkd-host5
+    hostname: host5
+    cap_add: [NET_ADMIN]
+    entrypoint: ["/opt/entrypoint-vpn.sh"]
+    command: []
+    environment:
+      ROLE: "client"
+      OWN_IP: "192.168.56.5"
+      PEER_IP: "192.168.56.6"
+      KMS_IP: "192.168.35.3"
+      OWN_APP_ID: "bbbbbbbb-0000-0000-0000-000000000001"
+      PEER_APP_ID: "bbbbbbbb-0000-0000-0000-000000000002"
+      HANDOFF_PORT: "9999"
+      KEY_CHUNK_SIZE_BITS: "256"
+      REKEY_INTERVAL_S: "60"
+    depends_on:
+      host3_kms_alice:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'ESTABLISHED' /tmp/qkdnetsim.log"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+  host6_etsi014_bob:
+    image: qkdnetsim-vpn-endpoint:latest
+    container_name: qkd-host6
+    hostname: host6
+    cap_add: [NET_ADMIN]
+    entrypoint: ["/opt/entrypoint-vpn.sh"]
+    command: []
+    environment:
+      ROLE: "server"
+      OWN_IP: "192.168.56.6"
+      PEER_IP: "192.168.56.5"
+      KMS_IP: "192.168.46.4"
+      OWN_APP_ID: "bbbbbbbb-0000-0000-0000-000000000002"
+      PEER_APP_ID: "bbbbbbbb-0000-0000-0000-000000000001"
+      HANDOFF_PORT: "9999"
+      KEY_CHUNK_SIZE_BITS: "256"
+      REKEY_INTERVAL_S: "60"
+    depends_on:
+      host4_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'ESTABLISHED' /tmp/qkdnetsim.log"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 5s

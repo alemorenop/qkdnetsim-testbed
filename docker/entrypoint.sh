@@ -44,6 +44,16 @@ for iface in $(ls /sys/class/net | grep -v '^lo$'); do
     # discovery above, which already read the IP it needed)
     ip link set "$iface" promisc on
     ip addr flush dev "$iface"
+
+    # A real (non-ns-3) peer's kernel TCP stack marks outgoing segments for
+    # checksum offload, expecting a NIC to fill in the real checksum before
+    # the packet leaves. Docker veth pairs have no such NIC, so with
+    # ChecksumEnabled=true ns-3 sees a bogus checksum on every incoming
+    # segment and silently drops it ("Bad checksum, dropping packet!"),
+    # which looks like a hung TCP handshake from the outside. Harmless for
+    # existing ns-3-to-ns-3 links; required for any real external client
+    # (e.g. a VPN container) talking HTTP to this node's KMS/app socket.
+    ethtool -K "$iface" tx off rx off sg off tso off gso off gro off >/dev/null 2>&1 || true
 done
 
 # Mirror all output (from here on) to a fixed file inside the container, in

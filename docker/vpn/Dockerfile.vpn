@@ -1,0 +1,26 @@
+# QKD-VPN endpoint image: strongSwan IPsec/IKEv2 with a PSK periodically
+# rekeyed from real ETSI GS QKD 004 key material (open_connect/get_key
+# against the KMS containers already running in this testbed). Unlike the
+# rest of the testbed, this container is NOT ns-3-based: it talks to the
+# KMS over ordinary kernel networking (no EmuFdNetDevice/raw sockets
+# needed), so it only needs strongSwan and a small rekey script.
+#
+# Build context = root of this qkdnetsim checkout (contrib/qkdnetsim), e.g.:
+#   docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
+# (run from inside contrib/qkdnetsim)
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    strongswan strongswan-pki \
+    curl jq python3 iproute2 ethtool iputils-ping tcpdump ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/vpn/entrypoint-vpn.sh /opt/entrypoint-vpn.sh
+COPY docker/vpn/rekey.sh /opt/rekey.sh
+RUN sed -i 's/\r$//' /opt/entrypoint-vpn.sh /opt/rekey.sh && \
+    chmod +x /opt/entrypoint-vpn.sh /opt/rekey.sh
+
+ENTRYPOINT ["/opt/entrypoint-vpn.sh"]
