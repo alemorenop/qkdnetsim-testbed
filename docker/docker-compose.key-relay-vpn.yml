@@ -1,0 +1,172 @@
+# Scenario 4: key relay (Alice - trusted relay - Bob) with native
+# strongSwan consumers.  HOST1-HOST7 are extended unchanged from the
+# synthetic key-relay scenario.  HOST8/HOST9 use ETSI GS QKD 014 because
+# QKDNetSim currently aborts ETSI 004 open_connect requests whose route has
+# more than one hop.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.key-relay-vpn.yml up -d --build
+name: qkdnetsim-key-relay-vpn
+
+networks:
+  net_1_2:
+    ipam:
+      config:
+        - subnet: 192.168.111.0/24
+          gateway: 192.168.111.254
+  net_1_5:
+    ipam:
+      config:
+        - subnet: 192.168.112.0/24
+          gateway: 192.168.112.254
+  net_2_6:
+    ipam:
+      config:
+        - subnet: 192.168.113.0/24
+          gateway: 192.168.113.254
+  net_3_4:
+    ipam:
+      config:
+        - subnet: 192.168.114.0/24
+          gateway: 192.168.114.254
+  net_3_6:
+    ipam:
+      config:
+        - subnet: 192.168.115.0/24
+          gateway: 192.168.115.254
+  net_4_7:
+    ipam:
+      config:
+        - subnet: 192.168.116.0/24
+          gateway: 192.168.116.254
+  net_5_6:
+    ipam:
+      config:
+        - subnet: 192.168.117.0/24
+          gateway: 192.168.117.254
+  net_6_7:
+    ipam:
+      config:
+        - subnet: 192.168.118.0/24
+          gateway: 192.168.118.254
+  net_5_8:
+    ipam:
+      config:
+        - subnet: 192.168.119.0/24
+          gateway: 192.168.119.254
+  net_7_9:
+    ipam:
+      config:
+        - subnet: 192.168.120.0/24
+          gateway: 192.168.120.254
+  net_8_9:
+    ipam:
+      config:
+        - subnet: 192.168.121.0/24
+          gateway: 192.168.121.254
+
+services:
+  host1_pp_alice:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host1_pp_alice
+    container_name: qkd-relay-vpn-host1
+
+  host2_pp_relay_a:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host2_pp_relay_a
+    container_name: qkd-relay-vpn-host2
+
+  host3_pp_relay_b:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host3_pp_relay_b
+    container_name: qkd-relay-vpn-host3
+
+  host4_pp_bob:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host4_pp_bob
+    container_name: qkd-relay-vpn-host4
+
+  host5_kms_alice:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host5_kms_alice
+    container_name: qkd-relay-vpn-host5
+
+  host6_kms_relay:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host6_kms_relay
+    container_name: qkd-relay-vpn-host6
+
+  host7_kms_bob:
+    extends:
+      file: docker-compose.key-relay.yml
+      service: host7_kms_bob
+    container_name: qkd-relay-vpn-host7
+
+  host9_vpn_bob:
+    build:
+      context: ..
+      dockerfile: docker/vpn/Dockerfile.vpn
+    image: qkdnetsim-vpn-endpoint:latest
+    container_name: qkd-relay-vpn-host9
+    hostname: host9-vpn-bob
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      VPN_ROLE: "bob"
+      QKD_INTERFACE: "014"
+      OWN_IP: "192.168.121.9"
+      PEER_IP: "192.168.121.8"
+      KMS_IP: "192.168.120.7"
+      OWN_APP_ID: "eeeeeeee-0000-0000-0000-000000000002"
+      PEER_APP_ID: "eeeeeeee-0000-0000-0000-000000000001"
+      CONTROL_PORT: "9090"
+      KEY_CHUNK_SIZE_BITS: "256"
+      REKEY_INTERVAL_S: "60"
+    networks:
+      net_7_9: { ipv4_address: 192.168.120.9 }
+      net_8_9: { ipv4_address: 192.168.121.9 }
+    depends_on:
+      host7_kms_bob:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import json; s=json.load(open('/run/qkd-vpn/state.json')); raise SystemExit(0 if s.get('tunnel_up') else 1)\" && ipsec statusall | grep -q 'ESTABLISHED'"]
+      interval: 3s
+      timeout: 3s
+      retries: 120
+      start_period: 5s
+
+  host8_vpn_alice:
+    image: qkdnetsim-vpn-endpoint:latest
+    container_name: qkd-relay-vpn-host8
+    hostname: host8-vpn-alice
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      VPN_ROLE: "alice"
+      QKD_INTERFACE: "014"
+      OWN_IP: "192.168.121.8"
+      PEER_IP: "192.168.121.9"
+      KMS_IP: "192.168.119.5"
+      OWN_APP_ID: "eeeeeeee-0000-0000-0000-000000000001"
+      PEER_APP_ID: "eeeeeeee-0000-0000-0000-000000000002"
+      CONTROL_PORT: "9090"
+      KEY_CHUNK_SIZE_BITS: "256"
+      REKEY_INTERVAL_S: "60"
+    networks:
+      net_5_8: { ipv4_address: 192.168.119.8 }
+      net_8_9: { ipv4_address: 192.168.121.8 }
+    depends_on:
+      host5_kms_alice:
+        condition: service_healthy
+      host9_vpn_bob:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import json; s=json.load(open('/run/qkd-vpn/state.json')); raise SystemExit(0 if s.get('tunnel_up') else 1)\" && ipsec statusall | grep -q 'ESTABLISHED'"]
+      interval: 3s
+      timeout: 3s
+      retries: 120
+      start_period: 5s

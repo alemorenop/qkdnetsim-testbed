@@ -1,121 +1,173 @@
-#!/bin/bash
-# End-to-end verification of the point-to-point + VPN scenario: HOST5/HOST6
-# run real strongSwan IPsec/IKEv2 endpoints instead of the toy ETSI014 app,
-# rekeyed from real ETSI GS QKD 004 key material fetched from HOST3/HOST4.
-# Usage: ./docker/verify-vpn.sh [capture_seconds]
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -uo pipefail
 export MSYS_NO_PATHCONV=1
 
-COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.vpn.yml"
-CAPTURE_S="${1:-8}"
-failures=0
-
-log_count() {
-    local service="$1" pattern="$2" container_id
-    container_id=$($COMPOSE ps -q "$service")
-    docker exec "$container_id" grep -cE "$pattern" /tmp/qkdnetsim.log 2>/dev/null || true
-}
-
-echo "=== 1) Status of the 6 containers ==="
-docker ps --filter "name=qkd-host" --format "table {{.Names}}\t{{.Status}}"
-echo
-
-for service in $($COMPOSE config --services); do
-    container_id=$($COMPOSE ps -q "$service")
-    if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null)" != "true" ]; then
-        echo "  [FAIL] $service is not running"
-        failures=$((failures + 1))
-        continue
-    fi
-    restarts=$(docker inspect -f '{{.RestartCount}}' "$container_id")
-    if [ "$restarts" -ne 0 ]; then
-        echo "  [FAIL] $service has restarted $restarts time(s)"
-        failures=$((failures + 1))
-    fi
-done
-echo
-
-echo "=== 2) Expected activity per host ==="
-declare -A PATTERNS=(
-    [host1_pp_alice]="Key delivered to KMS Alice"
-    [host2_pp_bob]="Key delivered to KMS Bob"
-    [host3_kms_alice]="stores key|serves key"
-    [host4_kms_bob]="stores key|serves key"
-    [host5_etsi014_alice]="got KSID|ESTABLISHED"
-    [host6_etsi014_bob]="received KSID|ESTABLISHED"
+docker_bin="${DOCKER_BIN:-docker}"
+startup_timeout="${1:-240}"
+rotation_timeout="${2:-120}"
+capture=/tmp/qkd-vpn-verify.pcap
+compose=(
+    "$docker_bin" compose
+    -f docker/docker-compose.vpn.yml
+)
+services=(
+    host1_pp_alice
+    host2_pp_bob
+    host3_kms_alice
+    host4_kms_bob
+    host5_vpn_alice
+    host6_vpn_bob
+)
+containers=(
+    qkd-vpn-host1
+    qkd-vpn-host2
+    qkd-vpn-host3
+    qkd-vpn-host4
+    qkd-vpn-host5
+    qkd-vpn-host6
 )
 
-for service in "${!PATTERNS[@]}"; do
-    count=$(log_count "$service" "${PATTERNS[$service]}")
-    count=${count:-0}
-    if [ "$count" -gt 0 ]; then
-        echo "  [OK]    $service: $count lines"
-    else
-        echo "  [FAIL]  $service: no expected activity"
-        failures=$((failures + 1))
-    fi
-done
-echo
+cleanup() {
+    "$docker_bin" exec qkd-vpn-host5 sh -c \
+        "rm -f '$capture' /tmp/qkd-vpn-tcpdump.log" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
-echo "=== 3) VPN endpoints established a QKD-keyed IPsec SA ==="
-host5_gen=$(docker exec qkd-host5 sed -n 's/.*ESTABLISHED qkd-\([0-9]*\).*/\1/p' /tmp/qkdnetsim.log | tail -1)
-host6_gen=$(docker exec qkd-host6 sed -n 's/.*ESTABLISHED qkd-\([0-9]*\).*/\1/p' /tmp/qkdnetsim.log | tail -1)
-if [ -z "$host5_gen" ] || [ -z "$host6_gen" ]; then
-    echo "  [FAIL] one or both endpoints never logged an ESTABLISHED generation"
-    failures=$((failures + 1))
-else
-    echo "  [OK] host5 generation=$host5_gen, host6 generation=$host6_gen"
-fi
-
-if docker exec qkd-host5 ipsec statusall 2>/dev/null | grep -q "Security Associations (1 up"; then
-    echo "  [OK] host5: IPsec SA ESTABLISHED"
-else
-    echo "  [FAIL] host5: no ESTABLISHED IPsec SA"
-    failures=$((failures + 1))
-fi
-if docker exec qkd-host6 ipsec statusall 2>/dev/null | grep -q "Security Associations (1 up"; then
-    echo "  [OK] host6: IPsec SA ESTABLISHED"
-else
-    echo "  [FAIL] host6: no ESTABLISHED IPsec SA"
-    failures=$((failures + 1))
-fi
-echo
-
-echo "=== 4) Real encrypted traffic between HOST5 and HOST6 (${CAPTURE_S}s) ==="
-# Same privilege-drop/stale-file gotcha as verify.sh: tcpdump opens the raw
-# socket as root and drops privileges before writing -w, so a leftover file
-# from a previous run can make the capture fail silently.
-docker exec qkd-host6 rm -f /tmp/vpn-verify.pcap
-docker exec qkd-host6 timeout -s INT "$CAPTURE_S" tcpdump -i any -s 0 \
-    -w /tmp/vpn-verify.pcap 'host 192.168.56.5' >/dev/null 2>&1 &
-tcpdump_pid=$!
-sleep 1
-docker exec qkd-host5 ping -c 3 192.168.56.6 >/dev/null 2>&1
-wait "$tcpdump_pid" 2>/dev/null
-
-esp_packets=$(docker exec qkd-host6 tcpdump -nn -r /tmp/vpn-verify.pcap 2>/dev/null | grep -c "ESP(")
-total_packets=$(docker exec qkd-host6 tcpdump -nn -r /tmp/vpn-verify.pcap 2>/dev/null | wc -l)
-if [ "$esp_packets" -gt 0 ]; then
-    echo "  [OK] $esp_packets ESP packet(s) observed ($total_packets total captured)"
-else
-    echo "  [FAIL] no ESP traffic observed ($total_packets total captured)"
-    failures=$((failures + 1))
-fi
-
-# Real proof of encryption: an ESP payload with no ICMP header ever visible
-# on the wire (unlike a plaintext ping, which would show "ICMP echo
-# request/reply" in a plain tcpdump decode).
-if [ "$total_packets" -gt 0 ] && [ "$esp_packets" -eq "$total_packets" ]; then
-    echo "  [OK] all captured packets are ESP -- no plaintext ICMP visible on the wire"
-else
-    echo "  [FAIL] some captured packets are not ESP (possible plaintext leak)"
-    failures=$((failures + 1))
-fi
-echo
-
-if [ "$failures" -ne 0 ]; then
-    echo "RESULT: FAIL ($failures check(s))" >&2
+fail() {
+    echo "[FAIL] $*" >&2
     exit 1
-fi
-echo "RESULT: OK"
+}
+
+state_value() {
+    local container="$1" field="$2"
+    "$docker_bin" exec "$container" python3 -c \
+        'import json,sys; value=json.load(open("/run/qkd-vpn/state.json")).get(sys.argv[1]); print("" if value is None else value)' \
+        "$field" | tr -d '\r'
+}
+
+wait_for_health() {
+    local container="$1" deadline=$((SECONDS + startup_timeout)) status=""
+    while (( SECONDS < deadline )); do
+        status=$("$docker_bin" inspect -f \
+            '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+            "$container" 2>/dev/null || true)
+        [ "$status" = "healthy" ] && return 0
+        sleep 3
+    done
+    fail "$container did not become healthy within ${startup_timeout}s (last status: ${status:-missing})"
+}
+
+assert_running_without_restarts() {
+    local container running restarts
+    for container in "${containers[@]}"; do
+        running=$("$docker_bin" inspect -f '{{.State.Running}}' "$container")
+        restarts=$("$docker_bin" inspect -f '{{.RestartCount}}' "$container")
+        [ "$running" = "true" ] || fail "$container is not running"
+        [ "$restarts" = "0" ] || fail "$container restarted $restarts time(s)"
+    done
+}
+
+assert_peer_state_matches() {
+    local alice_generation bob_generation alice_ksid bob_ksid
+    local alice_index bob_index alice_fingerprint bob_fingerprint
+
+    alice_generation=$(state_value qkd-vpn-host5 generation)
+    bob_generation=$(state_value qkd-vpn-host6 generation)
+    alice_ksid=$(state_value qkd-vpn-host5 ksid)
+    bob_ksid=$(state_value qkd-vpn-host6 ksid)
+    alice_index=$(state_value qkd-vpn-host5 key_index)
+    bob_index=$(state_value qkd-vpn-host6 key_index)
+    alice_fingerprint=$(state_value qkd-vpn-host5 key_fingerprint)
+    bob_fingerprint=$(state_value qkd-vpn-host6 key_fingerprint)
+
+    [ -n "$alice_ksid" ] && [ "$alice_ksid" = "$bob_ksid" ] ||
+        fail "VPN peers do not report the same ETSI 004 KSID"
+    [ "$alice_generation" = "$bob_generation" ] ||
+        fail "generation mismatch: Alice=$alice_generation Bob=$bob_generation"
+    [ -n "$alice_index" ] && [ "$alice_index" = "$bob_index" ] ||
+        fail "ETSI 004 key-index mismatch: Alice=$alice_index Bob=$bob_index"
+    [ -n "$alice_fingerprint" ] &&
+        [ "$alice_fingerprint" = "$bob_fingerprint" ] ||
+        fail "QKD key fingerprint mismatch"
+
+    echo "$alice_generation"
+}
+
+assert_current_ike_sa() {
+    local container="$1" generation="$2" status
+    status=$("$docker_bin" exec "$container" ipsec statusall 2>&1)
+    grep -Eq "qkd-${generation}\\[[0-9]+\\]: ESTABLISHED" <<<"$status" ||
+        fail "$container has no qkd-${generation} IKE_SA"
+}
+
+echo "=== 1) Waiting for the initial QKD-backed VPN ==="
+wait_for_health qkd-vpn-host5
+wait_for_health qkd-vpn-host6
+assert_running_without_restarts
+initial_generation=$(assert_peer_state_matches)
+[ "$initial_generation" -ge 1 ] ||
+    fail "the first committed generation was not reached"
+assert_current_ike_sa qkd-vpn-host5 "$initial_generation"
+assert_current_ike_sa qkd-vpn-host6 "$initial_generation"
+echo "[OK] six containers are stable; generation $initial_generation uses the same KSID, key index and fingerprint"
+
+echo
+echo "=== 2) Waiting for a real IKE PSK rotation ==="
+target_generation=$((initial_generation + 1))
+deadline=$((SECONDS + rotation_timeout))
+while (( SECONDS < deadline )); do
+    assert_running_without_restarts
+    alice_generation=$(state_value qkd-vpn-host5 generation)
+    bob_generation=$(state_value qkd-vpn-host6 generation)
+    if [ "$alice_generation" -ge "$target_generation" ] &&
+        [ "$bob_generation" -ge "$target_generation" ]; then
+        break
+    fi
+    sleep 3
+done
+
+current_generation=$(assert_peer_state_matches)
+[ "$current_generation" -ge "$target_generation" ] ||
+    fail "no committed rotation within ${rotation_timeout}s (still at generation $current_generation)"
+assert_current_ike_sa qkd-vpn-host5 "$current_generation"
+assert_current_ike_sa qkd-vpn-host6 "$current_generation"
+echo "[OK] both peers committed generation $current_generation as a new IKE_SA"
+
+echo
+echo "=== 3) Sending real traffic and checking the outer interface ==="
+cleanup
+data_dev=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+    "ip route get 192.168.56.6 | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -n1" |
+    tr -d '\r')
+[ -n "$data_dev" ] || fail "could not resolve Alice's VPN data interface"
+
+"$docker_bin" exec qkd-vpn-host5 sh -c "
+    timeout 7 tcpdump -Z root -U -Q out -i '$data_dev' -s 128 \
+        -w '$capture' 'host 192.168.56.6 and (ip proto 50 or icmp)' \
+        >/tmp/qkd-vpn-tcpdump.log 2>&1 &
+    capture_pid=\$!
+    sleep 1
+    ping -c 3 -W 2 192.168.56.6 >/dev/null
+    wait \$capture_pid || true
+    test -s '$capture'
+" || fail "ping or packet capture failed"
+
+esp_packets=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+    "tcpdump -nn -r '$capture' 'ip proto 50' 2>/dev/null | wc -l" |
+    tr -d '\r ')
+plaintext_icmp=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+    "tcpdump -nn -r '$capture' 'icmp' 2>/dev/null | wc -l" |
+    tr -d '\r ')
+[ "$esp_packets" -gt 0 ] || fail "no outbound ESP traffic was captured"
+[ "$plaintext_icmp" -eq 0 ] ||
+    fail "$plaintext_icmp outbound plaintext ICMP packet(s) were visible"
+echo "[OK] ping succeeded; outer traffic contained ESP and no plaintext ICMP"
+
+cleanup
+"$docker_bin" exec qkd-vpn-host5 sh -c "test ! -e '$capture'" ||
+    fail "temporary capture cleanup failed"
+trap - EXIT
+
+echo
+echo "VPN point-to-point scenario verified successfully."
