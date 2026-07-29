@@ -1,4 +1,6 @@
 # Scenario 3: point-to-point QKDNetSim with native strongSwan consumers.
+# Select the QKD application interface with QKD_INTERFACE=004 or 014
+# (ETSI 004 is used by default).
 #
 # This is intentionally a standalone Compose project.  Reusing the base file
 # as an override kept its ETSI 014 service names and, more importantly, merged
@@ -83,7 +85,7 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       VPN_ROLE: "bob"
-      QKD_INTERFACE: "004"
+      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
       OWN_IP: "192.168.56.6"
       PEER_IP: "192.168.56.5"
       KMS_IP: "192.168.46.4"
@@ -112,7 +114,7 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       VPN_ROLE: "alice"
-      QKD_INTERFACE: "004"
+      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
       OWN_IP: "192.168.56.5"
       PEER_IP: "192.168.56.6"
       KMS_IP: "192.168.35.3"

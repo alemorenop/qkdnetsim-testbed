@@ -132,13 +132,16 @@ The image also applies `patches/realtime-simulator-clamp.patch` to ns-3.46. Unde
 
 PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after HOST1–HOST4 begin reporting `Key delivered`.
 
-### 3. Point-to-point QKD-backed VPN (`docker/docker-compose.vpn.yml`)
+### 3. Point-to-point QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.vpn.yml`)
 
 Replaces the toy ETSI 014 apps at HOST5/HOST6 with real strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting synthetic traffic by hand, HOST5 and HOST6 are now ordinary Ubuntu containers that periodically fetch real key material from the same KMS containers (HOST3, HOST4) and hand it to strongSwan as the connection's pre-shared key — the QKD stack's only remaining job is producing the key that protects a real IPsec tunnel. The overall architecture (a client/server pair of strongSwan encryptors fed by a periodic key-fetch script) follows:
 
 > Mehic, M., Dervisevic, E., Fazio, P. and Voznak, M., 2025. *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*. IEEE Network. https://doi.org/10.1109/MNET.2025.3540705
 
-and the choice of ETSI GS QKD 004 (session-based key retrieval, see below) over ETSI 014 for this specific use case follows:
+The scenario supports both ETSI GS QKD 004 and ETSI GS QKD 014 so that
+the two application interfaces can be compared over the same QKD link,
+strongSwan configuration, key size and rekey interval. The use of ETSI GS
+QKD 004 for session-based VPN key retrieval follows:
 
 > Buruaga, J.S., Brunner, H.H., Fung, F., Peev, M., Pastor, A., López, D.R., Ortiz, L., Martín, V. and Brito, J.P., 2023. *VPN Protection with QKD-Derived Keys Using Standard Interfaces*. In 2023 23rd International Conference on Transparent Optical Networks (ICTON). IEEE. https://doi.org/10.1109/ICTON59386.2023.10207212
 
@@ -158,10 +161,14 @@ HOST3 (KMS Alice) <────────── transform_keys ─────
 HOST5 (VPN Alice) <══════════ IPsec/IKEv2 (ESP) ══════════> HOST6 (VPN Bob)
 ```
 
-**Why ETSI 004, not 014.** ETSI 004 negotiates one `Key_stream_ID` (KSID)
-for the complete VPN session. Alice sends that KSID once to Bob, which
-registers the replica association with its own KMS. Raw key material never
-crosses the endpoint coordination channel.
+**Interface selection.** ETSI 004 negotiates one `Key_stream_ID` (KSID) for
+the complete VPN session. Alice sends that KSID once to Bob, which registers
+the replica association with its own KMS. ETSI 014 instead obtains every new
+key with `enc_keys`; Alice sends its `key_ID` to Bob, which retrieves the
+matching material with `dec_keys`. Raw key material never crosses the endpoint
+coordination channel in either mode. `QKD_INTERFACE=004` is the default;
+setting it to `014` selects the second flow without changing the topology or
+VPN parameters.
 
 **Known limitation.** ETSI 004's `open_connect` is only implemented for
 direct one-hop KMS pairs. `ProcessOpenConnectRequest()` explicitly terminates
@@ -170,11 +177,12 @@ the KMS when `GetHop() != 1`. Scenario 4 therefore uses ETSI 014
 association and relay-buffer logic inside QKDNetSim, not a configuration
 change.
 
-**Transactional rekey cycle.** Alice drives each generation. It obtains one
-`get_key(KSID)` result and asks Bob to prepare that same generation. Repeated
-control requests are idempotent, so a lost response cannot consume an extra
-key on only one side. The peers compare the ETSI 004 key index and a SHA-256
-fingerprint before installing the secret.
+**Transactional rekey cycle.** Alice drives each generation. With ETSI 004 it
+obtains one `get_key(KSID)` result; with ETSI 014 it obtains one `enc_keys`
+result and Bob retrieves its `key_ID` through `dec_keys`. Repeated control
+requests are idempotent, so a lost response cannot consume an extra key on
+only one side. The peers compare the ETSI 004 key index or ETSI 014 `key_ID`,
+together with a SHA-256 fingerprint, before installing the secret.
 
 For generation 2 and later, both peers temporarily remove the previous
 strongSwan connection definition before initiation. This is required because
@@ -189,7 +197,7 @@ The operation repeats every `REKEY_INTERVAL_S` (60 seconds by default).
 `/run/qkd-vpn/state.json` contains only the KSID, generation, key index,
 truncated fingerprint and status; raw keys are never written to state or logs.
 
-Quick start:
+Quick start with ETSI 004:
 
 ```bash
 cd contrib/qkdnetsim-testbed
@@ -199,13 +207,28 @@ docker compose -f docker/docker-compose.vpn.yml up -d --build
 bash ./docker/verify-vpn.sh
 ```
 
+Run the equivalent point-to-point VPN with ETSI 014 after stopping the first
+run:
+
+```bash
+docker compose -f docker/docker-compose.vpn.yml down
+QKD_INTERFACE=014 docker compose -f docker/docker-compose.vpn.yml up -d --build
+QKD_INTERFACE=014 bash ./docker/verify-vpn.sh
+```
+
+Keep `QKD_INTERFACE` identical for `docker compose` and the verifier. For
+repeatable measurements, bring the project down between interface changes so
+that both tests start with empty KMS/VPN state.
+
 `verify-vpn.sh` first verifies the initial VPN and then waits for a later
 committed generation, proving that a new IKE_SA was authenticated with a new
-QKD PSK. It requires all six containers to have zero restarts, compares KSID,
-generation, key index and fingerprint, and checks the exact `qkd-N` IKE_SA on
-both peers. Finally it sends a real ping and captures only outbound ESP or
-ICMP: ESP must be present and plaintext ICMP absent. The temporary capture is
-always deleted.
+QKD PSK. It requires all six containers to have zero restarts, verifies the
+selected interface, compares generation, fingerprint and either KSID/key index
+(ETSI 004) or `key_ID` (ETSI 014), and checks the exact `qkd-N` IKE_SA on both
+peers. In ETSI 014 mode it also confirms that both KMSs reported serving that
+`key_ID`. Finally it sends a real ping and captures only outbound ESP or ICMP:
+ESP must be present and plaintext ICMP absent. The temporary capture is always
+deleted.
 
 **Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** HOST5/HOST6 talk to the KMS over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (every other host talks to another ns-3/`EmuFdNetDevice` process, never to a real kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. `entrypoint.sh` and `entrypoint-vpn.sh` now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
 

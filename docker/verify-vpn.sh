@@ -4,6 +4,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 docker_bin="${DOCKER_BIN:-docker}"
+expected_interface="${QKD_INTERFACE:-004}"
 startup_timeout="${1:-240}"
 rotation_timeout="${2:-120}"
 capture=/tmp/qkd-vpn-verify.pcap
@@ -39,6 +40,9 @@ fail() {
     exit 1
 }
 
+[ "$expected_interface" = "004" ] || [ "$expected_interface" = "014" ] ||
+    fail "QKD_INTERFACE must be 004 or 014"
+
 state_value() {
     local container="$1" field="$2"
     "$docker_bin" exec "$container" python3 -c \
@@ -69,29 +73,54 @@ assert_running_without_restarts() {
 }
 
 assert_peer_state_matches() {
-    local alice_generation bob_generation alice_ksid bob_ksid
-    local alice_index bob_index alice_fingerprint bob_fingerprint
+    local alice_generation bob_generation alice_interface bob_interface
+    local alice_ksid bob_ksid alice_index bob_index alice_key_id bob_key_id
+    local alice_fingerprint bob_fingerprint
 
     alice_generation=$(state_value qkd-vpn-host5 generation)
     bob_generation=$(state_value qkd-vpn-host6 generation)
+    alice_interface=$(state_value qkd-vpn-host5 qkd_interface)
+    bob_interface=$(state_value qkd-vpn-host6 qkd_interface)
     alice_ksid=$(state_value qkd-vpn-host5 ksid)
     bob_ksid=$(state_value qkd-vpn-host6 ksid)
     alice_index=$(state_value qkd-vpn-host5 key_index)
     bob_index=$(state_value qkd-vpn-host6 key_index)
+    alice_key_id=$(state_value qkd-vpn-host5 key_id)
+    bob_key_id=$(state_value qkd-vpn-host6 key_id)
     alice_fingerprint=$(state_value qkd-vpn-host5 key_fingerprint)
     bob_fingerprint=$(state_value qkd-vpn-host6 key_fingerprint)
 
-    [ -n "$alice_ksid" ] && [ "$alice_ksid" = "$bob_ksid" ] ||
-        fail "VPN peers do not report the same ETSI 004 KSID"
+    [ "$alice_interface" = "$expected_interface" ] &&
+        [ "$bob_interface" = "$expected_interface" ] ||
+        fail "VPN endpoints use ETSI $alice_interface/$bob_interface; expected ETSI $expected_interface"
     [ "$alice_generation" = "$bob_generation" ] ||
         fail "generation mismatch: Alice=$alice_generation Bob=$bob_generation"
-    [ -n "$alice_index" ] && [ "$alice_index" = "$bob_index" ] ||
-        fail "ETSI 004 key-index mismatch: Alice=$alice_index Bob=$bob_index"
+
+    if [ "$expected_interface" = "004" ]; then
+        [ -n "$alice_ksid" ] && [ "$alice_ksid" = "$bob_ksid" ] ||
+            fail "VPN peers do not report the same ETSI 004 KSID"
+        [ -n "$alice_index" ] && [ "$alice_index" = "$bob_index" ] ||
+            fail "ETSI 004 key-index mismatch: Alice=$alice_index Bob=$bob_index"
+    else
+        [ -n "$alice_key_id" ] && [ "$alice_key_id" = "$bob_key_id" ] ||
+            fail "ETSI 014 key_ID mismatch: Alice=$alice_key_id Bob=$bob_key_id"
+    fi
+
     [ -n "$alice_fingerprint" ] &&
         [ "$alice_fingerprint" = "$bob_fingerprint" ] ||
         fail "QKD key fingerprint mismatch"
 
     echo "$alice_generation"
+}
+
+assert_kms_served_etsi014_key() {
+    local key_id="$1"
+    "$docker_bin" logs qkd-vpn-host3 2>&1 |
+        grep "serves key.*keyId=${key_id}" >/dev/null ||
+        fail "KMS Alice did not report serving ETSI 014 key_ID=$key_id"
+    "$docker_bin" logs qkd-vpn-host4 2>&1 |
+        grep "serves key.*keyId=${key_id}" >/dev/null ||
+        fail "KMS Bob did not report serving ETSI 014 key_ID=$key_id"
 }
 
 assert_current_ike_sa() {
@@ -110,7 +139,13 @@ initial_generation=$(assert_peer_state_matches)
     fail "the first committed generation was not reached"
 assert_current_ike_sa qkd-vpn-host5 "$initial_generation"
 assert_current_ike_sa qkd-vpn-host6 "$initial_generation"
-echo "[OK] six containers are stable; generation $initial_generation uses the same KSID, key index and fingerprint"
+if [ "$expected_interface" = "014" ]; then
+    initial_key_id=$(state_value qkd-vpn-host5 key_id)
+    assert_kms_served_etsi014_key "$initial_key_id"
+    echo "[OK] six containers are stable; generation $initial_generation uses the same ETSI 014 key_ID and fingerprint"
+else
+    echo "[OK] six containers are stable; generation $initial_generation uses the same ETSI 004 KSID, key index and fingerprint"
+fi
 
 echo
 echo "=== 2) Waiting for a real IKE PSK rotation ==="
@@ -132,7 +167,13 @@ current_generation=$(assert_peer_state_matches)
     fail "no committed rotation within ${rotation_timeout}s (still at generation $current_generation)"
 assert_current_ike_sa qkd-vpn-host5 "$current_generation"
 assert_current_ike_sa qkd-vpn-host6 "$current_generation"
-echo "[OK] both peers committed generation $current_generation as a new IKE_SA"
+if [ "$expected_interface" = "014" ]; then
+    current_key_id=$(state_value qkd-vpn-host5 key_id)
+    assert_kms_served_etsi014_key "$current_key_id"
+    echo "[OK] both peers committed generation $current_generation with ETSI 014 key_ID=$current_key_id as a new IKE_SA"
+else
+    echo "[OK] both peers committed generation $current_generation as a new ETSI 004-backed IKE_SA"
+fi
 
 echo
 echo "=== 3) Sending real traffic and checking the outer interface ==="
@@ -170,4 +211,4 @@ cleanup
 trap - EXIT
 
 echo
-echo "VPN point-to-point scenario verified successfully."
+echo "ETSI $expected_interface VPN point-to-point scenario verified successfully."
