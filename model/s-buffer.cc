@@ -64,6 +64,7 @@ namespace ns3 {
         m_notReadyKeyCount = 0;
         m_notReadyBitCount = 0;
         m_currentStreamIndex = 0;
+        m_streamIndexInitialized = false;
         m_relayActive = false; 
     }
 
@@ -92,6 +93,7 @@ namespace ns3 {
         m_notReadyKeyCount = 0;
         m_notReadyBitCount = 0;
         m_currentStreamIndex = 0;
+        m_streamIndexInitialized = false;
         m_relayActive = false; 
     }
 
@@ -111,6 +113,7 @@ namespace ns3 {
         m_notReadyKeyCount = 0;
         m_notReadyBitCount = 0;
         m_currentStreamIndex = 0;
+        m_streamIndexInitialized = false;
         m_relayActive = false;
     }
 
@@ -553,9 +556,14 @@ namespace ns3 {
             << "\nm_currentStreamIndex:\t" << m_currentStreamIndex
         );
 
-        //Take last stored index m_currentStreamIndex
+        // Continue after the last assigned index even when all previously
+        // inserted chunks have already been consumed.  Using
+        // m_currentStreamIndex directly in that case reused index 0 (or the
+        // last exhausted index) and desynchronised ETSI 004 peers that refill
+        // their stream buffers at different times.
         bool startingInReady {true};
-        uint32_t startingIndex = m_currentStreamIndex;
+        uint32_t startingIndex =
+            m_streamIndexInitialized ? m_currentStreamIndex + 1 : 0;
         if(m_stream_keys.rbegin() != m_stream_keys.rend())
         {
             startingIndex = m_stream_keys.rbegin()->first;
@@ -628,6 +636,7 @@ namespace ns3 {
         }
 
         m_currentStreamIndex = startingIndex - 1;
+        m_streamIndexInitialized = true;
         NS_LOG_FUNCTION( this << "Last index stored is " << m_currentStreamIndex );
 
     }

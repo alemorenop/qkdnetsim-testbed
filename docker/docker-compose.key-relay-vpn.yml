@@ -1,8 +1,8 @@
 # Scenario 4: key relay (Alice - trusted relay - Bob) with native
 # strongSwan consumers.  HOST1-HOST7 are extended unchanged from the
-# synthetic key-relay scenario.  HOST8/HOST9 use ETSI GS QKD 014 because
-# QKDNetSim currently aborts ETSI 004 open_connect requests whose route has
-# more than one hop.
+# synthetic key-relay scenario. HOST8/HOST9 use the multi-hop ETSI GS QKD
+# 004 implementation by default; set QKD_INTERFACE=014 to compare it with
+# the key-oriented interface over the same trusted-node topology.
 #
 # Usage:
 #   docker compose -f docker/docker-compose.key-relay-vpn.yml up -d --build
@@ -118,7 +118,7 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       VPN_ROLE: "bob"
-      QKD_INTERFACE: "014"
+      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
       OWN_IP: "192.168.121.9"
       PEER_IP: "192.168.121.8"
       KMS_IP: "192.168.120.7"
@@ -147,7 +147,7 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       VPN_ROLE: "alice"
-      QKD_INTERFACE: "014"
+      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
       OWN_IP: "192.168.121.8"
       PEER_IP: "192.168.121.9"
       KMS_IP: "192.168.119.5"

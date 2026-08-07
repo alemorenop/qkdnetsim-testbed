@@ -160,6 +160,12 @@ def parse_key_response(response: dict[str, Any], generation: int) -> KeyVersion:
     if "index" not in response or not response.get("Key_buffer"):
         raise ValueError("KMS response has no index or Key_buffer")
     value = str(response["Key_buffer"])
+    actual_bits = len(value.encode()) * 8
+    if actual_bits != KEY_CHUNK_SIZE_BITS:
+        raise ValueError(
+            f"ETSI 004 returned {actual_bits} bits, "
+            f"expected {KEY_CHUNK_SIZE_BITS}"
+        )
     return KeyVersion(
         generation=generation,
         index=int(response["index"]),

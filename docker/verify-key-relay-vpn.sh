@@ -4,6 +4,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 docker_bin="${DOCKER_BIN:-docker}"
+expected_interface="${QKD_INTERFACE:-004}"
 startup_timeout="${1:-360}"
 rotation_timeout="${2:-180}"
 capture=/tmp/qkd-relay-vpn-verify.pcap
@@ -30,6 +31,9 @@ fail() {
     echo "[FAIL] $*" >&2
     exit 1
 }
+
+[ "$expected_interface" = "004" ] || [ "$expected_interface" = "014" ] ||
+    fail "QKD_INTERFACE must be 004 or 014"
 
 state_value() {
     local container="$1" field="$2"
@@ -62,28 +66,46 @@ assert_stable_containers() {
 
 assert_peer_state_matches() {
     local alice_generation bob_generation alice_key_id bob_key_id
+    local alice_ksid bob_ksid alice_index bob_index
     local alice_fingerprint bob_fingerprint alice_interface bob_interface
+    local key_reference
 
     alice_generation=$(state_value qkd-relay-vpn-host8 generation)
     bob_generation=$(state_value qkd-relay-vpn-host9 generation)
     alice_key_id=$(state_value qkd-relay-vpn-host8 key_id)
     bob_key_id=$(state_value qkd-relay-vpn-host9 key_id)
+    alice_ksid=$(state_value qkd-relay-vpn-host8 ksid)
+    bob_ksid=$(state_value qkd-relay-vpn-host9 ksid)
+    alice_index=$(state_value qkd-relay-vpn-host8 key_index)
+    bob_index=$(state_value qkd-relay-vpn-host9 key_index)
     alice_fingerprint=$(state_value qkd-relay-vpn-host8 key_fingerprint)
     bob_fingerprint=$(state_value qkd-relay-vpn-host9 key_fingerprint)
     alice_interface=$(state_value qkd-relay-vpn-host8 qkd_interface)
     bob_interface=$(state_value qkd-relay-vpn-host9 qkd_interface)
 
-    [ "$alice_interface" = "014" ] && [ "$bob_interface" = "014" ] ||
-        fail "one or both VPN endpoints are not using ETSI 014"
+    [ "$alice_interface" = "$expected_interface" ] &&
+        [ "$bob_interface" = "$expected_interface" ] ||
+        fail "VPN endpoints use ETSI $alice_interface/$bob_interface; expected ETSI $expected_interface"
     [ "$alice_generation" = "$bob_generation" ] ||
         fail "generation mismatch: Alice=$alice_generation Bob=$bob_generation"
-    [ -n "$alice_key_id" ] && [ "$alice_key_id" = "$bob_key_id" ] ||
-        fail "ETSI 014 key_ID mismatch"
+
+    if [ "$expected_interface" = "004" ]; then
+        [ -n "$alice_ksid" ] && [ "$alice_ksid" = "$bob_ksid" ] ||
+            fail "ETSI 004 KSID mismatch"
+        [ -n "$alice_index" ] && [ "$alice_index" = "$bob_index" ] ||
+            fail "ETSI 004 stream-index mismatch"
+        key_reference="$alice_index"
+    else
+        [ -n "$alice_key_id" ] && [ "$alice_key_id" = "$bob_key_id" ] ||
+            fail "ETSI 014 key_ID mismatch"
+        key_reference="$alice_key_id"
+    fi
+
     [ -n "$alice_fingerprint" ] &&
         [ "$alice_fingerprint" = "$bob_fingerprint" ] ||
         fail "QKD key fingerprint mismatch"
 
-    echo "$alice_generation|$alice_key_id"
+    echo "$alice_generation|$key_reference"
 }
 
 assert_current_ike_sa() {
@@ -93,14 +115,14 @@ assert_current_ike_sa() {
         fail "$container has no qkd-${generation} IKE_SA"
 }
 
-assert_kms_served_key() {
-    local key_id="$1"
+assert_kms_served_reference() {
+    local reference="$1"
     "$docker_bin" logs qkd-relay-vpn-host5 2>&1 |
-        grep "serves key.*keyId=${key_id}" >/dev/null ||
-        fail "KMS Alice did not report serving key_ID=$key_id"
+        grep "serves key.*keyId=${reference}" >/dev/null ||
+        fail "KMS Alice did not report serving ETSI $expected_interface reference=$reference"
     "$docker_bin" logs qkd-relay-vpn-host7 2>&1 |
-        grep "serves key.*keyId=${key_id}" >/dev/null ||
-        fail "KMS Bob did not report serving key_ID=$key_id"
+        grep "serves key.*keyId=${reference}" >/dev/null ||
+        fail "KMS Bob did not report serving ETSI $expected_interface reference=$reference"
 }
 
 echo "=== 1) Waiting for the initial relayed QKD-backed VPN ==="
@@ -109,13 +131,13 @@ wait_for_health qkd-relay-vpn-host9
 assert_stable_containers
 initial_state=$(assert_peer_state_matches)
 initial_generation=${initial_state%%|*}
-initial_key_id=${initial_state#*|}
+initial_reference=${initial_state#*|}
 [ "$initial_generation" -ge 1 ] ||
     fail "the first committed generation was not reached"
 assert_current_ike_sa qkd-relay-vpn-host8 "$initial_generation"
 assert_current_ike_sa qkd-relay-vpn-host9 "$initial_generation"
-assert_kms_served_key "$initial_key_id"
-echo "[OK] generation $initial_generation uses the same relayed ETSI 014 key_ID and fingerprint"
+assert_kms_served_reference "$initial_reference"
+echo "[OK] generation $initial_generation uses the same relayed ETSI $expected_interface reference and fingerprint"
 
 echo
 echo "=== 2) Waiting for a real IKE PSK rotation ==="
@@ -134,13 +156,13 @@ done
 
 current_state=$(assert_peer_state_matches)
 current_generation=${current_state%%|*}
-current_key_id=${current_state#*|}
+current_reference=${current_state#*|}
 [ "$current_generation" -ge "$target_generation" ] ||
     fail "no committed rotation within ${rotation_timeout}s (still at generation $current_generation)"
 assert_current_ike_sa qkd-relay-vpn-host8 "$current_generation"
 assert_current_ike_sa qkd-relay-vpn-host9 "$current_generation"
-assert_kms_served_key "$current_key_id"
-echo "[OK] both peers committed qkd-$current_generation with relayed key_ID=$current_key_id"
+assert_kms_served_reference "$current_reference"
+echo "[OK] both peers committed qkd-$current_generation with relayed ETSI $expected_interface reference=$current_reference"
 
 echo
 echo "=== 3) Sending real traffic and checking the outer interface ==="
@@ -178,4 +200,4 @@ cleanup
 trap - EXIT
 
 echo
-echo "Key-relay VPN scenario verified successfully."
+echo "ETSI $expected_interface key-relay VPN scenario verified successfully."

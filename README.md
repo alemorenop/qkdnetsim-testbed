@@ -170,12 +170,12 @@ coordination channel in either mode. `QKD_INTERFACE=004` is the default;
 setting it to `014` selects the second flow without changing the topology or
 VPN parameters.
 
-**Known limitation.** ETSI 004's `open_connect` is only implemented for
-direct one-hop KMS pairs. `ProcessOpenConnectRequest()` explicitly terminates
-the KMS when `GetHop() != 1`. Scenario 4 therefore uses ETSI 014
-`enc_keys`/`dec_keys`; supporting multi-hop ETSI 004 would require new stream
-association and relay-buffer logic inside QKDNetSim, not a configuration
-change.
+The same endpoint API is also available over the trusted-node path in
+scenario 4. That case adds an internal KMS-to-KMS control plane because ETSI
+GS QKD 004 defines the SAE-to-KMS stream API, but does not define how several
+KMSs must construct one association across a trusted-node network. The
+extension is described with the key-relay scenario below; it does not change
+the ETSI 004 requests made by the VPN consumer.
 
 **Transactional rekey cycle.** Alice drives each generation. With ETSI 004 it
 obtains one `get_key(KSID)` result; with ETSI 014 it obtains one `enc_keys`
@@ -246,7 +246,7 @@ The cipher suites are pinned to plugins available in Ubuntu 22.04:
 `ipsec statusall` rather than trusting the exit code of `ipsec up`, because
 that command can return success even when no matching IKE_SA was established.
 
-### 4. Key-relay QKD-backed VPN (`docker/docker-compose.key-relay-vpn.yml`)
+### 4. Key-relay QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.key-relay-vpn.yml`)
 
 This scenario keeps the complete trusted-node topology from scenario 2 and
 replaces only the synthetic HOST8/HOST9 ETSI 014 applications with native
@@ -264,10 +264,47 @@ HOST8 (VPN Alice) <══════════ IKEv2 / IPsec ESP ════
 
 HOST1-HOST7 are extended unchanged from
 `docker-compose.key-relay.yml`. The standalone project defines correctly
-named `host8_vpn_alice` and `host9_vpn_bob` services and selects
-`QKD_INTERFACE=014` in the shared VPN consumer.
+named `host8_vpn_alice` and `host9_vpn_bob` services and reuses the same
+interface-aware VPN consumer as scenario 3. `QKD_INTERFACE=004` is the
+default; setting it to `014` selects the key-oriented flow without changing
+the topology, strongSwan configuration or rotation interval.
 
 #### Relayed key acquisition
+
+The existing QKDNetSim relay mechanism first supplies matching end-to-end key
+objects to the `RELAY_SBUFFER`s at HOST5 and HOST7. HOST6 is a trusted node:
+it decrypts and re-encrypts the key material with independent hop keys while
+forwarding it from HOST5 to HOST7. The VPN can consume that common material
+through either application interface.
+
+In ETSI 004 mode:
+
+1. HOST8 calls `open_connect` on HOST5. HOST5 creates the master stream and
+   sends an internal `new_app` control request through HOST6. HOST7 creates
+   the replica association with the same KSID. HOST8 receives the KSID only
+   after that operation succeeds end to end.
+2. HOST8 sends the KSID to HOST9 once. HOST9 calls `open_connect(KSID)` on
+   HOST7, which sends an internal `register` request back through HOST6.
+3. Once both SAEs are registered, HOST5 reserves complete key objects from
+   its end-to-end relay buffer and sends a `fill` request containing their
+   identifiers—not their secret values—to HOST7.
+4. HOST7 resolves those identifiers from its matching relay buffer and
+   inserts the material into its replica stream. Its acknowledgement causes
+   HOST5 to commit the same objects to the master stream; rejected objects
+   are returned to the relay buffer.
+5. Each VPN generation uses the normal ETSI 004 `get_key(KSID)` endpoint.
+   Alice and Bob compare the returned stream index and fingerprint before
+   installing the PSK and performing the transactional IKE cutover.
+
+The `new_app`, `register` and `fill` messages use the private
+`/api/v1/associations/relay004/<request-id>` KMS endpoint. HOST6 is only a
+hop-by-hop control proxy and keeps no ETSI 004 association. Each request
+carries its origin, final KMS and previous hop, so responses follow the
+reverse path and duplicate fills cannot overlap. This endpoint is an
+internal QKDNetSim trusted-network extension, not an additional ETSI
+SAE-to-KMS operation.
+
+In ETSI 014 mode:
 
 1. Alice requests one 256-bit key from HOST5 with
    `enc_keys/<Bob SAE>/number/1/size/256`.
@@ -278,13 +315,14 @@ named `host8_vpn_alice` and `host9_vpn_bob` services and selects
 4. Bob requests that exact identifier from HOST7 with
    `dec_keys/<Alice SAE>`.
 5. Both endpoints compare `key_ID` and key fingerprint, install the result as
-   the strongSwan PSK, and perform the same transactional IKE cutover used in
-   scenario 3.
+   the strongSwan PSK, and perform the same transactional IKE cutover.
 
 Raw key material never travels between HOST8 and HOST9. The recurring
 `key_ID` coordination is necessary because ETSI 014 is key-oriented rather
-than stream-oriented. Prepare requests are idempotent, so a lost response
-does not make Bob consume another key.
+than stream-oriented; ETSI 004 only coordinates its KSID during association
+setup and thereafter identifies each chunk by its monotonically increasing
+stream index. Prepare requests are idempotent, so a lost response does not
+make Bob consume another key.
 
 #### Start and verify
 
@@ -299,12 +337,37 @@ docker compose -f docker/docker-compose.key-relay-vpn.yml up -d --build
 bash ./docker/verify-key-relay-vpn.sh
 ```
 
+Run the same topology with ETSI 014 after stopping the ETSI 004 run:
+
+```bash
+docker compose -f docker/docker-compose.key-relay-vpn.yml down
+QKD_INTERFACE=014 docker compose -f docker/docker-compose.key-relay-vpn.yml up -d --build
+QKD_INTERFACE=014 bash ./docker/verify-key-relay-vpn.sh
+```
+
+As in scenario 3, keep `QKD_INTERFACE` identical for Compose and the
+verifier, and bring the project down before changing interfaces.
+
 The verifier requires all nine containers to remain running with zero
-restarts. It confirms matching ETSI 014 `key_ID` and fingerprints at the VPN
-endpoints, checks that both HOST5 and HOST7 served that identifier, validates
-the exact IKE_SA on both sides, and waits for at least one later committed
-generation. A real ping must produce outbound ESP and no plaintext ICMP. Its
-temporary capture is always deleted.
+restarts. It confirms matching fingerprints and either ETSI 004 KSID/index
+or ETSI 014 `key_ID` at the VPN endpoints, checks the corresponding HOST5
+and HOST7 KMS traces, validates the exact IKE_SA on both sides, and waits for
+at least one later committed generation. A real ping must produce outbound
+ESP and no plaintext ICMP. Its temporary capture is always deleted.
+
+#### Stream-index continuity
+
+`SBuffer::InsertKeyToStreamSession()` now distinguishes a never-used stream
+from an empty stream whose earlier chunks were consumed. Previously, an
+empty buffer reused `m_currentStreamIndex`, causing a fast-consuming endpoint
+to receive index `0` repeatedly while its peer continued with `1`, `2`, and
+so on. The last assigned index is now retained and the next refill starts at
+`last + 1`; this applies to both direct and relayed ETSI 004 associations.
+After stream-buffer initialization the KMS also restores the
+`Key_chunk_size` negotiated by `open_connect`, because the generic S-buffer
+initializer otherwise replaced it with the relay-storage default. Thus both
+VPN interfaces now supply the configured 256-bit PSK material even though
+the relay layer transports larger storage blocks internally.
 
 ## Testbed additions to QKDNetSim
 
@@ -316,6 +379,14 @@ temporary capture is always deleted.
 - **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that HOST5 and HOST7 serve the same `keyId`, and samples traffic without storing captures in the repository. Both this script and `verify.sh` remove any pre-existing capture file before writing a new one — `tcpdump` opens the raw socket as root and then drops privileges to a dedicated user before writing `-w`, so a leftover file from a previous run with different ownership made the capture fail silently (`Permission denied`, zero packets) regardless of whether traffic was actually flowing. `verify.sh`'s plaintext check no longer looks for a specific marker string — that check happened to depend on the same uninitialized-memory leak described above, not on anything the application actually sends — and instead only asserts the absence of any long readable run in the captured payload.
 - **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
 - **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
+- **[`model/qkd-key-manager-system-application.cc`](model/qkd-key-manager-system-application.cc)**
+  — preserves the original direct ETSI 004 path and adds routed
+  `new_app`/`register`/`fill` control transactions for multi-hop
+  associations. Secret material is moved by the existing trusted-node relay;
+  the new control messages carry only KSID, routing metadata and key IDs.
+- **[`model/s-buffer.cc`](model/s-buffer.cc)** — maintains monotonically
+  increasing ETSI 004 stream indices after a completely consumed stream is
+  refilled.
 - **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for every scenario binary.
 - **[`docker/vpn/`](docker/vpn/)** — the strongSwan endpoint image, its
   interface-aware entrypoint, and the transactional ETSI 004/014 consumer
@@ -326,8 +397,8 @@ temporary capture is always deleted.
   rotation, stable containers and encrypted ESP traffic.
 - **[`docker-compose.key-relay-vpn.yml`](docker/docker-compose.key-relay-vpn.yml)**
   and **[`verify-key-relay-vpn.sh`](docker/verify-key-relay-vpn.sh)** — the
-  nine-node ETSI 014 key-relay VPN and its end-to-end relay, IKE rotation and
-  ESP verifier.
+  selectable ETSI 004/014 nine-node key-relay VPN and its end-to-end
+  association, synchronized rotation and ESP verifier.
 
 ---
 

@@ -38,6 +38,7 @@
 #include <sstream>
 #include <string>
 #include <regex>
+#include <set>
 
 
 namespace ns3 {
@@ -99,7 +100,8 @@ public:
     STORE_KEY = 9, //Store postprocessing keys
     TRANSFORM_KEYS = 10, //Transform(merge, split) QKD keys
     ETSI_QKD_004_KMS_CLOSE = 11,
-    RELAY_KEYS = 12
+    RELAY_KEYS = 12,
+    ETSI_QKD_004_RELAY_CONTROL = 13
   };
 
   /**
@@ -661,6 +663,8 @@ private:
     Ipv4Address prev_hop_address;
     std::string request_uri;
     uint32_t next_hop_id;
+    uint32_t source_node_id;
+    std::string operation;
 
     //Specific to new FILL method
     uint32_t peerNodeId;
@@ -696,6 +700,34 @@ private:
     bool peerRegistered; //KMS must know the state of connection for association on peer KMS!
     Ptr<SBuffer> stre_buffer; //A pointer on a SBUFFER
   };
+
+  /**
+   * @brief Send an ETSI 004 control operation over the KMS route.
+   *
+   * Direct ETSI 004 associations use the original KMS-to-KMS methods. A
+   * multi-hop association cannot address the final KMS directly, therefore
+   * NEW_APP, REGISTER and FILL are wrapped in a relay-control envelope. Each
+   * intermediate KMS stores the previous hop and returns the final response
+   * over the reverse path.
+   */
+  void SendEtsi004RelayControl(
+    std::string operation,
+    std::string ksid,
+    nlohmann::json payload,
+    uint32_t destinationNodeId,
+    HttpQuery query);
+
+  /// Process or forward an ETSI 004 multi-hop control request.
+  void ProcessEtsi004RelayControlRequest(HTTPMessage header);
+
+  /// Return or forward an ETSI 004 multi-hop control response.
+  void ProcessEtsi004RelayControlResponse(HTTPMessage header);
+
+  /// Fill an ETSI 004 stream from an end-to-end RELAY_SBUFFER.
+  void FillEtsi004Relay(std::string ksid, uint32_t amount);
+
+  /// Commit or roll back the local half of a relayed ETSI 004 FILL.
+  void CompleteEtsi004RelayFill(HttpQuery query, HTTPMessage header);
   
   /**
    * @brief Help function to create relay SBuffers
@@ -708,6 +740,7 @@ private:
   Ptr<SBuffer> CreateRelaySBuffer(uint32_t srcNodeId, uint32_t dstNodeId, std::string description);
 
   std::map<std::string, Association004> m_associations004; //Associations map
+  std::set<std::string> m_etsi004FillPending; //!< Multi-hop streams with an in-flight FILL transaction
 
   Ptr<Socket> m_sinkSocket;       // Associated socket
 

@@ -21,6 +21,7 @@
 #include "json.h"
 #include <iostream>
 #include <fstream>
+#include <set>
 #include <string>
 
 #include "qkd-key-manager-system-application.h"
@@ -1892,6 +1893,8 @@ QKDKeyManagerSystemApplication::ProcessRequestKMS(HTTPMessage headerIn, Ptr<Sock
         ProcessKMSCloseRequest(headerIn, socket, ksid);
     }else if(requestType == RELAY_KEYS){
         ProcessRelayRequest(headerIn, socket);
+    }else if(requestType == ETSI_QKD_004_RELAY_CONTROL){
+        ProcessEtsi004RelayControlRequest(headerIn);
     }else
         NS_FATAL_ERROR( this << "Invalid request made to this KMS!" );
 }
@@ -1918,6 +1921,8 @@ QKDKeyManagerSystemApplication::ProcessResponseKMS(HTTPMessage headerIn, Ptr<Pac
         ProcessKMSCloseResponse(headerIn, socket);
     else if(methodType == RELAY_KEYS)
         ProcessRelayResponse(headerIn);
+    else if(methodType == ETSI_QKD_004_RELAY_CONTROL)
+        ProcessEtsi004RelayControlResponse(headerIn);
     else
       NS_FATAL_ERROR( this << "Invalid request method!" );
   }
@@ -1978,12 +1983,35 @@ QKDKeyManagerSystemApplication::ProcessOpenConnectRequest(HTTPMessage headerIn, 
             NS_ASSERT(packet);
             SendToSocketPair(socket, packet); //Respond to SAE!
 
-        }else{ //Not-Supported
-            NS_FATAL_ERROR(this << "ETSI QKD 004 is supported only for point-to-point connections");
-            return;
+        }else{
+            // Multi-hop ETSI 004: do not expose the KSID to the application
+            // until the destination KMS has created the matching association.
+            // The relay-control response will complete this pending APP query.
+            Http004AppQuery(srcSaeId, socket);
+
+            nlohmann::json controlPayload = {
+              {"Source", srcSaeId},
+              {"Destination", dstSaeId},
+              {"QoS", {
+                {"Key_chunk_size", inQos.chunkSize}
+              }}
+            };
+            HttpQuery query {};
+            query.method_type = ETSI_QKD_004_RELAY_CONTROL;
+            query.source_sae = srcSaeId;
+            query.destination_sae = dstSaeId;
+            query.ksid = ksid;
+            query.request_uri = headerIn.GetUri();
+            SendEtsi004RelayControl(
+              "new_app",
+              ksid,
+              controlPayload,
+              conn.GetDestinationKmNodeId(),
+              query);
         }
 
-        NewAppRequest(ksid); //Send NEW_APP notification
+        if(conn.GetHop() == 1)
+          NewAppRequest(ksid); //Original direct NEW_APP notification.
 
     }else{ //Request made by slave SAE!
       auto it = m_associations004.find(ksid);
@@ -1999,19 +2027,41 @@ QKDKeyManagerSystemApplication::ProcessOpenConnectRequest(HTTPMessage headerIn, 
 
       }else{
          (it->second).peerRegistered = true; //Change the sate of key stream session to active!
-          RegisterRequest(ksid); //Send REGISTER notification
-          HTTPMessage httpMessage;
-          httpMessage.CreateResponse(HTTPMessage::HttpStatus::Ok, "", {
-            {"Content-Type", "application/json; charset=utf-8"},
-            {"Request URI", headerIn.GetUri() }
-          });
-          std::string hMessage = httpMessage.ToString();
-          Ptr<Packet> packet = Create<Packet>(
-           (uint8_t*)(hMessage).c_str(),
-            hMessage.size()
-          );
-          NS_ASSERT(packet);
-          SendToSocketPair(socket, packet); //Respond to SAE!
+          if(conn.GetHop() == 1)
+          {
+            RegisterRequest(ksid); //Original direct REGISTER notification.
+            HTTPMessage httpMessage;
+            httpMessage.CreateResponse(HTTPMessage::HttpStatus::Ok, "", {
+              {"Content-Type", "application/json; charset=utf-8"},
+              {"Request URI", headerIn.GetUri() }
+            });
+            std::string hMessage = httpMessage.ToString();
+            Ptr<Packet> packet = Create<Packet>(
+             (uint8_t*)(hMessage).c_str(),
+              hMessage.size()
+            );
+            NS_ASSERT(packet);
+            SendToSocketPair(socket, packet); //Respond to SAE!
+          }
+          else
+          {
+            // Bob's OPEN_CONNECT(KSID) is acknowledged only after the master
+            // KMS has registered the remote application and started stream
+            // replenishment.
+            Http004AppQuery(srcSaeId, socket);
+            HttpQuery query {};
+            query.method_type = ETSI_QKD_004_RELAY_CONTROL;
+            query.source_sae = srcSaeId;
+            query.destination_sae = dstSaeId;
+            query.ksid = ksid;
+            query.request_uri = headerIn.GetUri();
+            SendEtsi004RelayControl(
+              "register",
+              ksid,
+              nlohmann::json::object(),
+              conn.GetDestinationKmNodeId(),
+              query);
+          }
       }
 
     }
@@ -2898,6 +2948,404 @@ QKDKeyManagerSystemApplication::ProcessRegisterResponse(HTTPMessage headerIn, Pt
     }
     HttpKMSCompleteQuery(dstKms);
 
+}
+
+void
+QKDKeyManagerSystemApplication::SendEtsi004RelayControl(
+  std::string operation,
+  std::string ksid,
+  nlohmann::json payload,
+  uint32_t destinationNodeId,
+  HttpQuery query)
+{
+  NS_LOG_FUNCTION(this << operation << ksid << destinationNodeId);
+
+  if(query.req_id.empty())
+    query.req_id = GenerateUUID();
+  if(query.source_node_id == 0)
+    query.source_node_id = GetNode()->GetId();
+
+  query.method_type = ETSI_QKD_004_RELAY_CONTROL;
+  query.operation = operation;
+  query.peerNodeId = destinationNodeId;
+  if(query.prev_hop_id == 0)
+    query.prev_hop_id = GetNode()->GetId();
+
+  QKDLocationRegisterEntry route = GetController()->GetRoute(destinationNodeId);
+  uint32_t nextHop = route.GetNextHop();
+  Ipv4Address nextHopAddress = GetPeerKmAddress(nextHop);
+  CheckSocketsKMS(nextHopAddress);
+  Ptr<Socket> sendSocket = GetSocketKMS(nextHopAddress);
+  NS_ASSERT(sendSocket);
+
+  nlohmann::json envelope = {
+    {"operation", operation},
+    {"request_id", query.req_id},
+    {"source_node_id", query.source_node_id},
+    {"destination_node_id", destinationNodeId},
+    {"previous_node_id", GetNode()->GetId()},
+    {"Key_stream_ID", ksid},
+    {"payload", payload}
+  };
+
+  std::string headerUri =
+    "http://" + GetAddressString(nextHopAddress) +
+    "/api/v1/associations/relay004/" + query.req_id;
+  HTTPMessage httpMessage;
+  httpMessage.CreateRequest(headerUri, "POST", envelope.dump());
+  std::string hMessage = httpMessage.ToString();
+  Ptr<Packet> packet = Create<Packet>(
+    reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+    hMessage.size());
+  NS_ASSERT(packet);
+
+  HttpKMSAddQuery(nextHopAddress, query);
+  HttpProxyRequestAdd(query);
+  sendSocket->Send(packet);
+  NS_LOG_FUNCTION(this << "ETSI004 relay-control request sent"
+                       << operation << query.req_id << nextHop);
+}
+
+void
+QKDKeyManagerSystemApplication::ProcessEtsi004RelayControlRequest(
+  HTTPMessage headerIn)
+{
+  NS_LOG_FUNCTION(this << headerIn.GetUri());
+
+  nlohmann::json envelope;
+  try
+  {
+    envelope = nlohmann::json::parse(headerIn.GetMessageBodyString());
+  }
+  catch(...)
+  {
+    NS_FATAL_ERROR(this << "Invalid ETSI004 relay-control JSON");
+  }
+
+  const std::string operation = envelope.value("operation", "");
+  const std::string reqId = envelope.value("request_id", "");
+  const std::string ksid = envelope.value("Key_stream_ID", "");
+  const uint32_t sourceNodeId = envelope.value("source_node_id", 0u);
+  const uint32_t destinationNodeId =
+    envelope.value("destination_node_id", 0u);
+  const uint32_t previousNodeId =
+    envelope.value("previous_node_id", 0u);
+  const nlohmann::json payload =
+    envelope.value("payload", nlohmann::json::object());
+
+  NS_ASSERT(!operation.empty());
+  NS_ASSERT(!reqId.empty());
+  NS_ASSERT(!ksid.empty());
+  NS_ASSERT(sourceNodeId);
+  NS_ASSERT(destinationNodeId);
+  NS_ASSERT(previousNodeId);
+
+  if(destinationNodeId != GetNode()->GetId())
+  {
+    // Pure control-plane proxy: the trusted repeater never creates an ETSI
+    // 004 association. It only remembers the reverse hop for this request.
+    HttpQuery query {};
+    query.method_type = ETSI_QKD_004_RELAY_CONTROL;
+    query.req_id = reqId;
+    query.prev_hop_id = previousNodeId;
+    query.request_uri = headerIn.GetUri();
+    query.peerNodeId = destinationNodeId;
+    query.source_node_id = sourceNodeId;
+    query.operation = operation;
+    query.ksid = ksid;
+
+    SendEtsi004RelayControl(
+      operation, ksid, payload, destinationNodeId, query);
+    return;
+  }
+
+  HTTPMessage::HttpStatus status = HTTPMessage::HttpStatus::Ok;
+  nlohmann::json responseBody = nlohmann::json::object();
+
+  if(operation == "new_app")
+  {
+    std::string srcSaeId = payload.value("Source", "");
+    std::string dstSaeId = payload.value("Destination", "");
+    QoS qos {};
+    ReadJsonQos(qos, payload);
+
+    auto association = m_associations004.find(ksid);
+    if(association == m_associations004.end())
+    {
+      CreateKeyStreamSession(dstSaeId, srcSaeId, qos, ksid);
+      NS_LOG_FUNCTION(this << "ETSI004 relay association created" << ksid);
+    }
+    else if(association->second.srcSaeId != dstSaeId ||
+            association->second.dstSaeId != srcSaeId)
+    {
+      status = HTTPMessage::HttpStatus::NotAcceptable;
+    }
+  }
+  else if(operation == "register")
+  {
+    auto association = m_associations004.find(ksid);
+    if(association == m_associations004.end())
+    {
+      status = HTTPMessage::HttpStatus::NotAcceptable;
+    }
+    else
+    {
+      association->second.peerRegistered = true;
+      if(association->second.srcNodeId > association->second.dstNodeId)
+        CheckEtsi004Association(ksid);
+    }
+  }
+  else if(operation == "fill")
+  {
+    auto association = m_associations004.find(ksid);
+    Ptr<SBuffer> relayBuffer = GetSBuffer(sourceNodeId, "dec");
+    if(association == m_associations004.end() || !relayBuffer ||
+       !payload.contains("keys"))
+    {
+      status = HTTPMessage::HttpStatus::NotAcceptable;
+    }
+    else
+    {
+      for(const auto& keyObject : payload["keys"])
+      {
+        const std::string keyId = keyObject.value("key_ID", "");
+        Ptr<QKDKey> key = relayBuffer->GetKey(keyId, true);
+        if(!key)
+        {
+          responseBody["keys_rejected"].push_back({{"key_ID", keyId}});
+          status = HTTPMessage::HttpStatus::NotAcceptable;
+          continue;
+        }
+        association->second.stre_buffer->InsertKeyToStreamSession(key);
+        responseBody["keys_accepted"].push_back({{"key_ID", keyId}});
+      }
+    }
+  }
+  else
+  {
+    status = HTTPMessage::HttpStatus::BadRequest;
+  }
+
+  HTTPMessage httpMessage;
+  httpMessage.CreateResponse(status, responseBody.dump(), {
+    {"Content-Type", "application/json; charset=utf-8"},
+    {"Request URI", headerIn.GetUri()}
+  });
+  std::string hMessage = httpMessage.ToString();
+  Ptr<Packet> packet = Create<Packet>(
+    reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+    hMessage.size());
+  NS_ASSERT(packet);
+
+  Ipv4Address previousAddress = GetPeerKmAddress(previousNodeId);
+  CheckSocketsKMS(previousAddress);
+  Ptr<Socket> sendSocket = GetSocketKMS(previousAddress);
+  NS_ASSERT(sendSocket);
+  sendSocket->Send(packet);
+}
+
+void
+QKDKeyManagerSystemApplication::ProcessEtsi004RelayControlResponse(
+  HTTPMessage headerIn)
+{
+  NS_LOG_FUNCTION(this << headerIn.GetRequestUri());
+
+  std::vector<std::string> uri = ReadUri(headerIn.GetRequestUri());
+  NS_ASSERT(!uri.empty());
+  const std::string reqId = uri.back();
+  HttpQuery query = GetProxyQuery(reqId);
+
+  // The first component is the KMS address embedded by CreateRequest().
+  // It identifies the FIFO used only for response dispatch/bookkeeping.
+  Ipv4Address nextHopAddress(uri[0].c_str());
+
+  if(query.prev_hop_id != GetNode()->GetId())
+  {
+    HTTPMessage response;
+    response.CreateResponse(
+      headerIn.GetStatus(),
+      headerIn.GetMessageBodyString(),
+      {
+        {"Content-Type", "application/json; charset=utf-8"},
+        {"Request URI", query.request_uri}
+      });
+    std::string hMessage = response.ToString();
+    Ptr<Packet> packet = Create<Packet>(
+      reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+      hMessage.size());
+
+    Ipv4Address previousAddress = GetPeerKmAddress(query.prev_hop_id);
+    CheckSocketsKMS(previousAddress);
+    Ptr<Socket> sendSocket = GetSocketKMS(previousAddress);
+    NS_ASSERT(sendSocket);
+    sendSocket->Send(packet);
+  }
+  else if(query.operation == "new_app")
+  {
+    Ptr<Socket> appSocket =
+      GetSocketFromHttp004AppQuery(query.source_sae);
+    nlohmann::json body;
+    if(headerIn.GetStatus() == HTTPMessage::HttpStatus::Ok)
+      body["Key_stream_ID"] = query.ksid;
+    else
+      m_associations004.erase(query.ksid);
+
+    HTTPMessage response;
+    response.CreateResponse(
+      headerIn.GetStatus(),
+      body.dump(),
+      {
+        {"Content-Type", "application/json; charset=utf-8"},
+        {"Request URI", query.request_uri}
+      });
+    std::string hMessage = response.ToString();
+    Ptr<Packet> packet = Create<Packet>(
+      reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+      hMessage.size());
+    SendToSocketPair(appSocket, packet);
+    Http004AppQueryComplete(query.source_sae);
+  }
+  else if(query.operation == "register")
+  {
+    Ptr<Socket> appSocket =
+      GetSocketFromHttp004AppQuery(query.source_sae);
+    HTTPMessage response;
+    response.CreateResponse(
+      headerIn.GetStatus(),
+      "",
+      {
+        {"Content-Type", "application/json; charset=utf-8"},
+        {"Request URI", query.request_uri}
+      });
+    std::string hMessage = response.ToString();
+    Ptr<Packet> packet = Create<Packet>(
+      reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+      hMessage.size());
+    SendToSocketPair(appSocket, packet);
+    Http004AppQueryComplete(query.source_sae);
+  }
+  else if(query.operation == "fill")
+  {
+    CompleteEtsi004RelayFill(query, headerIn);
+  }
+
+  HttpKMSCompleteQuery(nextHopAddress);
+  RemoveProxyQuery(reqId);
+}
+
+void
+QKDKeyManagerSystemApplication::FillEtsi004Relay(
+  std::string ksid,
+  uint32_t amount)
+{
+  NS_LOG_FUNCTION(this << ksid << amount);
+  if(m_etsi004FillPending.find(ksid) != m_etsi004FillPending.end())
+    return;
+
+  auto association = m_associations004.find(ksid);
+  if(association == m_associations004.end())
+    return;
+
+  uint32_t destinationNodeId = association->second.dstNodeId;
+  Ptr<SBuffer> relayBuffer = GetSBuffer(destinationNodeId, "enc");
+  Ptr<SBuffer> streamBuffer = association->second.stre_buffer;
+  if(!relayBuffer || !streamBuffer)
+  {
+    ScheduleCheckEtsi004Association(
+      Time("2s"), "CheckEtsi004Association", ksid);
+    return;
+  }
+
+  nlohmann::json payload;
+  std::vector<std::string> keyIds;
+  while(amount > 0)
+  {
+    // RELAY_SBUFFERs at both endpoints contain the same default-sized key
+    // objects. Moving a complete object preserves its identifier, allowing
+    // the destination to resolve the FILL by ID without transporting secret
+    // material in the control message.
+    Ptr<QKDKey> key = relayBuffer->GetKey(relayBuffer->GetKeySize());
+    if(!key)
+      break;
+
+    keyIds.push_back(key->GetId());
+    payload["keys"].push_back({{"key_ID", key->GetId()}});
+    streamBuffer->StoreKey(key, true);
+    streamBuffer->MarkKey(key->GetId(), QKDKey::INIT);
+
+    if(key->GetSizeInBits() >= amount)
+      amount = 0;
+    else
+      amount -= key->GetSizeInBits();
+  }
+
+  if(keyIds.empty())
+  {
+    ScheduleCheckEtsi004Association(
+      Time("2s"), "CheckEtsi004Association", ksid);
+    return;
+  }
+
+  HttpQuery query {};
+  query.method_type = ETSI_QKD_004_RELAY_CONTROL;
+  query.operation = "fill";
+  query.ksid = ksid;
+  query.keyIds = keyIds;
+  query.sBuffer = ksid;
+  m_etsi004FillPending.insert(ksid);
+  SendEtsi004RelayControl(
+    "fill", ksid, payload, destinationNodeId, query);
+
+  SBufferClientCheck(destinationNodeId);
+}
+
+void
+QKDKeyManagerSystemApplication::CompleteEtsi004RelayFill(
+  HttpQuery query,
+  HTTPMessage headerIn)
+{
+  NS_LOG_FUNCTION(this << query.ksid);
+  m_etsi004FillPending.erase(query.ksid);
+  auto association = m_associations004.find(query.ksid);
+  if(association == m_associations004.end())
+    return;
+
+  nlohmann::json responseBody;
+  try
+  {
+    responseBody = nlohmann::json::parse(
+      headerIn.GetMessageBodyString());
+  }
+  catch(...)
+  {
+    responseBody = nlohmann::json::object();
+  }
+
+  std::set<std::string> accepted;
+  if(responseBody.contains("keys_accepted"))
+  {
+    for(const auto& keyObject : responseBody["keys_accepted"])
+      accepted.insert(keyObject.value("key_ID", ""));
+  }
+
+  Ptr<SBuffer> streamBuffer = association->second.stre_buffer;
+  Ptr<SBuffer> relayBuffer =
+    GetSBuffer(association->second.dstNodeId, "enc");
+  for(const auto& keyId : query.keyIds)
+  {
+    Ptr<QKDKey> key = streamBuffer->GetKey(keyId, false);
+    if(!key)
+      continue;
+    key->SwitchToState(QKDKey::READY);
+    if(accepted.find(keyId) != accepted.end())
+      streamBuffer->InsertKeyToStreamSession(key);
+    else if(relayBuffer)
+      relayBuffer->StoreKey(key, true);
+  }
+
+  if(headerIn.GetStatus() != HTTPMessage::HttpStatus::Ok)
+    ScheduleCheckEtsi004Association(
+      Time("2s"), "CheckEtsi004Association", query.ksid);
 }
 
 void
@@ -3897,6 +4345,10 @@ QKDKeyManagerSystemApplication::FetchRequestType(std::string s)
 
     return RELAY_KEYS;
 
+  } else if(s == "relay004") {
+
+    return ETSI_QKD_004_RELAY_CONTROL;
+
   } else {
 
       NS_FATAL_ERROR(this << "Unknown Type: " << s);
@@ -4022,9 +4474,33 @@ QKDKeyManagerSystemApplication::CheckEtsi004Association(std::string ksid)
 
   if(it->second.peerRegistered &&(it->second).stre_buffer->GetStreamKeyCount() < 2)
   { 
-    //Check
-    Ptr<QBuffer> qBuffer = GetQBuffer(it->second.dstNodeId);
-    uint32_t availableKeys = qBuffer->GetBitCount();
+    QKDLocationRegisterEntry route =
+      GetController()->GetRoute(it->second.dstNodeId);
+    const bool multiHop = route.GetHop() > 1;
+
+    // A direct association reserves material from the mirrored QBUFFER of
+    // its quantum link. A multi-hop association reserves from the already
+    // established end-to-end RELAY_SBUFFER; there is deliberately no
+    // QBUFFER for a non-neighbour KMS.
+    uint32_t availableKeys {0};
+    if(multiHop)
+    {
+      if(m_etsi004FillPending.find(ksid) !=
+         m_etsi004FillPending.end())
+        return;
+
+      Ptr<SBuffer> relayBuffer =
+        GetSBuffer(it->second.dstNodeId, "enc");
+      if(relayBuffer)
+        availableKeys = relayBuffer->GetSBitCount();
+    }
+    else
+    {
+      Ptr<QBuffer> qBuffer = GetQBuffer(it->second.dstNodeId);
+      if(qBuffer)
+        availableKeys = qBuffer->GetBitCount();
+    }
+
     uint32_t availableKeyChunks = std::floor(availableKeys / it->second.qos.chunkSize);
 
     NS_LOG_FUNCTION(this << availableKeys << it->second.qos.chunkSize << availableKeyChunks);
@@ -4040,7 +4516,14 @@ QKDKeyManagerSystemApplication::CheckEtsi004Association(std::string ksid)
       ScheduleCheckEtsi004Association(Time("2s"), "CheckEtsi004Association", ksid); 
       return;
     }
-    Fill(it->second.dstNodeId, ksid, availableKeyChunks*it->second.qos.chunkSize); //Starts reservation of keys for the association
+    if(multiHop)
+      FillEtsi004Relay(
+        ksid, availableKeyChunks * it->second.qos.chunkSize);
+    else
+      Fill(
+        it->second.dstNodeId,
+        ksid,
+        availableKeyChunks * it->second.qos.chunkSize);
 
   }else if(!it->second.peerRegistered)
     NS_LOG_ERROR(this << "peer not registered " << ksid);
@@ -4094,7 +4577,12 @@ QKDKeyManagerSystemApplication::CreateKeyStreamSession(
     NS_LOG_FUNCTION(this << srcSaeId << dstSaeId << ksid);
 
     Ptr<SBuffer> SBufferStream = CreateObject<SBuffer>(SBuffer::STREAM_SBUFFER, inQos.chunkSize); 
-    SBufferStream->Initialize();  
+    SBufferStream->Initialize();
+    // SBuffer::DoInitialize() applies the global relay-buffer defaults,
+    // including SDefaultKeySize. Restore the chunk size negotiated by
+    // OPEN_CONNECT so a stream created for (for example) 256-bit VPN keys
+    // does not silently expose the 2048-bit relay-storage block size.
+    SBufferStream->SetKeySize(inQos.chunkSize);
     SBufferStream->SetDescription ("(STREAM)"); 
     SBufferStream->SetIndex( m_qbuffersVector.size() ); 
     uint32_t dstNodeId = GetController()->GetRoute(dstSaeId).GetDestinationKmNodeId();

@@ -266,6 +266,8 @@ namespace ns3 {
 
       uint32_t    m_currentStreamIndex; //!< The last index when the S-Buffer is used for key stream sessions.
 
+      bool        m_streamIndexInitialized; //!< True after the first stream chunk index has been assigned.
+
       uint32_t    m_notReadyKeyCount; //!< Number of keys stored which are not in READY state
 
       uint32_t    m_notReadyBitCount; //!< Amount of key material stored that are not in READY state
