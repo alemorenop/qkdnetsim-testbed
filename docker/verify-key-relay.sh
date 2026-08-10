@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end verification of the "key relay" scenario (9 hosts).
+# End-to-end verification of the "key relay" scenario (9 containers).
 # Usage: ./docker/verify-key-relay.sh [sample_seconds]
 #   (run from contrib/qkdnetsim, with the stack already up)
 # tcpdump samples only exist temporarily inside the containers; this script
@@ -12,12 +12,20 @@ set -uo pipefail
 export MSYS_NO_PATHCONV=1
 COMPOSE="docker compose -f docker/docker-compose.key-relay.yml"
 CAPTURE_S="${1:-10}"
+READY_TIMEOUT_S="${READY_TIMEOUT_S:-120}"
 failures=0
 
 log_count() {
     local service="$1" pattern="$2" container_id
     container_id=$($COMPOSE ps -q "$service")
     docker exec "$container_id" grep -cE "$pattern" /tmp/qkdnetsim.log 2>/dev/null || true
+}
+
+common_served_key_count() {
+    local alice_ids bob_ids
+    alice_ids=$(docker exec qkd-relay-kms-alice sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log 2>/dev/null | sort -u)
+    bob_ids=$(docker exec qkd-relay-kms-bob sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log 2>/dev/null | sort -u)
+    comm -12 <(printf '%s\n' "$alice_ids") <(printf '%s\n' "$bob_ids") | sed '/^$/d' | wc -l
 }
 
 echo "=== 1) Status of the 9 containers ==="
@@ -39,17 +47,28 @@ for service in $($COMPOSE config --services); do
 done
 echo
 
-echo "=== 2) Expected activity per host (current run's logs) ==="
+# The two physical QKD links become ready before the end-to-end relay buffer.
+# On a cold start the first 6400-bit application key may therefore take tens
+# of seconds to traverse both hops. Wait for the functional condition instead
+# of treating that normal warm-up as a startup failure.
+echo "Waiting up to ${READY_TIMEOUT_S}s for the first key served at both ends..."
+deadline=$((SECONDS + READY_TIMEOUT_S))
+while [ "$(common_served_key_count)" -eq 0 ] && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 2
+done
+echo
+
+echo "=== 2) Expected activity per container (current run's logs) ==="
 declare -A PATTERNS=(
-    [host1_pp_alice]="Key delivered to KMS Alice"
-    [host2_pp_relay_a]="Key delivered to KMS Relay"
-    [host3_pp_relay_b]="Key delivered to KMS Relay"
-    [host4_pp_bob]="Key delivered to KMS Bob"
-    [host5_kms_alice]="stores key|serves key"
-    [host6_kms_relay]="stores key"
-    [host7_kms_bob]="stores key|serves key"
-    [host8_etsi014_alice]="GET_KEY request"
-    [host9_etsi014_bob]="GET_KEY request"
+    [pp_alice]="Key delivered to KMS Alice"
+    [pp_relay_a]="Key delivered to KMS Relay"
+    [pp_relay_b]="Key delivered to KMS Relay"
+    [pp_bob]="Key delivered to KMS Bob"
+    [kms_alice]="stores key|serves key"
+    [kms_trusted]="stores key"
+    [kms_bob]="stores key|serves key"
+    [etsi014_alice]="GET_KEY request"
+    [etsi014_bob]="GET_KEY request"
 )
 
 for service in "${!PATTERNS[@]}"; do
@@ -65,7 +84,7 @@ done
 echo
 
 echo "=== 3) Confirm that KMS Alice and KMS Bob SERVE keys to the ETSI014 apps (not just relay/store) ==="
-for service in host5_kms_alice host7_kms_bob; do
+for service in kms_alice kms_bob; do
     count=$(log_count "$service" "serves key")
     echo "  $service: $count key(s) served since startup"
     if [ "$count" -eq 0 ]; then
@@ -73,13 +92,11 @@ for service in host5_kms_alice host7_kms_bob; do
     fi
 done
 
-alice_ids=$(docker exec qkd-relay-host5 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
-bob_ids=$(docker exec qkd-relay-host7 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
-common_ids=$(comm -12 <(printf '%s\n' "$alice_ids") <(printf '%s\n' "$bob_ids") | sed '/^$/d' | wc -l)
+common_ids=$(common_served_key_count)
 if [ "$common_ids" -gt 0 ]; then
-    echo "  [OK] HOST5 and HOST7 served $common_ids identical keyId(s)"
+    echo "  [OK] KMS Alice and KMS Bob served $common_ids identical keyId(s)"
 else
-    echo "  [FAIL] HOST5 and HOST7 have not served any common keyId"
+    echo "  [FAIL] KMS Alice and KMS Bob have not served any common keyId"
     failures=$((failures + 1))
 fi
 echo
@@ -114,10 +131,10 @@ capture() {
 #
 # Run the 4 samples IN PARALLEL so they share the same time window.
 capture_pids=()
-capture qkd-relay-host1 "tcp port 80" "01_host1_pp_a_kms_alice.pcap"   "HOST1 -> HOST5 (raw key delivery, post-processing -> KMS Alice)" & capture_pids+=("$!")
-capture qkd-relay-host5 "tcp port 80 or tcp port 8080" "02_host5_kms_alice_relay.pcap" "HOST5 -> HOST6 (relay KMS Alice -> KMS Relay)" & capture_pids+=("$!")
-capture qkd-relay-host6 "tcp port 80 or tcp port 8080" "03_host6_kms_relay_bob.pcap"   "HOST6 -> HOST7 (relay KMS Relay -> KMS Bob)" & capture_pids+=("$!")
-capture qkd-relay-host8 "tcp port 8081" "04_host8_alice_bob_app.pcap" "HOST8 -> HOST9 (encrypted ETSI014 Alice <-> Bob traffic, the final result)" & capture_pids+=("$!")
+capture qkd-relay-pp-alice "tcp port 80" "01_pp_alice_kms_alice.pcap"   "PP Alice -> KMS Alice (raw key delivery, post-processing -> KMS Alice)" & capture_pids+=("$!")
+capture qkd-relay-kms-alice "tcp port 80 or tcp port 8080" "02_kms_alice_relay.pcap" "KMS Alice -> trusted KMS (relay KMS Alice -> KMS Relay)" & capture_pids+=("$!")
+capture qkd-relay-kms-trusted "tcp port 80 or tcp port 8080" "03_kms_trusted_bob.pcap"   "trusted KMS -> KMS Bob (relay KMS Relay -> KMS Bob)" & capture_pids+=("$!")
+capture qkd-relay-etsi014-alice "tcp port 8081" "04_etsi014_alice_bob.pcap" "ETSI 014 Alice <-> Bob (encrypted ETSI014 Alice <-> Bob traffic, the final result)" & capture_pids+=("$!")
 for pid in "${capture_pids[@]}"; do
     if ! wait "$pid"; then
         failures=$((failures + 1))
@@ -125,25 +142,25 @@ for pid in "${capture_pids[@]}"; do
 done
 echo
 
-relay_payload=$(docker exec qkd-relay-host5 tcpdump -nn -A -r /tmp/02_host5_kms_alice_relay.pcap 2>/dev/null)
+relay_payload=$(docker exec qkd-relay-kms-alice tcpdump -nn -A -r /tmp/02_kms_alice_relay.pcap 2>/dev/null)
 if ! grep -q 'skey_create' <<<"$relay_payload"; then
     echo "  [INFO] no new SKEY_CREATE negotiation happened during this window"
     echo "         (the common keyId already served by both KMS instances already confirms the relay)"
 elif grep -qE '"ekey":"[^"]+' <<<"$relay_payload"; then
     echo "  [OK] SKEY_CREATE observed with a non-empty ekey"
 else
-    echo "  [FAIL] SKEY_CREATE observed with an empty ekey on HOST5 -> HOST6"
+    echo "  [FAIL] SKEY_CREATE observed with an empty ekey on KMS Alice -> trusted KMS"
     failures=$((failures + 1))
 fi
 
-app_packets=$(docker exec qkd-relay-host8 tcpdump -nn -r /tmp/04_host8_alice_bob_app.pcap 2>/dev/null | wc -l)
+app_packets=$(docker exec qkd-relay-etsi014-alice tcpdump -nn -r /tmp/04_etsi014_alice_bob.pcap 2>/dev/null | wc -l)
 if [ "$app_packets" -le 3 ]; then
     echo "  [INFO] parallel application sample empty; retrying sequentially for 6s"
-    docker exec qkd-relay-host8 rm -f /tmp/04_host8_alice_bob_app.pcap
-    docker exec qkd-relay-host8 timeout 6 tcpdump -U -i any \
-        -w /tmp/04_host8_alice_bob_app.pcap 'tcp port 8081' >/dev/null 2>&1
-    app_packets=$(docker exec qkd-relay-host8 tcpdump -nn \
-        -r /tmp/04_host8_alice_bob_app.pcap 2>/dev/null | wc -l)
+    docker exec qkd-relay-etsi014-alice rm -f /tmp/04_etsi014_alice_bob.pcap
+    docker exec qkd-relay-etsi014-alice timeout 6 tcpdump -U -i any \
+        -w /tmp/04_etsi014_alice_bob.pcap 'tcp port 8081' >/dev/null 2>&1
+    app_packets=$(docker exec qkd-relay-etsi014-alice tcpdump -nn \
+        -r /tmp/04_etsi014_alice_bob.pcap 2>/dev/null | wc -l)
 fi
 if [ "$app_packets" -gt 3 ]; then
     echo "  [OK] encrypted application traffic: $app_packets packet(s) captured"
@@ -154,7 +171,7 @@ fi
 echo
 
 echo "=== 5) Text sample of the encrypted Alice<->Bob traffic ==="
-docker exec qkd-relay-host8 timeout 8 tcpdump -i any -nn -c 8 'tcp port 8081' 2>/dev/null
+docker exec qkd-relay-etsi014-alice timeout 8 tcpdump -i any -nn -c 8 'tcp port 8081' 2>/dev/null
 echo
 
 if [ "$failures" -ne 0 ]; then

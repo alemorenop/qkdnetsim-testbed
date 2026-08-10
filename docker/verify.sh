@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end verification of the 6-host point-to-point scenario.
+# End-to-end verification of the 6-container point-to-point scenario.
 # Usage: ./docker/verify.sh [capture_seconds]
 
 set -uo pipefail
@@ -16,7 +16,7 @@ log_count() {
 }
 
 echo "=== 1) Status of the 6 containers ==="
-docker ps --filter "name=qkd-host" --format "table {{.Names}}\t{{.Status}}"
+docker ps --filter "name=qkd-p2p-" --format "table {{.Names}}\t{{.Status}}"
 echo
 
 for service in $($COMPOSE config --services); do
@@ -34,14 +34,14 @@ for service in $($COMPOSE config --services); do
 done
 echo
 
-echo "=== 2) Expected activity per host ==="
+echo "=== 2) Expected activity per container ==="
 declare -A PATTERNS=(
-    [host1_pp_alice]="Key delivered to KMS Alice"
-    [host2_pp_bob]="Key delivered to KMS Bob"
-    [host3_kms_alice]="stores key|serves key"
-    [host4_kms_bob]="stores key|serves key"
-    [host5_etsi014_alice]="GET_KEY request to KMS Alice"
-    [host6_etsi014_bob]="GET_KEY request to KMS Bob"
+    [pp_alice]="Key delivered to KMS Alice"
+    [pp_bob]="Key delivered to KMS Bob"
+    [kms_alice]="stores key|serves key"
+    [kms_bob]="stores key|serves key"
+    [etsi014_alice]="GET_KEY request to KMS Alice"
+    [etsi014_bob]="GET_KEY request to KMS Bob"
 )
 
 for service in "${!PATTERNS[@]}"; do
@@ -57,8 +57,8 @@ done
 echo
 
 echo "=== 3) Same key served to Alice and Bob ==="
-alice_ids=$(docker exec qkd-host3 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
-bob_ids=$(docker exec qkd-host4 sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
+alice_ids=$(docker exec qkd-p2p-kms-alice sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
+bob_ids=$(docker exec qkd-p2p-kms-bob sed -n 's/.*serves key.*keyId=\([^ ]*\).*/\1/p' /tmp/qkdnetsim.log | sort -u)
 common_ids=$(comm -12 <(printf '%s\n' "$alice_ids") <(printf '%s\n' "$bob_ids") | sed '/^$/d')
 if [ -n "$common_ids" ]; then
     echo "  [OK] common keyId: $(printf '%s' "$common_ids" | tr '\n' ' ')"
@@ -76,23 +76,23 @@ echo "=== 4) Encrypted Alice-Bob traffic (${CAPTURE_S}s) ==="
 # denied" (exit 1, zero packets), unrelated to whether there is real
 # traffic. Remove the file before each attempt so it never depends on its
 # previous state.
-docker exec qkd-host5 rm -f /tmp/p2p-verify-app.pcap
-docker exec qkd-host5 timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
+docker exec qkd-p2p-etsi014-alice rm -f /tmp/p2p-verify-app.pcap
+docker exec qkd-p2p-etsi014-alice timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
     -w /tmp/p2p-verify-app.pcap 'tcp port 8081' >/dev/null 2>&1
 
-app_packets=$(docker exec qkd-host5 tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
+app_packets=$(docker exec qkd-p2p-etsi014-alice tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
 # Steps 1-3 (grepping logs that already have thousands of lines) can take a
 # few seconds, so this capture window may start right in a gap between
 # bursts of the periodic send. A retry covers that case without flagging as
 # a failure a scenario that is actually sending traffic.
 if [ "$app_packets" -le 3 ]; then
     echo "  [INFO] empty sample; retrying for ${CAPTURE_S}s"
-    docker exec qkd-host5 rm -f /tmp/p2p-verify-app.pcap
-    docker exec qkd-host5 timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
+    docker exec qkd-p2p-etsi014-alice rm -f /tmp/p2p-verify-app.pcap
+    docker exec qkd-p2p-etsi014-alice timeout "$CAPTURE_S" tcpdump -U -i any -s 0 \
         -w /tmp/p2p-verify-app.pcap 'tcp port 8081' >/dev/null 2>&1
-    app_packets=$(docker exec qkd-host5 tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
+    app_packets=$(docker exec qkd-p2p-etsi014-alice tcpdump -nn -r /tmp/p2p-verify-app.pcap 2>/dev/null | wc -l)
 fi
-wire_text=$(docker exec qkd-host5 tcpdump -nn -A -s 0 -r /tmp/p2p-verify-app.pcap 2>/dev/null)
+wire_text=$(docker exec qkd-p2p-etsi014-alice tcpdump -nn -A -s 0 -r /tmp/p2p-verify-app.pcap 2>/dev/null)
 if [ "$app_packets" -gt 3 ]; then
     echo "  [OK] $app_packets application packets captured"
 else

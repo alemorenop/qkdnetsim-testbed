@@ -13,24 +13,24 @@ compose=(
     -f docker/docker-compose.vpn.yml
 )
 services=(
-    host1_pp_alice
-    host2_pp_bob
-    host3_kms_alice
-    host4_kms_bob
-    host5_vpn_alice
-    host6_vpn_bob
+    pp_alice
+    pp_bob
+    kms_alice
+    kms_bob
+    vpn_alice
+    vpn_bob
 )
 containers=(
-    qkd-vpn-host1
-    qkd-vpn-host2
-    qkd-vpn-host3
-    qkd-vpn-host4
-    qkd-vpn-host5
-    qkd-vpn-host6
+    qkd-p2p-vpn-pp-alice
+    qkd-p2p-vpn-pp-bob
+    qkd-p2p-vpn-kms-alice
+    qkd-p2p-vpn-kms-bob
+    qkd-p2p-vpn-alice
+    qkd-p2p-vpn-bob
 )
 
 cleanup() {
-    "$docker_bin" exec qkd-vpn-host5 sh -c \
+    "$docker_bin" exec qkd-p2p-vpn-alice sh -c \
         "rm -f '$capture' /tmp/qkd-vpn-tcpdump.log" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -77,18 +77,18 @@ assert_peer_state_matches() {
     local alice_ksid bob_ksid alice_index bob_index alice_key_id bob_key_id
     local alice_fingerprint bob_fingerprint
 
-    alice_generation=$(state_value qkd-vpn-host5 generation)
-    bob_generation=$(state_value qkd-vpn-host6 generation)
-    alice_interface=$(state_value qkd-vpn-host5 qkd_interface)
-    bob_interface=$(state_value qkd-vpn-host6 qkd_interface)
-    alice_ksid=$(state_value qkd-vpn-host5 ksid)
-    bob_ksid=$(state_value qkd-vpn-host6 ksid)
-    alice_index=$(state_value qkd-vpn-host5 key_index)
-    bob_index=$(state_value qkd-vpn-host6 key_index)
-    alice_key_id=$(state_value qkd-vpn-host5 key_id)
-    bob_key_id=$(state_value qkd-vpn-host6 key_id)
-    alice_fingerprint=$(state_value qkd-vpn-host5 key_fingerprint)
-    bob_fingerprint=$(state_value qkd-vpn-host6 key_fingerprint)
+    alice_generation=$(state_value qkd-p2p-vpn-alice generation)
+    bob_generation=$(state_value qkd-p2p-vpn-bob generation)
+    alice_interface=$(state_value qkd-p2p-vpn-alice qkd_interface)
+    bob_interface=$(state_value qkd-p2p-vpn-bob qkd_interface)
+    alice_ksid=$(state_value qkd-p2p-vpn-alice ksid)
+    bob_ksid=$(state_value qkd-p2p-vpn-bob ksid)
+    alice_index=$(state_value qkd-p2p-vpn-alice key_index)
+    bob_index=$(state_value qkd-p2p-vpn-bob key_index)
+    alice_key_id=$(state_value qkd-p2p-vpn-alice key_id)
+    bob_key_id=$(state_value qkd-p2p-vpn-bob key_id)
+    alice_fingerprint=$(state_value qkd-p2p-vpn-alice key_fingerprint)
+    bob_fingerprint=$(state_value qkd-p2p-vpn-bob key_fingerprint)
 
     [ "$alice_interface" = "$expected_interface" ] &&
         [ "$bob_interface" = "$expected_interface" ] ||
@@ -115,10 +115,10 @@ assert_peer_state_matches() {
 
 assert_kms_served_etsi014_key() {
     local key_id="$1"
-    "$docker_bin" logs qkd-vpn-host3 2>&1 |
+    "$docker_bin" logs qkd-p2p-vpn-kms-alice 2>&1 |
         grep "serves key.*keyId=${key_id}" >/dev/null ||
         fail "KMS Alice did not report serving ETSI 014 key_ID=$key_id"
-    "$docker_bin" logs qkd-vpn-host4 2>&1 |
+    "$docker_bin" logs qkd-p2p-vpn-kms-bob 2>&1 |
         grep "serves key.*keyId=${key_id}" >/dev/null ||
         fail "KMS Bob did not report serving ETSI 014 key_ID=$key_id"
 }
@@ -131,16 +131,16 @@ assert_current_ike_sa() {
 }
 
 echo "=== 1) Waiting for the initial QKD-backed VPN ==="
-wait_for_health qkd-vpn-host5
-wait_for_health qkd-vpn-host6
+wait_for_health qkd-p2p-vpn-alice
+wait_for_health qkd-p2p-vpn-bob
 assert_running_without_restarts
 initial_generation=$(assert_peer_state_matches)
 [ "$initial_generation" -ge 1 ] ||
     fail "the first committed generation was not reached"
-assert_current_ike_sa qkd-vpn-host5 "$initial_generation"
-assert_current_ike_sa qkd-vpn-host6 "$initial_generation"
+assert_current_ike_sa qkd-p2p-vpn-alice "$initial_generation"
+assert_current_ike_sa qkd-p2p-vpn-bob "$initial_generation"
 if [ "$expected_interface" = "014" ]; then
-    initial_key_id=$(state_value qkd-vpn-host5 key_id)
+    initial_key_id=$(state_value qkd-p2p-vpn-alice key_id)
     assert_kms_served_etsi014_key "$initial_key_id"
     echo "[OK] six containers are stable; generation $initial_generation uses the same ETSI 014 key_ID and fingerprint"
 else
@@ -153,8 +153,8 @@ target_generation=$((initial_generation + 1))
 deadline=$((SECONDS + rotation_timeout))
 while (( SECONDS < deadline )); do
     assert_running_without_restarts
-    alice_generation=$(state_value qkd-vpn-host5 generation)
-    bob_generation=$(state_value qkd-vpn-host6 generation)
+    alice_generation=$(state_value qkd-p2p-vpn-alice generation)
+    bob_generation=$(state_value qkd-p2p-vpn-bob generation)
     if [ "$alice_generation" -ge "$target_generation" ] &&
         [ "$bob_generation" -ge "$target_generation" ]; then
         break
@@ -165,10 +165,10 @@ done
 current_generation=$(assert_peer_state_matches)
 [ "$current_generation" -ge "$target_generation" ] ||
     fail "no committed rotation within ${rotation_timeout}s (still at generation $current_generation)"
-assert_current_ike_sa qkd-vpn-host5 "$current_generation"
-assert_current_ike_sa qkd-vpn-host6 "$current_generation"
+assert_current_ike_sa qkd-p2p-vpn-alice "$current_generation"
+assert_current_ike_sa qkd-p2p-vpn-bob "$current_generation"
 if [ "$expected_interface" = "014" ]; then
-    current_key_id=$(state_value qkd-vpn-host5 key_id)
+    current_key_id=$(state_value qkd-p2p-vpn-alice key_id)
     assert_kms_served_etsi014_key "$current_key_id"
     echo "[OK] both peers committed generation $current_generation with ETSI 014 key_ID=$current_key_id as a new IKE_SA"
 else
@@ -178,12 +178,12 @@ fi
 echo
 echo "=== 3) Sending real traffic and checking the outer interface ==="
 cleanup
-data_dev=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+data_dev=$("$docker_bin" exec qkd-p2p-vpn-alice sh -c \
     "ip route get 192.168.56.6 | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -n1" |
     tr -d '\r')
 [ -n "$data_dev" ] || fail "could not resolve Alice's VPN data interface"
 
-"$docker_bin" exec qkd-vpn-host5 sh -c "
+"$docker_bin" exec qkd-p2p-vpn-alice sh -c "
     timeout 7 tcpdump -Z root -U -Q out -i '$data_dev' -s 128 \
         -w '$capture' 'host 192.168.56.6 and (ip proto 50 or icmp)' \
         >/tmp/qkd-vpn-tcpdump.log 2>&1 &
@@ -194,10 +194,10 @@ data_dev=$("$docker_bin" exec qkd-vpn-host5 sh -c \
     test -s '$capture'
 " || fail "ping or packet capture failed"
 
-esp_packets=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+esp_packets=$("$docker_bin" exec qkd-p2p-vpn-alice sh -c \
     "tcpdump -nn -r '$capture' 'ip proto 50' 2>/dev/null | wc -l" |
     tr -d '\r ')
-plaintext_icmp=$("$docker_bin" exec qkd-vpn-host5 sh -c \
+plaintext_icmp=$("$docker_bin" exec qkd-p2p-vpn-alice sh -c \
     "tcpdump -nn -r '$capture' 'icmp' 2>/dev/null | wc -l" |
     tr -d '\r ')
 [ "$esp_packets" -gt 0 ] || fail "no outbound ESP traffic was captured"
@@ -206,7 +206,7 @@ plaintext_icmp=$("$docker_bin" exec qkd-vpn-host5 sh -c \
 echo "[OK] ping succeeded; outer traffic contained ESP and no plaintext ICMP"
 
 cleanup
-"$docker_bin" exec qkd-vpn-host5 sh -c "test ! -e '$capture'" ||
+"$docker_bin" exec qkd-p2p-vpn-alice sh -c "test ! -e '$capture'" ||
     fail "temporary capture cleanup failed"
 trap - EXIT
 

@@ -1,20 +1,20 @@
 /*
- * HOST3 - KMS ALICE
+ * Point-to-point KMS ALICE
  *
  * A single real node with three interfaces bridged to the real world:
- *   --devPP   / --myIpPP    link to HOST1 (post-processing Alice)
- *   --devKms  / --myIpKms   link to HOST4 (KMS Bob)          [relay/transform_keys, port 8080]
- *   --devEtsi / --myIpEtsi  link to HOST5 (ETSI014 Alice)    [GET_KEY, port 80]
+ *   --devPP   / --myIpPP    link to P2P_PP_ALICE (post-processing Alice)
+ *   --devKms  / --myIpKms   link to P2P_KMS_BOB (KMS Bob)          [relay/transform_keys, port 8080]
+ *   --devEtsi / --myIpEtsi  link to P2P_ETSI014_ALICE (ETSI014 Alice)    [GET_KEY, port 80]
  *
- * "KMS Bob" (HOST4) is NOT instantiated here: only an empty local Node
+ * "KMS Bob" (P2P_KMS_BOB) is NOT instantiated here: only an empty local Node
  * (kmsBobHandle) is created, which serves as an internal identifier (GetId())
  * for the QKDControl/QKDKeyManagerSystemApplication structures. The real
  * relay traffic goes over --peerKmsBobIp on top of EmuFdNetDevice.
  *
  * Contract shared with the other VMs (must match exactly):
- *   ppAliceId   -> must match the "SetId" used by HOST1
- *   etsiAliceId -> must match the "appId" used by HOST5
- *   etsiBobId   -> must match the "appId" used by HOST6
+ *   ppAliceId   -> must match the "SetId" used by P2P_PP_ALICE
+ *   etsiAliceId -> must match the "appId" used by P2P_ETSI014_ALICE
+ *   etsiBobId   -> must match the "appId" used by P2P_ETSI014_BOB
  */
 
 #include "ns3/core-module.h"
@@ -33,7 +33,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("HOST3_KMS_ALICE");
+NS_LOG_COMPONENT_DEFINE("P2P_KMS_ALICE_KMS_ALICE");
 
 static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
@@ -68,12 +68,12 @@ main(int argc, char* argv[])
     std::string myIpEtsi = "192.168.35.3";
 
     // ---- Peers (real IPs of the other VMs) ----
-    std::string peerKmsBobIp = "192.168.34.4"; // HOST4, KM-KM link
+    std::string peerKmsBobIp = "192.168.34.4"; // P2P_KMS_BOB, KM-KM link
 
     // ---- Identifier contract shared between VMs ----
-    std::string ppAliceId   = "aaaaaaaa-0000-0000-0000-000000000001"; // HOST1's module
-    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // HOST5's app
-    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // HOST6's app
+    std::string ppAliceId   = "aaaaaaaa-0000-0000-0000-000000000001"; // P2P_PP_ALICE's module
+    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // P2P_ETSI014_ALICE's app
+    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // P2P_ETSI014_BOB's app
 
     // ---- Q-Buffer configuration (same values as in the examples) ----
     uint32_t qbMin = 1024;
@@ -84,16 +84,16 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devPP", "Real NIC toward HOST1", devPP);
-    cmd.AddValue("devKms", "Real NIC toward HOST4", devKms);
-    cmd.AddValue("devEtsi", "Real NIC toward HOST5", devEtsi);
-    cmd.AddValue("myIpPP", "Local IP on the link toward HOST1", myIpPP);
-    cmd.AddValue("myIpKms", "Local IP on the link toward HOST4", myIpKms);
-    cmd.AddValue("myIpEtsi", "Local IP on the link toward HOST5", myIpEtsi);
-    cmd.AddValue("peerKmsBobIp", "Real IP of HOST4 (KMS Bob)", peerKmsBobIp);
-    cmd.AddValue("ppAliceId", "UUID of HOST1's post-processing module", ppAliceId);
-    cmd.AddValue("etsiAliceId", "UUID of HOST5's ETSI014 app", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID of HOST6's ETSI014 app", etsiBobId);
+    cmd.AddValue("devPP", "Real NIC toward P2P_PP_ALICE", devPP);
+    cmd.AddValue("devKms", "Real NIC toward P2P_KMS_BOB", devKms);
+    cmd.AddValue("devEtsi", "Real NIC toward P2P_ETSI014_ALICE", devEtsi);
+    cmd.AddValue("myIpPP", "Local IP on the link toward P2P_PP_ALICE", myIpPP);
+    cmd.AddValue("myIpKms", "Local IP on the link toward P2P_KMS_BOB", myIpKms);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward P2P_ETSI014_ALICE", myIpEtsi);
+    cmd.AddValue("peerKmsBobIp", "Real IP of P2P_KMS_BOB (KMS Bob)", peerKmsBobIp);
+    cmd.AddValue("ppAliceId", "UUID of P2P_PP_ALICE's post-processing module", ppAliceId);
+    cmd.AddValue("etsiAliceId", "UUID of P2P_ETSI014_ALICE's ETSI014 app", etsiAliceId);
+    cmd.AddValue("etsiBobId", "UUID of P2P_ETSI014_BOB's ETSI014 app", etsiBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -102,7 +102,7 @@ main(int argc, char* argv[])
     // "master" of each KMS-KMS pair by comparing GetNode()->GetId() >
     // dstNodeId (see ProcessRequest/SBufferClientCheck) - that "master" is the
     // one that triggers replenishment of the transformed-key buffer. With
-    // HOST3 as "master" and HOST4 (host4_kms_bob.cc, which creates its real
+    // P2P_KMS_ALICE as "master" and P2P_KMS_BOB (kms_bob.cc, which creates its real
     // node first, without this trick) as "slave", exactly one side ends up in
     // each role.
     Ptr<Node> kmsBobHandle = CreateObject<Node>();
@@ -128,10 +128,10 @@ main(int argc, char* argv[])
     Ptr<QKDControl> control = QLinkHelper.InstallQKDNController(node);
     QLinkHelper.ConfigureQBuffers({control}, qbMin, qbThr, qbMax, qbDefaultKeyBits);
 
-    // The KMS listens on port 80 on the interface facing HOST4/HOST5 (in this
+    // The KMS listens on port 80 on the interface facing P2P_KMS_BOB/P2P_ETSI014_ALICE (in this
     // point-to-point experiment, a single "public" address is enough for the
-    // KMS; we use the interface toward HOST4 for relay requests and the one
-    // toward HOST5 for GET_KEY, both served by the same KMS application).
+    // KMS; we use the interface toward P2P_KMS_BOB for relay requests and the one
+    // toward P2P_ETSI014_ALICE for GET_KEY, both served by the same KMS application).
     QAHelper.InstallKeyManager(node, Ipv4Address(myIpKms.c_str()), 80, control);
     Ptr<QKDKeyManagerSystemApplication> kms = control->GetKeyManagerSystemApplication(node);
 
@@ -157,26 +157,26 @@ main(int argc, char* argv[])
         "kms-bob"                               // dstKmId (descriptive only)
     ));
 
-    // HOST1's post-processing module feeds the buffer used to reach KMS Bob
+    // P2P_PP_ALICE's post-processing module feeds the buffer used to reach KMS Bob
     kms->RegisterQKDModule(kmsBobId, ppAliceId);
 
-    // Register the ETSI014 app pair (HOST5 <-> HOST6); from KMS Alice's point
-    // of view, the remote app (HOST6) is reached "via KMS Bob"
+    // Register the ETSI014 app pair (P2P_ETSI014_ALICE <-> P2P_ETSI014_BOB); from KMS Alice's point
+    // of view, the remote app (P2P_ETSI014_BOB) is reached "via KMS Bob"
     control->RegisterQKDApplicationPair(etsiAliceId, etsiBobId, kmsBobHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST3] KMS Alice stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[P2P_KMS_ALICE] KMS Alice stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST3] KMS Alice serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[P2P_KMS_ALICE] KMS Alice serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST3] KMS Alice listening" << std::endl;
+                         std::cout << "[P2P_KMS_ALICE] KMS Alice listening" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

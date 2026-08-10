@@ -68,7 +68,7 @@ exec > >(tee -a /tmp/qkdnetsim.log) 2>&1
 # EmuFdNetDevice opens the Docker veth immediately after the kernel addresses
 # above are flushed. Give that interface state a short, deterministic settling
 # period when requested by the scenario. Unlike the old random jitter, this
-# does not change the dependency order between hosts.
+# does not change the dependency order between containers.
 if [ -n "${NETWORK_SETTLE_MS:-}" ] && [ "${NETWORK_SETTLE_MS}" -gt 0 ] 2>/dev/null; then
     settle_s=$(awk "BEGIN { printf \"%.3f\", ${NETWORK_SETTLE_MS}/1000 }")
     echo "[entrypoint] waiting ${NETWORK_SETTLE_MS}ms to stabilize interfaces"

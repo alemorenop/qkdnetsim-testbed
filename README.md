@@ -4,6 +4,14 @@ This repository is a testbed built on top of **QKDNetSim** (see the original pro
 
 ## Scenarios
 
+The diagrams and tables use `H1`–`H9` as compact deployment identifiers. Each
+identifier represents a Docker container, but its architectural role may be
+an ns-3 node, a KMS node, a synthetic QKD application, or a native Linux VPN
+endpoint. Internal names are role-based as well: for example, Compose uses
+`kms_trusted`, the corresponding container is `qkd-relay-kms-trusted`, the
+binary is `relay_kms_trusted`, and its log marker is
+`[RELAY_KMS_TRUSTED]`.
+
 ### 1. Point-to-point — direct Alice–Bob link (`examples/point-to-point/`)
 
 Container-based adaptation of the network emulation experiment shown in Fig. 3 of:
@@ -14,24 +22,16 @@ The paper simulates both ends of every link inside a single ns-3 process. In thi
 
 The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob ETSI 014 applications. Alice and Bob communicate directly, without an intermediate node.
 
-```
-HOST1 (post-processing Alice) ──sifting──> HOST2 (post-processing Bob)
-        │ key delivery                            key delivery │
-        v                                                       v
-HOST3 (KMS Alice) <────────── transform_keys ──────────> HOST4 (KMS Bob)
-        │ GET_KEY (ETSI 014)                    GET_KEY (ETSI 014) │
-        v                                                       v
-HOST5 (ETSI 014 Alice) ─────── encrypted traffic ─────> HOST6 (ETSI 014 Bob)
-```
+![Point-to-point QKDNetSim testbed architecture](diagrams/point-to-point.svg)
 
-| Host | Role | IPs (network ↔ peer) |
+| Node ID | Container role | IPs (network ↔ peer) |
 |---|---|---|
-| HOST1 | post-processing Alice | 192.168.11.1 (↔H2), 192.168.13.1 (↔H3) |
-| HOST2 | post-processing Bob | 192.168.11.2 (↔H1), 192.168.24.2 (↔H4) |
-| HOST3 | KMS Alice | 192.168.13.3 (↔H1), 192.168.34.3 (↔H4), 192.168.35.3 (↔H5) |
-| HOST4 | KMS Bob | 192.168.24.4 (↔H2), 192.168.34.4 (↔H3), 192.168.46.4 (↔H6) |
-| HOST5 | ETSI014 Alice | 192.168.35.5 (↔H3), 192.168.56.5 (↔H6) |
-| HOST6 | ETSI014 Bob | 192.168.46.6 (↔H4), 192.168.56.6 (↔H5) |
+| H1 | post-processing Alice (ns-3 node) | 192.168.11.1 (↔H2), 192.168.13.1 (↔H3) |
+| H2 | post-processing Bob (ns-3 node) | 192.168.11.2 (↔H1), 192.168.24.2 (↔H4) |
+| H3 | KMS Alice (ns-3 node) | 192.168.13.3 (↔H1), 192.168.34.3 (↔H4), 192.168.35.3 (↔H5) |
+| H4 | KMS Bob (ns-3 node) | 192.168.24.4 (↔H2), 192.168.34.4 (↔H3), 192.168.46.4 (↔H6) |
+| H5 | ETSI 014 Alice (ns-3 application node) | 192.168.35.5 (↔H3), 192.168.56.5 (↔H6) |
+| H6 | ETSI 014 Bob (ns-3 application node) | 192.168.46.6 (↔H4), 192.168.56.6 (↔H5) |
 
 Quick start:
 
@@ -42,37 +42,29 @@ docker compose -f docker/docker-compose.yml up -d
 ./docker/verify.sh
 ```
 
-Container creation order does not affect the scenario. Readiness traces from the PP, KMS, and ETSI 014 applications ensure that listeners start before their clients. The dependency chain is HOST4 → HOST3/HOST2/HOST6 → HOST1/HOST5. The first PP link may take about one minute to converge because of ns-3 TCP backoff; no container restart is required.
+Container creation order does not affect the scenario. Readiness traces from the PP, KMS, and ETSI 014 applications ensure that listeners start before their clients. The dependency chain is H4 → H3/H2/H6 → H1/H5. The first PP link may take about one minute to converge because of ns-3 TCP backoff; no container restart is required.
 
-`verify.sh` requires all six processes to be running with zero restarts, checks that both KMS instances served the same `keyId`, and temporarily samples port 8081 to verify that application traffic exists and the body is no longer visible as plaintext. HOST5 and HOST6 use OTP with `useCrypto=1`.
+`verify.sh` requires all six processes to be running with zero restarts, checks that both KMS instances served the same `keyId`, and temporarily samples port 8081 to verify that application traffic exists and the body is no longer visible as plaintext. The H5 and H6 application nodes use OTP with `useCrypto=1`.
 
 ### 2. Key relay — intermediate node without a direct Alice–Bob link (`examples/key-relay/`)
 
-In this scenario, Alice and Bob do not have a direct QKD link. They communicate through a trusted intermediate node with its own KMS. The node relays keys using the functionality already provided by `QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`, `ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP encryption through `skey_create`. Alice and Bob ultimately share actual key material without either endpoint seeing the raw key from the other QKD segment. End-to-end encrypted traffic flows between HOST8 and HOST9 and is verified with temporary `tcpdump` samples.
+In this scenario, Alice and Bob do not have a direct QKD link. They communicate through a trusted intermediate node with its own KMS. The node relays keys using the functionality already provided by `QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`, `ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP encryption through `skey_create`. Alice and Bob ultimately share actual key material without either endpoint seeing the raw key from the other QKD segment. End-to-end encrypted traffic flows between the H8 and H9 application nodes and is verified with temporary `tcpdump` samples.
 
-Topology (9 hosts):
+Topology (9 Docker containers):
 
-```
-HOST1 (PP Alice) ──qkd──> HOST2 (PP Relay-A)          HOST3 (PP Relay-B) <──qkd── HOST4 (PP Bob)
-       │                                                                                  │
-       v                                                                                  v
-HOST5 (KMS Alice) ─────────────── relay ───────────> HOST6 (KMS Relay) <─── relay ─────── HOST7 (KMS Bob)
-       │                                                                                  │
-       v                                                                                  v
-HOST8 (ETSI014 Alice) ───────────────── encrypted traffic ─────────────────> HOST9 (ETSI014 Bob)
-```
+![Trusted-node key-relay QKDNetSim testbed architecture](diagrams/key-relay.svg)
 
-| Host | Role | IPs (network ↔ peer) |
+| Node ID | Container role | IPs (network ↔ peer) |
 |---|---|---|
-| HOST1 | PP Alice | 192.168.111.1 (↔H2), 192.168.112.1 (↔H5) |
-| HOST2 | PP Relay-A | 192.168.111.2 (↔H1), 192.168.113.2 (↔H6) |
-| HOST3 | PP Relay-B | 192.168.114.3 (↔H4), 192.168.115.3 (↔H6) |
-| HOST4 | PP Bob | 192.168.114.4 (↔H3), 192.168.116.4 (↔H7) |
-| HOST5 | **KMS Alice** | 192.168.112.5 (↔H1), 192.168.117.5 (↔H6), 192.168.119.5 (↔H8) |
-| HOST6 | **KMS Relay** (intermediate node) | 192.168.113.6 (↔H2), 192.168.115.6 (↔H3), 192.168.117.6 (↔H5), 192.168.118.6 (↔H7) |
-| HOST7 | **KMS Bob** | 192.168.116.7 (↔H4), 192.168.118.7 (↔H6), 192.168.120.7 (↔H9) |
-| HOST8 | ETSI014 Alice | 192.168.119.8 (↔H5), 192.168.121.8 (↔H9) |
-| HOST9 | ETSI014 Bob | 192.168.120.9 (↔H7), 192.168.121.9 (↔H8) |
+| H1 | PP Alice (ns-3 node) | 192.168.111.1 (↔H2), 192.168.112.1 (↔H5) |
+| H2 | PP Relay-A (ns-3 node) | 192.168.111.2 (↔H1), 192.168.113.2 (↔H6) |
+| H3 | PP Relay-B (ns-3 node) | 192.168.114.3 (↔H4), 192.168.115.3 (↔H6) |
+| H4 | PP Bob (ns-3 node) | 192.168.114.4 (↔H3), 192.168.116.4 (↔H7) |
+| H5 | **KMS Alice** (ns-3 node) | 192.168.112.5 (↔H1), 192.168.117.5 (↔H6), 192.168.119.5 (↔H8) |
+| H6 | **KMS Relay** (trusted intermediate ns-3 node) | 192.168.113.6 (↔H2), 192.168.115.6 (↔H3), 192.168.117.6 (↔H5), 192.168.118.6 (↔H7) |
+| H7 | **KMS Bob** (ns-3 node) | 192.168.116.7 (↔H4), 192.168.118.7 (↔H6), 192.168.120.7 (↔H9) |
+| H8 | ETSI 014 Alice (ns-3 application node) | 192.168.119.8 (↔H5), 192.168.121.8 (↔H9) |
+| H9 | ETSI 014 Bob (ns-3 application node) | 192.168.120.9 (↔H7), 192.168.121.9 (↔H8) |
 
 Start the scenario:
 
@@ -82,59 +74,59 @@ docker build -t qkdnetsim-6vm-emulation:latest -f docker/Dockerfile .
 docker compose -f docker/docker-compose.key-relay.yml up -d
 ```
 
-`depends_on` and the health checks start hosts according to the readiness of their actual listeners. PP links use TCP reconnection and may take about one minute to converge because of ns-3 TCP backoff. Do not restart containers during this window.
+`depends_on` and the health checks start containers according to the readiness of their actual listeners. PP links use TCP reconnection and may take about one minute to converge because of ns-3 TCP backoff. Do not restart containers during this window.
 
 #### End-to-end verification
 
-Seeing all nine containers in the `Up` state only proves that their processes have not exited. To check the expected activity for every host and sample the relevant traffic, run:
+Seeing all nine containers in the `Up` state only proves that their processes have not exited. To check the expected activity for every container and sample the relevant traffic, run:
 
 ```bash
 ./docker/verify-key-relay.sh [sample_seconds]   # default: 10s
 ```
 
-The verifier reports whether all nine hosts produce the expected role-specific activity (`Key delivered`, `stores key`, `serves key`, or `GET_KEY request`), confirms that HOST5 and HOST7 serve the same `keyId` to the applications, and temporarily samples the four relevant links. Packet captures remain under `/tmp` inside the containers and are neither copied to nor stored in the repository. Traffic between HOST8 and HOST9 confirms the final result between the ETSI 014 applications.
+The verifier reports whether all nine containers produce the expected role-specific activity (`Key delivered`, `stores key`, `serves key`, or `GET_KEY request`), confirms that the H5 and H7 KMS nodes serve the same `keyId` to the applications, and temporarily samples the four relevant links. Packet captures remain under `/tmp` inside the containers and are neither copied to nor stored in the repository. Traffic between the H8 and H9 application nodes confirms the final result between the ETSI 014 applications.
 
 #### Library issues fixed for this scenario
 
 - **TCP sockets and startup ordering.** PP, KMS, and ETSI listeners publish readiness traces used by the health checks. `QKDPostprocessingApplication` preserves its socket during `SYN_SENT`, allows TCP backoff to proceed, and reconnects after a failure or closure. Periodically destroying a socket during the handshake caused `TcpSocketBase` assertions when delayed packets arrived.
 - **Incorrect framing of the post-processing TCP stream.** The receiver assumed that every `Recv()` call contained exactly one sent packet and constructed a `std::string` without an explicit length. TCP fragmentation or coalescing consequently caused `JSON parse error` and terminated the process. The receiver now keeps a buffer per connection, extracts frames delimited by `;`, preserves incomplete fragments, and discards malformed JSON without aborting the container.
-- **Empty key material in `skey_create`.** `mergedKey` was consumed while splitting the local response and was then reused empty for the relay operation. An exact copy is now preserved, its size is validated, and the key is encrypted hop by hop. HOST5 and HOST7 serve the same 6400-bit `keyId`.
+- **Empty key material in `skey_create`.** `mergedKey` was consumed while splitting the local response and was then reused empty for the relay operation. An exact copy is now preserved, its size is validated, and the key is encrypted hop by hop. The H5 and H7 KMS nodes serve the same 6400-bit `keyId`.
 - **Uninitialized ETSI 014 state.** `m_isSignalingConnectedToApp` and `m_isDataConnectedToApp` were read before initialization, causing some runs to skip socket creation. Both now start explicitly as `false`.
-- **Encryption disabled in the scenario.** HOST8 and HOST9 used `useCrypto=0`, so traffic described as OTP-protected was actually plaintext. The key-relay scenario now uses `useCrypto=1`.
+- **Encryption disabled in the scenario.** The H8 and H9 application nodes used `useCrypto=0`, so traffic described as OTP-protected was actually plaintext. The key-relay scenario now uses `useCrypto=1`.
 - **Uninitialized bytes leaked into the wire (applies to both scenarios).** `QKDAppHeader::GetSerializedSize()` reserves a fixed 32 bytes for the authentication tag field, but `SetAuthTag()` wrote exactly `value.size()` bytes with no padding. With authentication disabled (`authenticationType=0`, the default in both scenarios), `QKDEncryptor::Authenticate()` returns an empty string, so the remaining 32 bytes of that reservation were left untouched — whatever the ns-3 `Buffer` previously held (in one observed case, a literal fragment of an unrelated HTTP response, `"Vary: Accept-Encoding, Cookie"`) was sent on the wire as-is. `SetAuthTag()` now pads with leading `'0'` characters the same way `SetEncryptionKeyId()`/`SetAuthenticationKeyId()` already did.
 - **Bit accounting stuck in READY.** In `Relay()`, `StoreKey(key,true)` followed by `MarkKey(id,INIT)` has a net-zero effect on `m_currentKeyBit`. As a result, `CheckState()` stopped reflecting actual relay-buffer depletion after the threshold was crossed for the first time. `SBufferClientCheck` now also checks `GetSBitCount()`, which is the current count rather than historical accumulated state.
 - **`skey_create` assumed one exact-size key.** Hop-by-hop encryption material was requested as a single key with an exact bit length, while the buffer only contained default 2048-bit keys. It now uses the same multi-key merge pattern through `GetTransformCandidate` that is already used elsewhere in the implementation.
 - **Unbalanced HTTP request bookkeeping.** Multi-hop forwarding of `skey_create` sent the request to the next hop without adding it to `m_httpRequestsQueryKMS`. Processing the response then attempted to `pop()` an empty queue and terminated the process with `NS_FATAL_ERROR("HTTP query for this KMS is empty!")`.
 
-**Timing requirement:** keep `--appStartTime=20` for HOST8 and HOST9 (see the comments in `docker-compose.key-relay.yml`). `QKDApp014` establishes its KMS connection during startup; reducing the delay may make it connect before the KMS listener is ready.
+**Timing requirement:** keep `--appStartTime=20` for the H8 and H9 application nodes (see the comments in `docker-compose.key-relay.yml`). `QKDApp014` establishes its KMS connection during startup; reducing the delay may make it connect before the KMS listener is ready.
 
 #### Ordered startup with `depends_on`
 
 Originally, there was no guarantee that a server had reached `Listen()` before its client called `Connect()`. The following mechanisms now enforce the real dependency graph:
 
 - Readiness traces in `QKDKeyManagerSystemApplication`, `QKDPostprocessingApplication`, and `QKDApp014`, emitted after `Bind()` and `Listen()` complete.
-- A host-specific text marker attached to each trace, such as `"[HOST5] KMS Alice listening"`, alongside the existing `stores key` and `serves key` markers.
+- A role-specific readiness marker attached to each trace, for example `"[RELAY_KMS_ALICE] KMS Alice listening"`, alongside the existing `stores key` and `serves key` markers.
 - `entrypoint.sh` mirrors stdout to `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside the container namespace and cannot read the host-side `docker logs` view provided by the logging driver.
-- Health checks on HOST2, HOST4, HOST5, HOST6, HOST7, and HOST9, plus a `depends_on: condition: service_healthy` chain that follows the actual topology:
+- Health checks on H2, H4, H5, H6, H7, and H9, plus a `depends_on: condition: service_healthy` chain that follows the actual topology:
 
 ```
-HOST7
-  ├─ HOST6
-  │    ├─ HOST2 ─ HOST1
-  │    └─ HOST5 ─ HOST8
-  ├─ HOST4 ─ HOST3
-  └─ HOST9 ─ HOST8
+H7
+  ├─ H6
+  │    ├─ H2 ─ H1
+  │    └─ H5 ─ H8
+  ├─ H4 ─ H3
+  └─ H9 ─ H8
 ```
 
 All four PP applications schedule a lightweight event every 100 ms so that `RealtimeSimulatorImpl` always has a nearby event. The entrypoint applies a fixed veth stabilization delay. There is no random jitter and no watchdog that terminates processes or recreates containers.
 
 The image also applies `patches/realtime-simulator-clamp.patch` to ns-3.46. Under sustained load, the external `FdNetDevice` thread may observe a timestamp a few ticks behind `m_currentTs`. The original implementation aborts with `schedule for time < m_currentTs`; the patch schedules an already-late frame at the current valid timestamp and prevents the corresponding exit-code-139 failure.
 
-PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after HOST1–HOST4 begin reporting `Key delivered`.
+PP convergence may take approximately one minute because ns-3 backs off after the initial lost SYN packets. Run the verifier after the H1–H4 PP nodes begin reporting `Key delivered`.
 
 ### 3. Point-to-point QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.vpn.yml`)
 
-Replaces the toy ETSI 014 apps at HOST5/HOST6 with real strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting synthetic traffic by hand, HOST5 and HOST6 are now ordinary Ubuntu containers that periodically fetch real key material from the same KMS containers (HOST3, HOST4) and hand it to strongSwan as the connection's pre-shared key — the QKD stack's only remaining job is producing the key that protects a real IPsec tunnel. The overall architecture (a client/server pair of strongSwan encryptors fed by a periodic key-fetch script) follows:
+Replaces the synthetic ETSI 014 application nodes at H5/H6 with real strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting synthetic traffic by hand, the H5 and H6 endpoints are native Ubuntu containers that periodically fetch real key material from the H3 and H4 KMS nodes and hand it to strongSwan as the connection's pre-shared key — the QKD stack's only remaining job is producing the key that protects a real IPsec tunnel. The overall architecture (a client/server pair of strongSwan encryptors fed by a periodic key-fetch script) follows:
 
 > Mehic, M., Dervisevic, E., Fazio, P. and Voznak, M., 2025. *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*. IEEE Network. https://doi.org/10.1109/MNET.2025.3540705
 
@@ -145,21 +137,13 @@ QKD 004 for session-based VPN key retrieval follows:
 
 > Buruaga, J.S., Brunner, H.H., Fung, F., Peev, M., Pastor, A., López, D.R., Ortiz, L., Martín, V. and Brito, J.P., 2023. *VPN Protection with QKD-Derived Keys Using Standard Interfaces*. In 2023 23rd International Conference on Transparent Optical Networks (ICTON). IEEE. https://doi.org/10.1109/ICTON59386.2023.10207212
 
-HOST1-HOST4 and their networks are unchanged. The VPN definition is a
+The H1–H4 ns-3 nodes and their networks are unchanged. The VPN definition is a
 standalone Compose project that extends those four base services and replaces
-the application endpoints with correctly named `host5_vpn_alice` and
-`host6_vpn_bob` services. Keeping it standalone prevents Compose from merging
+the application endpoints with the `vpn_alice` and `vpn_bob` services.
+Keeping it standalone prevents Compose from merging
 the ETSI 014 dependency chain into this scenario.
 
-```
-HOST1 (post-processing Alice) ──sifting──> HOST2 (post-processing Bob)
-        │ key delivery                            key delivery │
-        v                                                       v
-HOST3 (KMS Alice) <────────── transform_keys ──────────> HOST4 (KMS Bob)
-        │ open_connect / get_key (ETSI 004)   open_connect / get_key (ETSI 004) │
-        v                                                       v
-HOST5 (VPN Alice) <══════════ IPsec/IKEv2 (ESP) ══════════> HOST6 (VPN Bob)
-```
+![Point-to-point QKD-backed IPsec/IKEv2 VPN architecture](diagrams/point-to-point-vpn.svg)
 
 **Interface selection.** ETSI 004 negotiates one `Key_stream_ID` (KSID) for
 the complete VPN session. Alice sends that KSID once to Bob, which registers
@@ -230,7 +214,7 @@ peers. In ETSI 014 mode it also confirms that both KMSs reported serving that
 ESP must be present and plaintext ICMP absent. The temporary capture is always
 deleted.
 
-**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** HOST5/HOST6 talk to the KMS over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (every other host talks to another ns-3/`EmuFdNetDevice` process, never to a real kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. `entrypoint.sh` and `entrypoint-vpn.sh` now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
+**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The H5/H6 VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. `entrypoint.sh` and `entrypoint-vpn.sh` now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
 
 #### How the VPN endpoints are implemented
 
@@ -249,22 +233,14 @@ that command can return success even when no matching IKE_SA was established.
 ### 4. Key-relay QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.key-relay-vpn.yml`)
 
 This scenario keeps the complete trusted-node topology from scenario 2 and
-replaces only the synthetic HOST8/HOST9 ETSI 014 applications with native
+replaces only the synthetic H8/H9 ETSI 014 application nodes with native
 strongSwan endpoints:
 
-```
-HOST1 ── QKD link ── HOST2        HOST3 ── QKD link ── HOST4
-  │                    │             │                    │
-  v                    v             v                    v
-HOST5 (KMS Alice) ── HOST6 (trusted relay KMS) ── HOST7 (KMS Bob)
-  │                                                         │
-  v                                                         v
-HOST8 (VPN Alice) <══════════ IKEv2 / IPsec ESP ═════> HOST9 (VPN Bob)
-```
+![Trusted-node QKD-backed IPsec/IKEv2 VPN architecture](diagrams/key-relay-vpn.svg)
 
-HOST1-HOST7 are extended unchanged from
+The H1–H7 ns-3 nodes are extended unchanged from
 `docker-compose.key-relay.yml`. The standalone project defines correctly
-named `host8_vpn_alice` and `host9_vpn_bob` services and reuses the same
+named `vpn_alice` and `vpn_bob` services and reuses the same
 interface-aware VPN consumer as scenario 3. `QKD_INTERFACE=004` is the
 default; setting it to `014` selects the key-oriented flow without changing
 the topology, strongSwan configuration or rotation interval.
@@ -272,32 +248,32 @@ the topology, strongSwan configuration or rotation interval.
 #### Relayed key acquisition
 
 The existing QKDNetSim relay mechanism first supplies matching end-to-end key
-objects to the `RELAY_SBUFFER`s at HOST5 and HOST7. HOST6 is a trusted node:
+objects to the `RELAY_SBUFFER`s at the H5 and H7 KMS nodes. H6 is a trusted KMS node:
 it decrypts and re-encrypts the key material with independent hop keys while
-forwarding it from HOST5 to HOST7. The VPN can consume that common material
+forwarding it from H5 to H7. The VPN can consume that common material
 through either application interface.
 
 In ETSI 004 mode:
 
-1. HOST8 calls `open_connect` on HOST5. HOST5 creates the master stream and
-   sends an internal `new_app` control request through HOST6. HOST7 creates
-   the replica association with the same KSID. HOST8 receives the KSID only
+1. The H8 VPN endpoint calls `open_connect` on the H5 KMS node. H5 creates the master stream and
+   sends an internal `new_app` control request through the H6 trusted KMS node. H7 creates
+   the replica association with the same KSID. H8 receives the KSID only
    after that operation succeeds end to end.
-2. HOST8 sends the KSID to HOST9 once. HOST9 calls `open_connect(KSID)` on
-   HOST7, which sends an internal `register` request back through HOST6.
-3. Once both SAEs are registered, HOST5 reserves complete key objects from
+2. H8 sends the KSID to the H9 VPN endpoint once. H9 calls `open_connect(KSID)` on
+   the H7 KMS node, which sends an internal `register` request back through H6.
+3. Once both SAEs are registered, H5 reserves complete key objects from
    its end-to-end relay buffer and sends a `fill` request containing their
-   identifiers—not their secret values—to HOST7.
-4. HOST7 resolves those identifiers from its matching relay buffer and
+   identifiers—not their secret values—to H7.
+4. H7 resolves those identifiers from its matching relay buffer and
    inserts the material into its replica stream. Its acknowledgement causes
-   HOST5 to commit the same objects to the master stream; rejected objects
+   H5 to commit the same objects to the master stream; rejected objects
    are returned to the relay buffer.
 5. Each VPN generation uses the normal ETSI 004 `get_key(KSID)` endpoint.
    Alice and Bob compare the returned stream index and fingerprint before
    installing the PSK and performing the transactional IKE cutover.
 
 The `new_app`, `register` and `fill` messages use the private
-`/api/v1/associations/relay004/<request-id>` KMS endpoint. HOST6 is only a
+`/api/v1/associations/relay004/<request-id>` KMS endpoint. H6 is only a
 hop-by-hop control proxy and keeps no ETSI 004 association. Each request
 carries its origin, final KMS and previous hop, so responses follow the
 reverse path and duplicate fills cannot overlap. This endpoint is an
@@ -306,18 +282,18 @@ SAE-to-KMS operation.
 
 In ETSI 014 mode:
 
-1. Alice requests one 256-bit key from HOST5 with
+1. Alice requests one 256-bit key from the H5 KMS node with
    `enc_keys/<Bob SAE>/number/1/size/256`.
 2. QKDNetSim creates and relays the end-to-end key through
-   HOST5 → HOST6 → HOST7 using the existing trusted-node `skey_create`
+   H5 → H6 → H7 using the existing trusted-node `skey_create`
    mechanism and hop-by-hop QKD protection.
 3. Alice sends only the returned `key_ID` to Bob's coordination API.
-4. Bob requests that exact identifier from HOST7 with
+4. Bob requests that exact identifier from the H7 KMS node with
    `dec_keys/<Alice SAE>`.
 5. Both endpoints compare `key_ID` and key fingerprint, install the result as
    the strongSwan PSK, and perform the same transactional IKE cutover.
 
-Raw key material never travels between HOST8 and HOST9. The recurring
+Raw key material never travels between the H8 and H9 VPN endpoints. The recurring
 `key_ID` coordination is necessary because ETSI 014 is key-oriented rather
 than stream-oriented; ETSI 004 only coordinates its KSID during association
 setup and thereafter identifies each chunk by its monotonically increasing
@@ -350,8 +326,8 @@ verifier, and bring the project down before changing interfaces.
 
 The verifier requires all nine containers to remain running with zero
 restarts. It confirms matching fingerprints and either ETSI 004 KSID/index
-or ETSI 014 `key_ID` at the VPN endpoints, checks the corresponding HOST5
-and HOST7 KMS traces, validates the exact IKE_SA on both sides, and waits for
+or ETSI 014 `key_ID` at the VPN endpoints, checks the corresponding H5
+and H7 KMS traces, validates the exact IKE_SA on both sides, and waits for
 at least one later committed generation. A real ping must produce outbound
 ESP and no plaintext ICMP. Its temporary capture is always deleted.
 
@@ -371,12 +347,12 @@ the relay layer transports larger storage blocks internally.
 
 ## Testbed additions to QKDNetSim
 
-- **[`examples/point-to-point/`](examples/point-to-point/)** — six independent ns-3 programs (`host1_pp_alice.cc` through `host6_etsi014_bob.cc`), one per role and container. Unlike the original module examples, which model both ends of every link in one process, these programs use the low-level QKDNetSim API and communicate over real networks through `EmuFdNetDevice`.
-- **[`examples/key-relay/`](examples/key-relay/)** — the same pattern applied to a three-site relay topology with nine binaries. See `examples/CMakeLists.txt` and the build targets in `docker/Dockerfile`.
+- **[`examples/point-to-point/`](examples/point-to-point/)** — six independent role-named ns-3 programs (`pp_alice.cc`, `pp_bob.cc`, `kms_alice.cc`, `kms_bob.cc`, `etsi014_alice.cc`, and `etsi014_bob.cc`), one per role and container. Unlike the original module examples, which model both ends of every link in one process, these programs use the low-level QKDNetSim API and communicate over real networks through `EmuFdNetDevice`.
+- **[`examples/key-relay/`](examples/key-relay/)** — the same pattern applied to a three-site relay topology with nine role-named programs: `pp_alice.cc`, `pp_relay_a.cc`, `pp_relay_b.cc`, `pp_bob.cc`, `kms_alice.cc`, `kms_trusted.cc`, `kms_bob.cc`, `etsi014_alice.cc`, and `etsi014_bob.cc`. See `examples/CMakeLists.txt` and the build targets in `docker/Dockerfile`.
 - **[`docker/`](docker/)** — the shared image, the six-container point-to-point definition and its seven networks, interface-aware entrypoint, and end-to-end verifier.
 - **[`docker-compose.key-relay.yml`](docker/docker-compose.key-relay.yml)** — the nine-container, ten-network key-relay definition, maintained as a separate Compose project and including the readiness dependency chain described above.
 - **`entrypoint.sh`** — detects interfaces by subnet, normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or random jitter.
-- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that HOST5 and HOST7 serve the same `keyId`, and samples traffic without storing captures in the repository. Both this script and `verify.sh` remove any pre-existing capture file before writing a new one — `tcpdump` opens the raw socket as root and then drops privileges to a dedicated user before writing `-w`, so a leftover file from a previous run with different ownership made the capture fail silently (`Permission denied`, zero packets) regardless of whether traffic was actually flowing. `verify.sh`'s plaintext check no longer looks for a specific marker string — that check happened to depend on the same uninitialized-memory leak described above, not on anything the application actually sends — and instead only asserts the absence of any long readable run in the captured payload.
+- **[`verify-key-relay.sh`](docker/verify-key-relay.sh)** — checks that all scenario processes are running without restarts, validates role-specific logs, confirms that the H5 and H7 KMS nodes serve the same `keyId`, and samples traffic without storing captures in the repository. Because the two physical links become ready before the end-to-end relay buffer, it waits up to 120 seconds for the first common served key instead of assuming that listener readiness also means immediate application-key readiness. Both this script and `verify.sh` remove any pre-existing capture file before writing a new one — `tcpdump` opens the raw socket as root and then drops privileges to a dedicated user before writing `-w`, so a leftover file from a previous run with different ownership made the capture fail silently (`Permission denied`, zero packets) regardless of whether traffic was actually flowing. `verify.sh`'s plaintext check no longer looks for a specific marker string — that check happened to depend on the same uninitialized-memory leak described above, not on anything the application actually sends — and instead only asserts the absence of any long readable run in the captured payload.
 - **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
 - **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
 - **[`model/qkd-key-manager-system-application.cc`](model/qkd-key-manager-system-application.cc)**

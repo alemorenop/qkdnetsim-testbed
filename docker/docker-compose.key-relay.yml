@@ -1,5 +1,5 @@
 # "Key relay" scenario (Alice - Relay - Bob, no direct Alice-Bob link),
-# 9 hosts. Uses the same image as docker-compose.yml (scenario 1); both
+# 9 containers. Uses the same image as docker-compose.yml (scenario 1); both
 # binaries live in the same image.
 #
 # Usage:
@@ -10,57 +10,57 @@
 name: qkdnetsim-key-relay
 
 networks:
-  net_1_2:   # HOST1 <-> HOST2  (sifting, Alice - Relay)
+  net_qkd_alice_relay:   # H1 <-> H2  (sifting, Alice - Relay)
     ipam:
       config:
         - subnet: 192.168.111.0/24
           gateway: 192.168.111.254
-  net_1_5:   # HOST1 <-> HOST5  (post-processing Alice -> KMS Alice)
+  net_alice_pp_kms:   # H1 <-> H5  (post-processing Alice -> KMS Alice)
     ipam:
       config:
         - subnet: 192.168.112.0/24
           gateway: 192.168.112.254
-  net_2_6:   # HOST2 <-> HOST6  (post-processing Relay-A -> KMS Relay, Alice side)
+  net_relay_a_pp_kms:   # H2 <-> H6  (post-processing Relay-A -> KMS Relay, Alice side)
     ipam:
       config:
         - subnet: 192.168.113.0/24
           gateway: 192.168.113.254
-  net_3_4:   # HOST3 <-> HOST4  (sifting, Relay - Bob)
+  net_qkd_relay_bob:   # H3 <-> H4  (sifting, Relay - Bob)
     ipam:
       config:
         - subnet: 192.168.114.0/24
           gateway: 192.168.114.254
-  net_3_6:   # HOST3 <-> HOST6  (post-processing Relay-B -> KMS Relay, Bob side)
+  net_relay_b_pp_kms:   # H3 <-> H6  (post-processing Relay-B -> KMS Relay, Bob side)
     ipam:
       config:
         - subnet: 192.168.115.0/24
           gateway: 192.168.115.254
-  net_4_7:   # HOST4 <-> HOST7  (post-processing Bob -> KMS Bob)
+  net_bob_pp_kms:   # H4 <-> H7  (post-processing Bob -> KMS Bob)
     ipam:
       config:
         - subnet: 192.168.116.0/24
           gateway: 192.168.116.254
-  net_5_6:   # HOST5 <-> HOST6  (KMS Alice <-> KMS Relay)
+  net_kms_alice_trusted:   # H5 <-> H6  (KMS Alice <-> KMS Relay)
     ipam:
       config:
         - subnet: 192.168.117.0/24
           gateway: 192.168.117.254
-  net_6_7:   # HOST6 <-> HOST7  (KMS Relay <-> KMS Bob)
+  net_kms_trusted_bob:   # H6 <-> H7  (KMS Relay <-> KMS Bob)
     ipam:
       config:
         - subnet: 192.168.118.0/24
           gateway: 192.168.118.254
-  net_5_8:   # HOST5 <-> HOST8  (KMS Alice -> ETSI014 Alice)
+  net_alice_kms_app:   # H5 <-> H8  (KMS Alice -> ETSI014 Alice)
     ipam:
       config:
         - subnet: 192.168.119.0/24
           gateway: 192.168.119.254
-  net_7_9:   # HOST7 <-> HOST9  (KMS Bob -> ETSI014 Bob)
+  net_bob_kms_app:   # H7 <-> H9  (KMS Bob -> ETSI014 Bob)
     ipam:
       config:
         - subnet: 192.168.120.0/24
           gateway: 192.168.120.254
-  net_8_9:   # HOST8 <-> HOST9  (encrypted ETSI014 Alice-Bob traffic)
+  net_app_data:   # H8 <-> H9  (encrypted ETSI014 Alice-Bob traffic)
     ipam:
       config:
         - subnet: 192.168.121.0/24
@@ -68,42 +68,42 @@ networks:
 
 services:
 
-  host1_pp_alice:
+  pp_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host1
-    hostname: host1
+    container_name: qkd-relay-pp-alice
+    hostname: relay-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.111"
       DEV_MAP_KMS: "192.168.112"
     networks:
-      net_1_2: { ipv4_address: 192.168.111.1 }
-      net_1_5: { ipv4_address: 192.168.112.1 }
-    # Waits for HOST5 to confirm (via ListenReady/healthcheck) that its KMS is
+      net_qkd_alice_relay: { ipv4_address: 192.168.111.1 }
+      net_alice_pp_kms: { ipv4_address: 192.168.112.1 }
+    # Waits for H5 to confirm (via ListenReady/healthcheck) that its KMS is
     # already in Listen() before starting. The model's own connection retry
     # also covers restarts or transient losses afterward.
     depends_on:
-      host2_pp_relay_a:
+      pp_relay_a:
         condition: service_healthy
-      host5_kms_alice:
+      kms_alice:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host1_pp_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_alice-default"]
 
-  host2_pp_relay_a:
+  pp_relay_a:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host2
-    hostname: host2
+    container_name: qkd-relay-pp-a
+    hostname: relay-pp-a
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.111"
       DEV_MAP_KMS: "192.168.113"
     networks:
-      net_1_2: { ipv4_address: 192.168.111.2 }
-      net_2_6: { ipv4_address: 192.168.113.2 }
+      net_qkd_alice_relay: { ipv4_address: 192.168.111.2 }
+      net_relay_a_pp_kms: { ipv4_address: 192.168.113.2 }
     depends_on:
-      host6_kms_relay:
+      kms_trusted:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'Post-processing Relay-A listening' /tmp/qkdnetsim.log"]
@@ -111,41 +111,41 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host2_pp_relay_a-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_a-default"]
 
-  host3_pp_relay_b:
+  pp_relay_b:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host3
-    hostname: host3
+    container_name: qkd-relay-pp-b
+    hostname: relay-pp-b
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.114"
       DEV_MAP_KMS: "192.168.115"
     networks:
-      net_3_4: { ipv4_address: 192.168.114.3 }
-      net_3_6: { ipv4_address: 192.168.115.3 }
+      net_qkd_relay_bob: { ipv4_address: 192.168.114.3 }
+      net_relay_b_pp_kms: { ipv4_address: 192.168.115.3 }
     depends_on:
-      host4_pp_bob:
+      pp_bob:
         condition: service_healthy
-      host6_kms_relay:
+      kms_trusted:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host3_pp_relay_b-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_b-default"]
 
-  host4_pp_bob:
+  pp_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host4
-    hostname: host4
+    container_name: qkd-relay-pp-bob
+    hostname: relay-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.114"
       DEV_MAP_KMS: "192.168.116"
     networks:
-      net_3_4: { ipv4_address: 192.168.114.4 }
-      net_4_7: { ipv4_address: 192.168.116.4 }
+      net_qkd_relay_bob: { ipv4_address: 192.168.114.4 }
+      net_bob_pp_kms: { ipv4_address: 192.168.116.4 }
     depends_on:
-      host7_kms_bob:
+      kms_bob:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'Post-processing Bob listening' /tmp/qkdnetsim.log"]
@@ -153,23 +153,23 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host4_pp_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_bob-default"]
 
-  host5_kms_alice:
+  kms_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host5
-    hostname: host5
+    container_name: qkd-relay-kms-alice
+    hostname: relay-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_PP: "192.168.112"
       DEV_MAP_KMS: "192.168.117"
       DEV_MAP_ETSI: "192.168.119"
     networks:
-      net_1_5: { ipv4_address: 192.168.112.5 }
-      net_5_6: { ipv4_address: 192.168.117.5 }
-      net_5_8: { ipv4_address: 192.168.119.5 }
+      net_alice_pp_kms: { ipv4_address: 192.168.112.5 }
+      net_kms_alice_trusted: { ipv4_address: 192.168.117.5 }
+      net_alice_kms_app: { ipv4_address: 192.168.119.5 }
     depends_on:
-      host6_kms_relay:
+      kms_trusted:
         condition: service_healthy
     # "listening" = marker printed via the ListenReady trace (see
     # qkd-key-manager-system-application.{h,cc}) once m_sinkSocket and
@@ -182,12 +182,12 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host5_kms_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_alice-default"]
 
-  host6_kms_relay:
+  kms_trusted:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host6
-    hostname: host6
+    container_name: qkd-relay-kms-trusted
+    hostname: relay-kms-trusted
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_PPA: "192.168.113"
@@ -195,12 +195,12 @@ services:
       DEV_MAP_KMSA: "192.168.117"
       DEV_MAP_KMSB: "192.168.118"
     networks:
-      net_2_6: { ipv4_address: 192.168.113.6 }
-      net_3_6: { ipv4_address: 192.168.115.6 }
-      net_5_6: { ipv4_address: 192.168.117.6 }
-      net_6_7: { ipv4_address: 192.168.118.6 }
+      net_relay_a_pp_kms: { ipv4_address: 192.168.113.6 }
+      net_relay_b_pp_kms: { ipv4_address: 192.168.115.6 }
+      net_kms_alice_trusted: { ipv4_address: 192.168.117.6 }
+      net_kms_trusted_bob: { ipv4_address: 192.168.118.6 }
     depends_on:
-      host7_kms_bob:
+      kms_bob:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'KMS Relay listening' /tmp/qkdnetsim.log"]
@@ -208,21 +208,21 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host6_kms_relay-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_trusted-default"]
 
-  host7_kms_bob:
+  kms_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host7
-    hostname: host7
+    container_name: qkd-relay-kms-bob
+    hostname: relay-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_PP: "192.168.116"
       DEV_MAP_KMS: "192.168.118"
       DEV_MAP_ETSI: "192.168.120"
     networks:
-      net_4_7: { ipv4_address: 192.168.116.7 }
-      net_6_7: { ipv4_address: 192.168.118.7 }
-      net_7_9: { ipv4_address: 192.168.120.7 }
+      net_bob_pp_kms: { ipv4_address: 192.168.116.7 }
+      net_kms_trusted_bob: { ipv4_address: 192.168.118.7 }
+      net_bob_kms_app: { ipv4_address: 192.168.120.7 }
     # Root of the depends_on chain (nobody else waits on anyone before
     # reaching here) -- no dependencies of its own.
     healthcheck:
@@ -231,49 +231,49 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host7_kms_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_bob-default"]
 
-  host8_etsi014_alice:
+  etsi014_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host8
-    hostname: host8
+    container_name: qkd-relay-etsi014-alice
+    hostname: relay-etsi014-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_KMS: "192.168.119"
       DEV_MAP_DATA: "192.168.121"
     networks:
-      net_5_8: { ipv4_address: 192.168.119.8 }
-      net_8_9: { ipv4_address: 192.168.121.8 }
-    # HOST8 connects as a client to BOTH: HOST5 (its KMS) and HOST9 (data
+      net_alice_kms_app: { ipv4_address: 192.168.119.8 }
+      net_app_data: { ipv4_address: 192.168.121.8 }
+    # H8 connects as a client to BOTH: H5 (its KMS) and H9 (data
     # socket of the peer app) -- waits for both to confirm they are listening.
     depends_on:
-      host5_kms_alice:
+      kms_alice:
         condition: service_healthy
-      host9_etsi014_bob:
+      etsi014_bob:
         condition: service_healthy
     # appStartTime=20 (not 1): QKDApp014::ConnectionToKMSFailed() does not
-    # retry the TCP connection if the first attempt fails -- if HOST8 tries to
-    # connect before HOST5's KMS listener is actually listening (quite
+    # retry the TCP connection if the first attempt fails -- if H8 tries to
+    # connect before H5's KMS listener is actually listening (quite
     # possible with only 1s of margin and 9 RealtimeSimulatorImpl instances
     # starting at once), the socket stays broken forever and the app "sends"
     # in a loop over a dead socket without EVER producing real traffic.
     # Confirmed with tcpdump: 0 packets on the wire despite the internal trace
     # firing nonstop.
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host8_etsi014_alice-default", "--appStartTime=20"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_alice-default", "--appStartTime=20"]
 
-  host9_etsi014_bob:
+  etsi014_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-host9
-    hostname: host9
+    container_name: qkd-relay-etsi014-bob
+    hostname: relay-etsi014-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_KMS: "192.168.120"
       DEV_MAP_DATA: "192.168.121"
     networks:
-      net_7_9: { ipv4_address: 192.168.120.9 }
-      net_8_9: { ipv4_address: 192.168.121.9 }
+      net_bob_kms_app: { ipv4_address: 192.168.120.9 }
+      net_app_data: { ipv4_address: 192.168.121.9 }
     depends_on:
-      host7_kms_bob:
+      kms_bob:
         condition: service_healthy
     # "listening" takes ~appStartTime=20s to show up (SetStartTime delays THE
     # WHOLE app, not just the socket to the KMS) -- generous start_period so
@@ -284,4 +284,4 @@ services:
       timeout: 2s
       retries: 15
       start_period: 20s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_host9_etsi014_bob-default", "--appStartTime=20"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_bob-default", "--appStartTime=20"]

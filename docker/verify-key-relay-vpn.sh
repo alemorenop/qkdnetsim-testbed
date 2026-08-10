@@ -9,19 +9,19 @@ startup_timeout="${1:-360}"
 rotation_timeout="${2:-180}"
 capture=/tmp/qkd-relay-vpn-verify.pcap
 containers=(
-    qkd-relay-vpn-host1
-    qkd-relay-vpn-host2
-    qkd-relay-vpn-host3
-    qkd-relay-vpn-host4
-    qkd-relay-vpn-host5
-    qkd-relay-vpn-host6
-    qkd-relay-vpn-host7
-    qkd-relay-vpn-host8
-    qkd-relay-vpn-host9
+    qkd-relay-vpn-pp-alice
+    qkd-relay-vpn-pp-a
+    qkd-relay-vpn-pp-b
+    qkd-relay-vpn-pp-bob
+    qkd-relay-vpn-kms-alice
+    qkd-relay-vpn-kms-trusted
+    qkd-relay-vpn-kms-bob
+    qkd-relay-vpn-alice
+    qkd-relay-vpn-bob
 )
 
 cleanup() {
-    "$docker_bin" exec qkd-relay-vpn-host8 sh -c \
+    "$docker_bin" exec qkd-relay-vpn-alice sh -c \
         "rm -f '$capture' /tmp/qkd-relay-vpn-tcpdump.log" \
         >/dev/null 2>&1 || true
 }
@@ -70,18 +70,18 @@ assert_peer_state_matches() {
     local alice_fingerprint bob_fingerprint alice_interface bob_interface
     local key_reference
 
-    alice_generation=$(state_value qkd-relay-vpn-host8 generation)
-    bob_generation=$(state_value qkd-relay-vpn-host9 generation)
-    alice_key_id=$(state_value qkd-relay-vpn-host8 key_id)
-    bob_key_id=$(state_value qkd-relay-vpn-host9 key_id)
-    alice_ksid=$(state_value qkd-relay-vpn-host8 ksid)
-    bob_ksid=$(state_value qkd-relay-vpn-host9 ksid)
-    alice_index=$(state_value qkd-relay-vpn-host8 key_index)
-    bob_index=$(state_value qkd-relay-vpn-host9 key_index)
-    alice_fingerprint=$(state_value qkd-relay-vpn-host8 key_fingerprint)
-    bob_fingerprint=$(state_value qkd-relay-vpn-host9 key_fingerprint)
-    alice_interface=$(state_value qkd-relay-vpn-host8 qkd_interface)
-    bob_interface=$(state_value qkd-relay-vpn-host9 qkd_interface)
+    alice_generation=$(state_value qkd-relay-vpn-alice generation)
+    bob_generation=$(state_value qkd-relay-vpn-bob generation)
+    alice_key_id=$(state_value qkd-relay-vpn-alice key_id)
+    bob_key_id=$(state_value qkd-relay-vpn-bob key_id)
+    alice_ksid=$(state_value qkd-relay-vpn-alice ksid)
+    bob_ksid=$(state_value qkd-relay-vpn-bob ksid)
+    alice_index=$(state_value qkd-relay-vpn-alice key_index)
+    bob_index=$(state_value qkd-relay-vpn-bob key_index)
+    alice_fingerprint=$(state_value qkd-relay-vpn-alice key_fingerprint)
+    bob_fingerprint=$(state_value qkd-relay-vpn-bob key_fingerprint)
+    alice_interface=$(state_value qkd-relay-vpn-alice qkd_interface)
+    bob_interface=$(state_value qkd-relay-vpn-bob qkd_interface)
 
     [ "$alice_interface" = "$expected_interface" ] &&
         [ "$bob_interface" = "$expected_interface" ] ||
@@ -117,25 +117,25 @@ assert_current_ike_sa() {
 
 assert_kms_served_reference() {
     local reference="$1"
-    "$docker_bin" logs qkd-relay-vpn-host5 2>&1 |
+    "$docker_bin" logs qkd-relay-vpn-kms-alice 2>&1 |
         grep "serves key.*keyId=${reference}" >/dev/null ||
         fail "KMS Alice did not report serving ETSI $expected_interface reference=$reference"
-    "$docker_bin" logs qkd-relay-vpn-host7 2>&1 |
+    "$docker_bin" logs qkd-relay-vpn-kms-bob 2>&1 |
         grep "serves key.*keyId=${reference}" >/dev/null ||
         fail "KMS Bob did not report serving ETSI $expected_interface reference=$reference"
 }
 
 echo "=== 1) Waiting for the initial relayed QKD-backed VPN ==="
-wait_for_health qkd-relay-vpn-host8
-wait_for_health qkd-relay-vpn-host9
+wait_for_health qkd-relay-vpn-alice
+wait_for_health qkd-relay-vpn-bob
 assert_stable_containers
 initial_state=$(assert_peer_state_matches)
 initial_generation=${initial_state%%|*}
 initial_reference=${initial_state#*|}
 [ "$initial_generation" -ge 1 ] ||
     fail "the first committed generation was not reached"
-assert_current_ike_sa qkd-relay-vpn-host8 "$initial_generation"
-assert_current_ike_sa qkd-relay-vpn-host9 "$initial_generation"
+assert_current_ike_sa qkd-relay-vpn-alice "$initial_generation"
+assert_current_ike_sa qkd-relay-vpn-bob "$initial_generation"
 assert_kms_served_reference "$initial_reference"
 echo "[OK] generation $initial_generation uses the same relayed ETSI $expected_interface reference and fingerprint"
 
@@ -145,8 +145,8 @@ target_generation=$((initial_generation + 1))
 deadline=$((SECONDS + rotation_timeout))
 while (( SECONDS < deadline )); do
     assert_stable_containers
-    alice_generation=$(state_value qkd-relay-vpn-host8 generation)
-    bob_generation=$(state_value qkd-relay-vpn-host9 generation)
+    alice_generation=$(state_value qkd-relay-vpn-alice generation)
+    bob_generation=$(state_value qkd-relay-vpn-bob generation)
     if [ "$alice_generation" -ge "$target_generation" ] &&
         [ "$bob_generation" -ge "$target_generation" ]; then
         break
@@ -159,20 +159,20 @@ current_generation=${current_state%%|*}
 current_reference=${current_state#*|}
 [ "$current_generation" -ge "$target_generation" ] ||
     fail "no committed rotation within ${rotation_timeout}s (still at generation $current_generation)"
-assert_current_ike_sa qkd-relay-vpn-host8 "$current_generation"
-assert_current_ike_sa qkd-relay-vpn-host9 "$current_generation"
+assert_current_ike_sa qkd-relay-vpn-alice "$current_generation"
+assert_current_ike_sa qkd-relay-vpn-bob "$current_generation"
 assert_kms_served_reference "$current_reference"
 echo "[OK] both peers committed qkd-$current_generation with relayed ETSI $expected_interface reference=$current_reference"
 
 echo
 echo "=== 3) Sending real traffic and checking the outer interface ==="
 cleanup
-data_dev=$("$docker_bin" exec qkd-relay-vpn-host8 sh -c \
+data_dev=$("$docker_bin" exec qkd-relay-vpn-alice sh -c \
     "ip route get 192.168.121.9 | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -n1" |
     tr -d '\r')
 [ -n "$data_dev" ] || fail "could not resolve Alice's VPN data interface"
 
-"$docker_bin" exec qkd-relay-vpn-host8 sh -c "
+"$docker_bin" exec qkd-relay-vpn-alice sh -c "
     timeout 7 tcpdump -Z root -U -Q out -i '$data_dev' -s 128 \
         -w '$capture' 'host 192.168.121.9 and (ip proto 50 or icmp)' \
         >/tmp/qkd-relay-vpn-tcpdump.log 2>&1 &
@@ -183,10 +183,10 @@ data_dev=$("$docker_bin" exec qkd-relay-vpn-host8 sh -c \
     test -s '$capture'
 " || fail "ping or packet capture failed"
 
-esp_packets=$("$docker_bin" exec qkd-relay-vpn-host8 sh -c \
+esp_packets=$("$docker_bin" exec qkd-relay-vpn-alice sh -c \
     "tcpdump -nn -r '$capture' 'ip proto 50' 2>/dev/null | wc -l" |
     tr -d '\r ')
-plaintext_icmp=$("$docker_bin" exec qkd-relay-vpn-host8 sh -c \
+plaintext_icmp=$("$docker_bin" exec qkd-relay-vpn-alice sh -c \
     "tcpdump -nn -r '$capture' 'icmp' 2>/dev/null | wc -l" |
     tr -d '\r ')
 [ "$esp_packets" -gt 0 ] || fail "no outbound ESP traffic was captured"
@@ -195,7 +195,7 @@ plaintext_icmp=$("$docker_bin" exec qkd-relay-vpn-host8 sh -c \
 echo "[OK] ping succeeded; outer traffic contained ESP and no plaintext ICMP"
 
 cleanup
-"$docker_bin" exec qkd-relay-vpn-host8 sh -c "test ! -e '$capture'" ||
+"$docker_bin" exec qkd-relay-vpn-alice sh -c "test ! -e '$capture'" ||
     fail "temporary capture cleanup failed"
 trap - EXIT
 

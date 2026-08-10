@@ -56,21 +56,21 @@ RUN sed -i 's/\r$//' \
 # which we don't use)
 RUN ./ns3 configure --enable-examples && \
     ./ns3 build \
-        p2p_host1_pp_alice \
-        p2p_host2_pp_bob \
-        p2p_host3_kms_alice \
-        p2p_host4_kms_bob \
-        p2p_host5_etsi014_alice \
-        p2p_host6_etsi014_bob \
-        relay_host1_pp_alice \
-        relay_host2_pp_relay_a \
-        relay_host3_pp_relay_b \
-        relay_host4_pp_bob \
-        relay_host5_kms_alice \
-        relay_host6_kms_relay \
-        relay_host7_kms_bob \
-        relay_host8_etsi014_alice \
-        relay_host9_etsi014_bob
+        p2p_pp_alice \
+        p2p_pp_bob \
+        p2p_kms_alice \
+        p2p_kms_bob \
+        p2p_etsi014_alice \
+        p2p_etsi014_bob \
+        relay_pp_alice \
+        relay_pp_relay_a \
+        relay_pp_relay_b \
+        relay_pp_bob \
+        relay_kms_alice \
+        relay_kms_trusted \
+        relay_kms_bob \
+        relay_etsi014_alice \
+        relay_etsi014_bob
 
 # --- Entrypoint: sets each interface to promiscuous mode and clears its kernel IP ---
 COPY docker/entrypoint.sh /opt/entrypoint.sh

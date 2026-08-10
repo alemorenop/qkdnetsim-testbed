@@ -1,10 +1,10 @@
 /*
- * HOST5 - KMS ALICE (key relay scenario)
+ * Key-relay KMS ALICE
  *
  * Unlike scenario 1 (direct link), here KMS Alice does NOT have KMS Bob as a
  * direct neighbor - it only reaches KMS Relay directly, and KMS Bob through
  * it (2 hops). It therefore needs:
- *   - A LOCAL Q-Buffer/S-Buffer toward the Relay (fed by HOST1)
+ *   - A LOCAL Q-Buffer/S-Buffer toward the Relay (fed by RELAY_PP_ALICE)
  *   - A RELAY-type S-Buffer toward Bob (created explicitly with
  *     BootstrapRelaySBuffer, see comment in qkd-key-manager-system-application.h)
  *   - A direct route entry toward the Relay (1 hop) and another toward Bob
@@ -13,14 +13,14 @@
  *     buffer toward Bob replenished, since QKDApp014 never triggers that
  *     replenishment on its own (it doesn't send GET_STATUS)
  *
- *   --devPP   / --myIpPP    link to HOST1 (post-processing Alice)
- *   --devKms  / --myIpKms   link to HOST6 (KMS Relay)          [relay/transform_keys]
- *   --devEtsi / --myIpEtsi  link to HOST8 (ETSI014 Alice)      [GET_KEY]
+ *   --devPP   / --myIpPP    link to RELAY_PP_ALICE (post-processing Alice)
+ *   --devKms  / --myIpKms   link to RELAY_KMS_TRUSTED (KMS Relay)          [relay/transform_keys]
+ *   --devEtsi / --myIpEtsi  link to RELAY_ETSI014_ALICE (ETSI014 Alice)      [GET_KEY]
  *
  * Contract shared with the other VMs (must match exactly):
- *   ppAliceId   -> must match the "SetId" used by HOST1
- *   etsiAliceId -> must match the "appId" used by HOST8
- *   etsiBobId   -> must match the "appId" used by HOST9
+ *   ppAliceId   -> must match the "SetId" used by RELAY_PP_ALICE
+ *   etsiAliceId -> must match the "appId" used by RELAY_ETSI014_ALICE
+ *   etsiBobId   -> must match the "appId" used by RELAY_ETSI014_BOB
  */
 
 #include "ns3/core-module.h"
@@ -39,7 +39,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("HOST5_KMS_ALICE");
+NS_LOG_COMPONENT_DEFINE("RELAY_KMS_ALICE_KMS_ALICE");
 
 static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
@@ -83,19 +83,19 @@ main(int argc, char* argv[])
     std::string myIpEtsi = "192.168.119.5";
 
     // ---- Peers (real IPs of the other VMs) ----
-    std::string peerKmsRelayIp = "192.168.117.6"; // HOST6, KMS Alice <-> KMS Relay link
+    std::string peerKmsRelayIp = "192.168.117.6"; // RELAY_KMS_TRUSTED, KMS Alice <-> KMS Relay link
 
     // ---- Identifier contract shared between VMs ----
-    std::string ppAliceId   = "cccccccc-0000-0000-0000-000000000001"; // HOST1's module
-    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // HOST8's app
-    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // HOST9's app
+    std::string ppAliceId   = "cccccccc-0000-0000-0000-000000000001"; // RELAY_PP_ALICE's module
+    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // RELAY_ETSI014_ALICE's app
+    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // RELAY_ETSI014_BOB's app
 
     // ---- Q-Buffer configuration ----
     uint32_t qbMin = 1024;
     uint32_t qbThr = 51200;
     uint32_t qbMax = 500000000;
     // MUST match ppKeySize*8 (256 bytes = 2048 bits) on the post-processing
-    // side (see host1_pp_alice.cc): GetDefaultKeyCount() in s-buffer.cc only
+    // side (see pp_alice.cc): GetDefaultKeyCount() in s-buffer.cc only
     // counts a key as "available" if its size matches GetKeySize() of the
     // local S-Buffer EXACTLY. If a different value is set here (e.g. 512 or
     // 4096), the count is always 0 and the relay never starts up
@@ -117,28 +117,28 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devPP", "Real NIC toward HOST1", devPP);
-    cmd.AddValue("devKms", "Real NIC toward HOST6", devKms);
-    cmd.AddValue("devEtsi", "Real NIC toward HOST8", devEtsi);
-    cmd.AddValue("myIpPP", "Local IP on the link toward HOST1", myIpPP);
-    cmd.AddValue("myIpKms", "Local IP on the link toward HOST6", myIpKms);
-    cmd.AddValue("myIpEtsi", "Local IP on the link toward HOST8", myIpEtsi);
-    cmd.AddValue("peerKmsRelayIp", "Real IP of HOST6 (KMS Relay)", peerKmsRelayIp);
-    cmd.AddValue("ppAliceId", "UUID of HOST1's post-processing module", ppAliceId);
-    cmd.AddValue("etsiAliceId", "UUID of HOST8's ETSI014 app", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID of HOST9's ETSI014 app", etsiBobId);
+    cmd.AddValue("devPP", "Real NIC toward RELAY_PP_ALICE", devPP);
+    cmd.AddValue("devKms", "Real NIC toward RELAY_KMS_TRUSTED", devKms);
+    cmd.AddValue("devEtsi", "Real NIC toward RELAY_ETSI014_ALICE", devEtsi);
+    cmd.AddValue("myIpPP", "Local IP on the link toward RELAY_PP_ALICE", myIpPP);
+    cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_TRUSTED", myIpKms);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward RELAY_ETSI014_ALICE", myIpEtsi);
+    cmd.AddValue("peerKmsRelayIp", "Real IP of RELAY_KMS_TRUSTED (KMS Relay)", peerKmsRelayIp);
+    cmd.AddValue("ppAliceId", "UUID of RELAY_PP_ALICE's post-processing module", ppAliceId);
+    cmd.AddValue("etsiAliceId", "UUID of RELAY_ETSI014_ALICE's ETSI014 app", etsiAliceId);
+    cmd.AddValue("etsiBobId", "UUID of RELAY_ETSI014_BOB's ETSI014 app", etsiBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
     // IMPORTANT: qkdnetsim's relay protocol embeds "raw" ns-3 node IDs inside
     // the JSON messages (source_node_id, destination_node_id), assuming all
     // KMSs share the same global numbering (true in a single process, false
-    // in ours: each process has its own counter starting at 0). For HOST6 and
-    // HOST7 to correctly interpret the IDs we send them, all 3 processes must
+    // in ours: each process has its own counter starting at 0). For RELAY_KMS_TRUSTED and
+    // RELAY_KMS_BOB to correctly interpret the IDs we send them, all 3 processes must
     // generate the SAME ID for the SAME conceptual entity, in the same order
     // in all 3 places:
     //   (dummy)=0, Bob=1, Relay=2, Alice(self)=3
-    // (host6_kms_relay.cc and host7_kms_bob.cc already follow this same
+    // (kms_trusted.cc and kms_bob.cc already follow this same
     // order). The initial "dummy" is mandatory: ProcessRelayRequest() uses
     // NS_ASSERT(srcNodeId && dstNodeId), i.e. ID 0 is reserved as an "empty
     // field" and no real node may have it.
@@ -148,7 +148,7 @@ main(int argc, char* argv[])
     // decides who is "master" of the LOCAL Alice-Relay link by comparing
     // GetNode()->GetId() > dstNodeId. With Alice as master, it is SHE who
     // triggers replenishment of the local S-Buffer when new key arrives from
-    // HOST1 (same pattern as in scenario 1).
+    // RELAY_PP_ALICE (same pattern as in scenario 1).
     CreateObject<Node>();                          // ID 0 = (unused, reserved)
     Ptr<Node> bobHandle = CreateObject<Node>();    // ID 1 = Bob
     Ptr<Node> relayHandle = CreateObject<Node>();  // ID 2 = Relay
@@ -199,7 +199,7 @@ main(int argc, char* argv[])
     // there) - only reachable via relay, but we need its GetId() here.
     uint32_t bobId = bobHandle->GetId();
 
-    // --- Direct LOCAL link toward the Relay (fed by HOST1) ---
+    // --- Direct LOCAL link toward the Relay (fed by RELAY_PP_ALICE) ---
     kms->CreateQBuffer(relayId, control->GetQBufferConf(relayId));
     kms->SetPeerKmAddress(relayId, Ipv4Address(peerKmsRelayIp.c_str()));
     kms->RegisterQKDModule(relayId, ppAliceId);
@@ -219,26 +219,26 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &PeriodicRelayCheck, kms, bobId,
                          Seconds(relayCheckPeriodSec), Seconds(simulationTime));
 
-    // --- ETSI014 app pair (HOST8 <-> HOST9); from KMS Alice, HOST9 is reached via the Relay ---
+    // --- ETSI014 app pair (RELAY_ETSI014_ALICE <-> RELAY_ETSI014_BOB); from KMS Alice, RELAY_ETSI014_BOB is reached via the Relay ---
     control->RegisterQKDApplicationPair(etsiAliceId, etsiBobId, bobHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST5] KMS Alice stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[RELAY_KMS_ALICE] KMS Alice stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST5] KMS Alice serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[RELAY_KMS_ALICE] KMS Alice serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
                      MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
-                         std::cout << "[HOST5] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
+                         std::cout << "[RELAY_KMS_ALICE] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST5] KMS Alice listening" << std::endl;
+                         std::cout << "[RELAY_KMS_ALICE] KMS Alice listening" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

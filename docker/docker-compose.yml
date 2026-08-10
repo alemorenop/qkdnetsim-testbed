@@ -1,5 +1,5 @@
 # Point-to-point scenario (Fig. 3 from the paper, adapted to containers), 6
-# hosts, each one a container with an independent ns-3 process. The IPs of
+# containers, each with an independent ns-3 process. The IPs of
 # each network match the defaults already written in the point-to-point/
 # .cc files, so there is no need to pass --myIpXXX on the command line.
 #
@@ -23,40 +23,40 @@ name: qkdnetsim-fig3-6host
 
 # All networks fix their gateway at ".254", outside the .1-.6 range used by
 # the containers, so Docker does not reserve by default an IP (".1") that
-# has already been assigned to one of the hosts (that caused "Address
+# has already been assigned to one of the containers (that caused "Address
 # already in use").
 networks:
-  net_h1_h2:   # HOST1 <-> HOST2  (sifting, post-processing Alice-Bob)
+  net_qkd:   # H1 <-> H2  (sifting, post-processing Alice-Bob)
     ipam:
       config:
         - subnet: 192.168.11.0/24
           gateway: 192.168.11.254
-  net_h1_h3:   # HOST1 <-> HOST3  (post-processing Alice -> KMS Alice)
+  net_alice_pp_kms:   # H1 <-> H3  (post-processing Alice -> KMS Alice)
     ipam:
       config:
         - subnet: 192.168.13.0/24
           gateway: 192.168.13.254
-  net_h2_h4:   # HOST2 <-> HOST4  (post-processing Bob -> KMS Bob)
+  net_bob_pp_kms:   # H2 <-> H4  (post-processing Bob -> KMS Bob)
     ipam:
       config:
         - subnet: 192.168.24.0/24
           gateway: 192.168.24.254
-  net_h3_h4:   # HOST3 <-> HOST4  (KMS Alice <-> KMS Bob, relay/transform_keys)
+  net_kms_peer:   # H3 <-> H4  (KMS Alice <-> KMS Bob, relay/transform_keys)
     ipam:
       config:
         - subnet: 192.168.34.0/24
           gateway: 192.168.34.254
-  net_h3_h5:   # HOST3 <-> HOST5  (KMS Alice -> ETSI014 Alice, GET_KEY)
+  net_alice_kms_app:   # H3 <-> H5  (KMS Alice -> ETSI014 Alice, GET_KEY)
     ipam:
       config:
         - subnet: 192.168.35.0/24
           gateway: 192.168.35.254
-  net_h4_h6:   # HOST4 <-> HOST6  (KMS Bob -> ETSI014 Bob, GET_KEY)
+  net_bob_kms_app:   # H4 <-> H6  (KMS Bob -> ETSI014 Bob, GET_KEY)
     ipam:
       config:
         - subnet: 192.168.46.0/24
           gateway: 192.168.46.254
-  net_h5_h6:   # HOST5 <-> HOST6  (trafico cifrado ETSI014 Alice-Bob)
+  net_app_data:   # H5 <-> H6  (trafico cifrado ETSI014 Alice-Bob)
     ipam:
       config:
         - subnet: 192.168.56.0/24
@@ -64,39 +64,39 @@ networks:
 
 services:
 
-  host1_pp_alice:
+  pp_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host1
-    hostname: host1
+    container_name: qkd-p2p-pp-alice
+    hostname: p2p-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.11"
       DEV_MAP_KMS: "192.168.13"
     networks:
-      net_h1_h2: { ipv4_address: 192.168.11.1 }
-      net_h1_h3: { ipv4_address: 192.168.13.1 }
+      net_qkd: { ipv4_address: 192.168.11.1 }
+      net_alice_pp_kms: { ipv4_address: 192.168.13.1 }
     depends_on:
-      host2_pp_bob:
+      pp_bob:
         condition: service_healthy
-      host3_kms_alice:
+      kms_alice:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host1_pp_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_alice-default"]
 
-  host2_pp_bob:
+  pp_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host2
-    hostname: host2
+    container_name: qkd-p2p-pp-bob
+    hostname: p2p-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       NETWORK_SETTLE_MS: "6000"
       DEV_MAP_SIFT: "192.168.11"
       DEV_MAP_KMS: "192.168.24"
     networks:
-      net_h1_h2: { ipv4_address: 192.168.11.2 }
-      net_h2_h4: { ipv4_address: 192.168.24.2 }
+      net_qkd: { ipv4_address: 192.168.11.2 }
+      net_bob_pp_kms: { ipv4_address: 192.168.24.2 }
     depends_on:
-      host4_kms_bob:
+      kms_bob:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'Post-processing Bob listening' /tmp/qkdnetsim.log"]
@@ -104,23 +104,23 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host2_pp_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_bob-default"]
 
-  host3_kms_alice:
+  kms_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host3
-    hostname: host3
+    container_name: qkd-p2p-kms-alice
+    hostname: p2p-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_PP: "192.168.13"
       DEV_MAP_KMS: "192.168.34"
       DEV_MAP_ETSI: "192.168.35"
     networks:
-      net_h1_h3: { ipv4_address: 192.168.13.3 }
-      net_h3_h4: { ipv4_address: 192.168.34.3 }
-      net_h3_h5: { ipv4_address: 192.168.35.3 }
+      net_alice_pp_kms: { ipv4_address: 192.168.13.3 }
+      net_kms_peer: { ipv4_address: 192.168.34.3 }
+      net_alice_kms_app: { ipv4_address: 192.168.35.3 }
     depends_on:
-      host4_kms_bob:
+      kms_bob:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'KMS Alice listening' /tmp/qkdnetsim.log"]
@@ -128,60 +128,60 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host3_kms_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_alice-default"]
 
-  host4_kms_bob:
+  kms_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host4
-    hostname: host4
+    container_name: qkd-p2p-kms-bob
+    hostname: p2p-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_PP: "192.168.24"
       DEV_MAP_KMS: "192.168.34"
       DEV_MAP_ETSI: "192.168.46"
     networks:
-      net_h2_h4: { ipv4_address: 192.168.24.4 }
-      net_h3_h4: { ipv4_address: 192.168.34.4 }
-      net_h4_h6: { ipv4_address: 192.168.46.4 }
+      net_bob_pp_kms: { ipv4_address: 192.168.24.4 }
+      net_kms_peer: { ipv4_address: 192.168.34.4 }
+      net_bob_kms_app: { ipv4_address: 192.168.46.4 }
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'KMS Bob listening' /tmp/qkdnetsim.log"]
       interval: 2s
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host4_kms_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_bob-default"]
 
-  host5_etsi014_alice:
+  etsi014_alice:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host5
-    hostname: host5
+    container_name: qkd-p2p-etsi014-alice
+    hostname: p2p-etsi014-alice
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_DATA: "192.168.56"
       DEV_MAP_KMS: "192.168.35"
     networks:
-      net_h5_h6: { ipv4_address: 192.168.56.5 }
-      net_h3_h5: { ipv4_address: 192.168.35.5 }
+      net_app_data: { ipv4_address: 192.168.56.5 }
+      net_alice_kms_app: { ipv4_address: 192.168.35.5 }
     depends_on:
-      host3_kms_alice:
+      kms_alice:
         condition: service_healthy
-      host6_etsi014_bob:
+      etsi014_bob:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host5_etsi014_alice-default", "--appStartTime=20"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_alice-default", "--appStartTime=20"]
 
-  host6_etsi014_bob:
+  etsi014_bob:
     image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-host6
-    hostname: host6
+    container_name: qkd-p2p-etsi014-bob
+    hostname: p2p-etsi014-bob
     cap_add: [NET_ADMIN, NET_RAW]
     environment:
       DEV_MAP_DATA: "192.168.56"
       DEV_MAP_KMS: "192.168.46"
     networks:
-      net_h5_h6: { ipv4_address: 192.168.56.6 }
-      net_h4_h6: { ipv4_address: 192.168.46.6 }
+      net_app_data: { ipv4_address: 192.168.56.6 }
+      net_bob_kms_app: { ipv4_address: 192.168.46.6 }
     depends_on:
-      host4_kms_bob:
+      kms_bob:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "grep -q 'Listening for application traffic' /tmp/qkdnetsim.log"]
@@ -189,4 +189,4 @@ services:
       timeout: 2s
       retries: 15
       start_period: 20s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_host6_etsi014_bob-default", "--appStartTime=20"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_bob-default", "--appStartTime=20"]

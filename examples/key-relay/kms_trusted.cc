@@ -1,27 +1,27 @@
 /*
- * HOST6 - KMS RELAY (intermediate node, "trusted node")
+ * Key-relay TRUSTED KMS (intermediate node)
  *
  * Has no ETSI014 application of its own: its only job is to act as a bridge
  * between KMS Alice and KMS Bob. It has TWO direct QKD links (one to each
  * side), each with its own LOCAL Q-Buffer/S-Buffer:
- *   - Alice side: fed by HOST2, LOCAL_SBUFFER indexed by KMS Alice's ID
- *   - Bob side:   fed by HOST3, LOCAL_SBUFFER indexed by KMS Bob's ID
+ *   - Alice side: fed by RELAY_PP_A, LOCAL_SBUFFER indexed by KMS Alice's ID
+ *   - Bob side:   fed by RELAY_PP_B, LOCAL_SBUFFER indexed by KMS Bob's ID
  *
  * It doesn't need any RELAY-type S-Buffer of its own (that's only for the
  * endpoints, Alice and Bob) - the actual forwarding is done by the internal
  * Relay()/ProcessRelayRequest function, using these two LOCAL buffers
  * directly, triggered automatically when real relay traffic arrives.
  *
- * "Master" trick in two roles at once (see comment in host5_kms_alice.cc):
+ * "Master" trick in two roles at once (see comment in kms_alice.cc):
  *   - Alice side: the Relay must be "slave" (Alice is already master in its own script)
  *     -> Alice's placeholder is created AFTER the real node (normal order)
  *   - Bob side: the Relay must be "master" (Bob is "slave" in its own script)
  *     -> Bob's placeholder is created BEFORE the real node
  *
- *   --devPPA  / --myIpPPA   link to HOST2 (post-processing Relay-A)
- *   --devPPB  / --myIpPPB   link to HOST3 (post-processing Relay-B)
- *   --devKmsA / --myIpKmsA  link to HOST5 (KMS Alice)
- *   --devKmsB / --myIpKmsB  link to HOST7 (KMS Bob)
+ *   --devPPA  / --myIpPPA   link to RELAY_PP_A (post-processing Relay-A)
+ *   --devPPB  / --myIpPPB   link to RELAY_PP_B (post-processing Relay-B)
+ *   --devKmsA / --myIpKmsA  link to RELAY_KMS_ALICE (KMS Alice)
+ *   --devKmsB / --myIpKmsB  link to RELAY_KMS_BOB (KMS Bob)
  */
 
 #include "ns3/core-module.h"
@@ -40,7 +40,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("HOST6_KMS_RELAY");
+NS_LOG_COMPONENT_DEFINE("RELAY_KMS_TRUSTED_KMS_RELAY");
 
 static void
 AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string mac)
@@ -68,7 +68,7 @@ AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string
 // first relay hop (Alice->Relay) always fails with 400 Bad Request
 // ("key_ID not found in 'dec' buffer"), no matter how long we wait. This is
 // compensated for with this manual periodic check (same pattern as
-// PeriodicRelayCheck in host5_kms_alice.cc/host7_kms_bob.cc).
+// PeriodicRelayCheck in kms_alice.cc/kms_bob.cc).
 static void
 PeriodicLocalBufferCheck(Ptr<QKDKeyManagerSystemApplication> kms, uint32_t peerId, Time period, Time stopTime)
 {
@@ -95,18 +95,18 @@ main(int argc, char* argv[])
     std::string myIpKmsB = "192.168.118.6";
 
     // ---- Peers (real IPs of the other VMs) ----
-    std::string peerKmsAliceIp = "192.168.117.5"; // HOST5
-    std::string peerKmsBobIp   = "192.168.118.7"; // HOST7
+    std::string peerKmsAliceIp = "192.168.117.5"; // RELAY_KMS_ALICE
+    std::string peerKmsBobIp   = "192.168.118.7"; // RELAY_KMS_BOB
 
     // ---- Identifier contract shared between VMs ----
-    std::string ppRelayAId = "cccccccc-0000-0000-0000-000000000002"; // HOST2's module
-    std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // HOST3's module
+    std::string ppRelayAId = "cccccccc-0000-0000-0000-000000000002"; // RELAY_PP_A's module
+    std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // RELAY_PP_B's module
 
     // ---- Q-Buffer configuration ----
     uint32_t qbMin = 1024;
     uint32_t qbThr = 51200;
     uint32_t qbMax = 500000000;
-    // MUST match qbDefaultKeyBits in host5_kms_alice.cc and host7_kms_bob.cc
+    // MUST match qbDefaultKeyBits in kms_alice.cc and kms_bob.cc
     // (2048 = ppKeySize*8 on the post-processing side): the relay protocol
     // assumes every KMS uses the same default key size (see the
     // "Keys must be in default size!" comment in Relay(),
@@ -118,22 +118,22 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devPPA", "Real NIC toward HOST2", devPPA);
-    cmd.AddValue("devPPB", "Real NIC toward HOST3", devPPB);
-    cmd.AddValue("devKmsA", "Real NIC toward HOST5", devKmsA);
-    cmd.AddValue("devKmsB", "Real NIC toward HOST7", devKmsB);
-    cmd.AddValue("myIpPPA", "Local IP on the link toward HOST2", myIpPPA);
-    cmd.AddValue("myIpPPB", "Local IP on the link toward HOST3", myIpPPB);
-    cmd.AddValue("myIpKmsA", "Local IP on the link toward HOST5", myIpKmsA);
-    cmd.AddValue("myIpKmsB", "Local IP on the link toward HOST7", myIpKmsB);
-    cmd.AddValue("peerKmsAliceIp", "Real IP of HOST5 (KMS Alice)", peerKmsAliceIp);
-    cmd.AddValue("peerKmsBobIp", "Real IP of HOST7 (KMS Bob)", peerKmsBobIp);
-    cmd.AddValue("ppRelayAId", "UUID of HOST2's post-processing module", ppRelayAId);
-    cmd.AddValue("ppRelayBId", "UUID of HOST3's post-processing module", ppRelayBId);
+    cmd.AddValue("devPPA", "Real NIC toward RELAY_PP_A", devPPA);
+    cmd.AddValue("devPPB", "Real NIC toward RELAY_PP_B", devPPB);
+    cmd.AddValue("devKmsA", "Real NIC toward RELAY_KMS_ALICE", devKmsA);
+    cmd.AddValue("devKmsB", "Real NIC toward RELAY_KMS_BOB", devKmsB);
+    cmd.AddValue("myIpPPA", "Local IP on the link toward RELAY_PP_A", myIpPPA);
+    cmd.AddValue("myIpPPB", "Local IP on the link toward RELAY_PP_B", myIpPPB);
+    cmd.AddValue("myIpKmsA", "Local IP on the link toward RELAY_KMS_ALICE", myIpKmsA);
+    cmd.AddValue("myIpKmsB", "Local IP on the link toward RELAY_KMS_BOB", myIpKmsB);
+    cmd.AddValue("peerKmsAliceIp", "Real IP of RELAY_KMS_ALICE (KMS Alice)", peerKmsAliceIp);
+    cmd.AddValue("peerKmsBobIp", "Real IP of RELAY_KMS_BOB (KMS Bob)", peerKmsBobIp);
+    cmd.AddValue("ppRelayAId", "UUID of RELAY_PP_A's post-processing module", ppRelayAId);
+    cmd.AddValue("ppRelayBId", "UUID of RELAY_PP_B's post-processing module", ppRelayBId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
-    // IMPORTANT (see the full note in host5_kms_alice.cc): the relay protocol
+    // IMPORTANT (see the full note in kms_alice.cc): the relay protocol
     // embeds raw ns-3 node IDs in the JSON messages, so all 3 processes must
     // agree on the same global scheme: (dummy)=0, Bob=1, Relay=2, Alice=3.
     // The initial "dummy" is mandatory (ID 0 is reserved as an "empty field"
@@ -164,7 +164,7 @@ main(int argc, char* argv[])
     QKDLinkHelper QLinkHelper;
     QKDAppHelper QAHelper;
 
-    // Library bug (see the full comment in host5_kms_alice.cc): without this
+    // Library bug (see the full comment in kms_alice.cc): without this
     // SetDefault, every S-Buffer created (including the LOCAL_SBUFFERs used
     // by this node) ends up with a fixed KeySize=512 via
     // SBuffer::DoInitialize(), regardless of what is passed to
@@ -185,12 +185,12 @@ main(int argc, char* argv[])
     uint32_t aliceId = aliceHandle->GetId();
     uint32_t bobId   = bobHandle->GetId();
 
-    // --- Direct LOCAL link toward Alice (fed by HOST2) ---
+    // --- Direct LOCAL link toward Alice (fed by RELAY_PP_A) ---
     kms->CreateQBuffer(aliceId, control->GetQBufferConf(aliceId));
     kms->SetPeerKmAddress(aliceId, Ipv4Address(peerKmsAliceIp.c_str()));
     kms->RegisterQKDModule(aliceId, ppRelayAId);
 
-    // --- Direct LOCAL link toward Bob (fed by HOST3) ---
+    // --- Direct LOCAL link toward Bob (fed by RELAY_PP_B) ---
     kms->CreateQBuffer(bobId, control->GetQBufferConf(bobId));
     kms->SetPeerKmAddress(bobId, Ipv4Address(peerKmsBobIp.c_str()));
     kms->RegisterQKDModule(bobId, ppRelayBId);
@@ -217,19 +217,19 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[HOST6] KMS Relay stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
+                         std::cout << "[RELAY_KMS_TRUSTED] KMS Relay stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
                      MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
-                         std::cout << "[HOST6] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
+                         std::cout << "[RELAY_KMS_TRUSTED] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/WasteRelay",
                      MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
-                         std::cout << "[HOST6] Relay WASTED src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
+                         std::cout << "[RELAY_KMS_TRUSTED] Relay WASTED src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST6] KMS Relay listening" << std::endl;
+                         std::cout << "[RELAY_KMS_TRUSTED] KMS Relay listening" << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

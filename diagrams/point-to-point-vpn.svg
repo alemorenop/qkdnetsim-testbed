@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="860" viewBox="0 0 1200 860" role="img" aria-labelledby="title desc">
+  <title id="title">Point-to-point QKD-backed VPN architecture</title>
+  <desc id="desc">Point-to-point QKDNetSim scenario with H5 and H6 implemented as native strongSwan IPsec/IKEv2 VPN endpoints fed by real key material from the KMS containers.</desc>
+  <defs>
+    
+    <marker id="ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2374d8"></path></marker>
+    <marker id="ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2f9e62"></path></marker>
+    <marker id="ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#5b3a99"></path></marker>
+  </defs>
+  <rect width="1200" height="860" fill="#f7f9fc"></rect>
+  <text x="230" y="19" text-anchor="middle" class="site" fill="#2358a5">ALICE</text>
+  <text x="970" y="19" text-anchor="middle" class="site" fill="#2358a5">BOB</text>
+
+  <path d="M360 81H840" fill="none" stroke="#2374d8" stroke-width="5" marker-end="url(#ab)"></path>
+  <text x="600" y="67" text-anchor="middle" class="edge" fill="#2374d8">QKD post-processing / sifting · 192.168.11.0/24</text>
+  <text x="366" y="100" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.11.1</text>
+  <text x="834" y="100" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.11.2</text>
+
+  <path d="M230 234V324" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <path d="M970 234V324" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <text x="242" y="285" class="edge" fill="#2f9e62">key delivery</text>
+  <text x="958" y="285" text-anchor="end" class="edge" fill="#2f9e62">key delivery</text>
+  <text x="205" y="248" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.13.1</text>
+  <text x="205" y="320" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.13.3</text>
+  <text x="995" y="248" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.24.2</text>
+  <text x="995" y="320" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.24.4</text>
+
+  <path d="M360 381H840" fill="none" stroke="#2f9e62" stroke-width="4" stroke-dasharray="10 7" marker-end="url(#ag)" marker-start="url(#ag)"></path>
+  <text x="600" y="367" text-anchor="middle" class="edge" fill="#2f9e62">KMS peer API · transform_keys · 192.168.34.0/24</text>
+  <text x="370" y="400" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.34.3</text>
+  <text x="830" y="400" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.34.4</text>
+
+  <path d="M230 534V636" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <path d="M970 534V636" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <text x="242" y="578" class="edge" fill="#2f9e62">ETSI 004: open_connect / get_key</text>
+  <text x="242" y="594" class="edge" fill="#2f9e62">ETSI 014: enc_keys</text>
+  <text x="958" y="578" text-anchor="end" class="edge" fill="#2f9e62">ETSI 004: open_connect / get_key</text>
+  <text x="958" y="594" text-anchor="end" class="edge" fill="#2f9e62">ETSI 014: dec_keys</text>
+  <text x="205" y="548" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.35.3</text>
+  <text x="205" y="630" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.35.5</text>
+  <text x="995" y="548" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.4</text>
+  <text x="995" y="630" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.6</text>
+
+  <rect x="70" y="598" width="1040" height="210" rx="16" fill="none" stroke="#7550b5" stroke-width="2" stroke-dasharray="9 6"></rect>
+  <text x="600" y="618" text-anchor="middle" class="group">Host OS layer — Ubuntu 22.04, no ns-3 process</text>
+  <rect x="364" y="678" width="472" height="30" rx="15" fill="#5b3a99"></rect>
+  <rect x="594" y="692" width="12" height="10" rx="2" fill="#fff"></rect>
+  <path d="M596 692v-4a4 4 0 0 1 8 0v4" stroke="#fff" stroke-width="1.8" fill="none"></path>
+  <text x="600" y="674" text-anchor="middle" class="edge" fill="#5b3a99">IPsec/IKEv2 VPN tunnel · 192.168.56.0/24</text>
+  <text x="370" y="726" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.5</text>
+  <text x="830" y="726" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.6</text>
+
+  <g transform="translate(100 24)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H1 · pp_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#e48b2a"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">PP Alice</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H2, H3</text>
+  </g>
+
+  <g transform="translate(840 24)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H2 · pp_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#e48b2a"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">PP Bob</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H1, H4</text>
+  </g>
+
+  <g transform="translate(100 324)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H3 · kms_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#45a850"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">KMS Alice</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H1, H4, H5</text>
+  </g>
+
+  <g transform="translate(840 324)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H4 · kms_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#45a850"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">KMS Bob</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H2, H3, H6</text>
+  </g>
+
+  <g transform="translate(100 636)">
+    <rect width="260" height="150" rx="14" fill="#fff" stroke="#5b3a99" stroke-width="2.5"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · vpn_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">strongSwan Client</text>
+    <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
+      <text x="130" y="108" text-anchor="middle" class="layer">qkd-vpn.py</text>
+
+  </g>
+
+  <g transform="translate(840 636)">
+    <rect width="260" height="150" rx="14" fill="#fff" stroke="#5b3a99" stroke-width="2.5"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · vpn_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">strongSwan Server</text>
+    <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
+      <text x="130" y="108" text-anchor="middle" class="layer">qkd-vpn.py</text>
+
+  </g>
+
+</svg>

@@ -1,13 +1,18 @@
 /*
- * HOST2 - QKD Post-processing BOB (slave)
+ * Point-to-point QKD post-processing ALICE (master)
  *
- * Symmetric to HOST1 (host1_pp_alice.cc). A single real node with two interfaces:
- *   --devSift / --myIpSift   link to HOST1 (post-processing Alice)
- *   --devKms  / --myIpKms    link to HOST4 (KMS Bob)
+ * A single real ns-3 node, with two interfaces bridged to the real world:
+ *   --devSift / --myIpSift   link to P2P_PP_BOB (post-processing Bob)   [sifting, UDP+TCP]
+ *   --devKms  / --myIpKms    link to P2P_KMS_ALICE (KMS Alice)             [key delivery]
+ *
+ * "Bob" (P2P_PP_BOB) is NOT instantiated here: only an empty local Node
+ * (bobHandle) is created as an identifier for SetDst(); the real sifting
+ * traffic travels over the Remote/Remote_Sifting address (P2P_PP_BOB's real IP)
+ * on top of EmuFdNetDevice.
  *
  * Contract shared with the other VMs (must match exactly):
- *   ppBobId    -> also used on HOST4 (KMS Bob) when registering the module
- *   ppAliceId  -> must match the "SetId" used by HOST1
+ *   ppAliceId  -> also used on P2P_KMS_ALICE (KMS Alice) when registering the module
+ *   ppBobId    -> must match the "SetId" used by P2P_PP_BOB
  */
 
 #include "ns3/core-module.h"
@@ -21,7 +26,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("HOST2_PP_BOB");
+NS_LOG_COMPONENT_DEFINE("P2P_PP_ALICE_PP_ALICE");
 
 static void
 KeepAlive(Time period, Time stopTime)
@@ -57,17 +62,17 @@ main(int argc, char* argv[])
     // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devSift  = "eth0";
     std::string devKms   = "eth1";
-    std::string myIpSift = "192.168.11.2";
-    std::string myIpKms  = "192.168.24.2";
+    std::string myIpSift = "192.168.11.1";
+    std::string myIpKms  = "192.168.13.1";
     uint16_t    siftPort = 7102;
 
     // ---- Peers (real IPs of the other VMs) ----
-    std::string peerAliceIp = "192.168.11.1"; // HOST1, same sifting link
-    std::string kmsBobIp    = "192.168.24.4"; // HOST4 (KMS Bob)
+    std::string peerBobIp  = "192.168.11.2"; // P2P_PP_BOB, same sifting link
+    std::string kmsAliceIp = "192.168.13.3"; // P2P_KMS_ALICE (KMS Alice)
 
     // ---- Identifier contract shared between VMs ----
-    std::string ppAliceId = "aaaaaaaa-0000-0000-0000-000000000001"; // must match HOST1/HOST3
-    std::string ppBobId   = "aaaaaaaa-0000-0000-0000-000000000002"; // must match HOST4
+    std::string ppAliceId = "aaaaaaaa-0000-0000-0000-000000000001"; // must match P2P_KMS_ALICE
+    std::string ppBobId   = "aaaaaaaa-0000-0000-0000-000000000002"; // must match P2P_PP_BOB/P2P_KMS_BOB
 
     // ---- QKD link parameters (values from the paper) ----
     uint32_t ppKeySize     = 256;    // bytes (2048 bits)
@@ -79,14 +84,14 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devSift", "Real NIC toward HOST1", devSift);
-    cmd.AddValue("devKms", "Real NIC toward HOST4", devKms);
-    cmd.AddValue("myIpSift", "Local IP on the link toward HOST1", myIpSift);
-    cmd.AddValue("myIpKms", "Local IP on the link toward HOST4", myIpKms);
-    cmd.AddValue("peerAliceIp", "Real IP of HOST1", peerAliceIp);
-    cmd.AddValue("kmsBobIp", "Real IP of HOST4 (KMS Bob)", kmsBobIp);
-    cmd.AddValue("ppAliceId", "UUID of the peer module on HOST1", ppAliceId);
-    cmd.AddValue("ppBobId", "UUID of this module (must match HOST4)", ppBobId);
+    cmd.AddValue("devSift", "Real NIC toward P2P_PP_BOB", devSift);
+    cmd.AddValue("devKms", "Real NIC toward P2P_KMS_ALICE", devKms);
+    cmd.AddValue("myIpSift", "Local IP on the link toward P2P_PP_BOB", myIpSift);
+    cmd.AddValue("myIpKms", "Local IP on the link toward P2P_KMS_ALICE", myIpKms);
+    cmd.AddValue("peerBobIp", "Real IP of P2P_PP_BOB", peerBobIp);
+    cmd.AddValue("kmsAliceIp", "Real IP of P2P_KMS_ALICE (KMS Alice)", kmsAliceIp);
+    cmd.AddValue("ppAliceId", "UUID of this module (must match P2P_KMS_ALICE)", ppAliceId);
+    cmd.AddValue("ppBobId", "UUID of the peer module on P2P_PP_BOB", ppBobId);
     cmd.AddValue("ppKeySize", "Key size (bytes)", ppKeySize);
     cmd.AddValue("ppKeyRateBps", "Average key generation rate (bps)", ppKeyRateBps);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
@@ -103,12 +108,12 @@ main(int argc, char* argv[])
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(self);
 
-    AddEmuInterface(node, devSift, myIpSift, "00:00:00:00:02:01");
-    AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:02:02");
+    AddEmuInterface(node, devSift, myIpSift, "00:00:00:00:01:01");
+    AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:01:02");
 
     InetSocketAddress selfSiftAddr(Ipv4Address(myIpSift.c_str()), siftPort);
-    InetSocketAddress peerSiftAddr(Ipv4Address(peerAliceIp.c_str()), siftPort);
-    InetSocketAddress kmsAddr(Ipv4Address(kmsBobIp.c_str()), 80);
+    InetSocketAddress peerSiftAddr(Ipv4Address(peerBobIp.c_str()), siftPort);
+    InetSocketAddress kmsAddr(Ipv4Address(kmsAliceIp.c_str()), 80);
 
     Ptr<QKDPostprocessingApplication> app = CreateObject<QKDPostprocessingApplication>();
     app->SetAttribute("Local", AddressValue(selfSiftAddr));
@@ -122,26 +127,26 @@ main(int argc, char* argv[])
     app->SetAttribute("DataRate", DataRateValue(DataRate(ppDataRateBps)));
     node->AddApplication(app);
 
-    // Local identifier for "Alice" - never runs code, only provides a GetId()
-    Ptr<Node> aliceHandle = CreateObject<Node>();
+    // Local identifier for "Bob" - never runs code, only provides a GetId()
+    Ptr<Node> bobHandle = CreateObject<Node>();
     app->SetSrc(node);
-    app->SetDst(aliceHandle);
+    app->SetDst(bobHandle);
 
     TypeId tcpTid = TypeId::LookupByName("ns3::TcpSocketFactory");
     TypeId udpTid = TypeId::LookupByName("ns3::UdpSocketFactory");
 
     Ptr<Socket> sData = Socket::CreateSocket(node, tcpTid);
     Ptr<Socket> sSink = Socket::CreateSocket(node, tcpTid);
-    app->SetSocket("send", sData, false);
-    app->SetSocket("sink", sSink, false);
+    app->SetSocket("send", sData, true);
+    app->SetSocket("sink", sSink, true);
 
     Ptr<Socket> sSiftSend = Socket::CreateSocket(node, udpTid);
     Ptr<Socket> sSiftSink = Socket::CreateSocket(node, udpTid);
     app->SetSiftingSocket("send", sSiftSend);
     app->SetSiftingSocket("sink", sSiftSink);
 
-    app->SetId(ppBobId);
-    app->SetPeerId(ppAliceId);
+    app->SetId(ppAliceId);
+    app->SetPeerId(ppBobId);
 
     app->SetStartTime(Seconds(qkdStartTime));
     app->SetStopTime(Seconds(simulationTime));
@@ -152,11 +157,7 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/TxKMS",
                      MakeCallback(+[](std::string ctx, Ptr<const Packet> p) {
-                         std::cout << "[HOST2] Key delivered to KMS Bob, bytes=" << p->GetSize() << std::endl;
-                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/ListenReady",
-                     MakeCallback(+[](std::string ctx, const uint32_t& node) {
-                         std::cout << "[HOST2] Post-processing Bob listening" << std::endl;
+                         std::cout << "[P2P_PP_ALICE] Key delivered to KMS Alice, bytes=" << p->GetSize() << std::endl;
                      }));
 
     Simulator::Stop(Seconds(simulationTime));

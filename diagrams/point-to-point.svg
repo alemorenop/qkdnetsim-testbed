@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880" viewBox="0 0 1200 880" role="img" aria-labelledby="title desc">
+  <title id="title">Point-to-point QKDNetSim testbed architecture</title>
+  <desc id="desc">Six role-named Docker containers, each an independent ns-3 process, forming a direct Alice-Bob QKD link with layered software stacks.</desc>
+  <defs>
+    
+    <marker id="ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2374d8"></path></marker>
+    <marker id="ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2f9e62"></path></marker>
+    <marker id="ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#7550b5"></path></marker>
+  </defs>
+  <rect width="1200" height="880" fill="#f7f9fc"></rect>
+  <text x="230" y="19" text-anchor="middle" class="site" fill="#2358a5">ALICE</text>
+  <text x="970" y="19" text-anchor="middle" class="site" fill="#2358a5">BOB</text>
+
+  <path d="M362 81H838" fill="none" stroke="#2374d8" stroke-width="5" marker-end="url(#ab)"></path>
+  <text x="600" y="67" text-anchor="middle" class="edge" fill="#2374d8">QKD post-processing / sifting · 192.168.11.0/24</text>
+  <text x="368" y="100" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.11.1</text>
+  <text x="832" y="100" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.11.2</text>
+
+  <path d="M230 234V324" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <path d="M970 234V324" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <text x="242" y="285" class="edge" fill="#2f9e62">key delivery</text>
+  <text x="958" y="285" text-anchor="end" class="edge" fill="#2f9e62">key delivery</text>
+  <text x="205" y="248" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.13.1</text>
+  <text x="205" y="320" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.13.3</text>
+  <text x="995" y="248" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.24.2</text>
+  <text x="995" y="320" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.24.4</text>
+
+  <path d="M364 381H836" fill="none" stroke="#2f9e62" stroke-width="4" stroke-dasharray="10 7" marker-end="url(#ag)" marker-start="url(#ag)"></path>
+  <text x="600" y="367" text-anchor="middle" class="edge" fill="#2f9e62">KMS peer API · transform_keys · 192.168.34.0/24</text>
+  <text x="370" y="400" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.34.3</text>
+  <text x="830" y="400" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.34.4</text>
+
+  <path d="M230 534V624" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <path d="M970 534V624" fill="none" stroke="#2f9e62" stroke-width="4" marker-end="url(#ag)"></path>
+  <text x="242" y="585" class="edge" fill="#2f9e62">ETSI 014 GET_KEY</text>
+  <text x="958" y="585" text-anchor="end" class="edge" fill="#2f9e62">ETSI 014 GET_KEY</text>
+  <text x="205" y="548" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.35.3</text>
+  <text x="205" y="620" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.35.5</text>
+  <text x="995" y="548" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.4</text>
+  <text x="995" y="620" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.6</text>
+
+  <path d="M362 681H838" fill="none" stroke="#7550b5" stroke-width="5" marker-end="url(#ap)"></path>
+  <text x="600" y="658" text-anchor="middle" class="edge" fill="#7550b5">OTP-protected application traffic · 192.168.56.0/24</text>
+  <text x="368" y="700" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.5</text>
+  <text x="832" y="700" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.6</text>
+
+  <g transform="translate(100 24)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H1 · pp_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#e48b2a"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">PP Alice</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H2, H3</text>
+  </g>
+
+  <g transform="translate(840 24)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H2 · pp_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#e48b2a"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">PP Bob</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H1, H4</text>
+  </g>
+
+  <g transform="translate(100 324)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H3 · kms_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#45a850"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">KMS Alice</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H1, H4, H5</text>
+  </g>
+
+  <g transform="translate(840 324)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H4 · kms_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#45a850"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">KMS Bob</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H2, H3, H6</text>
+  </g>
+
+  <g transform="translate(100 624)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · etsi014_alice</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#7550b5"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">ETSI 014 Alice</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice · OTP</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H3, H6</text>
+  </g>
+
+  <g transform="translate(840 624)">
+    <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · etsi014_bob</text>
+    <rect x="16" y="36" width="228" height="42" rx="7" fill="#7550b5"></rect>
+    <text x="130" y="63" text-anchor="middle" class="role">ETSI 014 Bob</text>
+    <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
+    <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="16" y="126" width="228" height="36" rx="6" fill="#f7c9de"></rect>
+    <text x="130" y="149" text-anchor="middle" class="layer">EmuFdNetDevice · OTP</text>
+      <text x="130" y="177" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H4, H5</text>
+  </g>
+
+</svg>

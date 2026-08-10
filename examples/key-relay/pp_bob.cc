@@ -1,14 +1,14 @@
 /*
- * HOST3 - QKD Post-processing RELAY-B (master)
+ * Key-relay QKD post-processing BOB (slave)
  *
- * "Relay" side of the Relay<->Bob QKD link.
+ * Symmetric to RELAY_PP_B. Bob has no direct QKD link with Alice, only with the Relay.
  *
- *   --devSift / --myIpSift   link to HOST4 (post-processing Bob)   [sifting]
- *   --devKms  / --myIpKms    link to HOST6 (KMS Relay)             [key delivery]
+ *   --devSift / --myIpSift   link to RELAY_PP_B (post-processing Relay-B)   [sifting]
+ *   --devKms  / --myIpKms    link to RELAY_KMS_BOB (KMS Bob)                  [key delivery]
  *
  * Contract shared with the other VMs (must match exactly):
- *   ppRelayBId -> also used on HOST6 (KMS Relay) when registering the module
- *   ppBobId    -> must match the "SetId" used by HOST4
+ *   ppBobId    -> also used on RELAY_KMS_BOB (KMS Bob) when registering the module
+ *   ppRelayBId -> must match the "SetId" used by RELAY_PP_B
  */
 
 #include "ns3/core-module.h"
@@ -22,7 +22,7 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("HOST3_PP_RELAY_B");
+NS_LOG_COMPONENT_DEFINE("RELAY_PP_BOB_PP_BOB");
 
 static void
 KeepAlive(Time period, Time stopTime)
@@ -58,17 +58,17 @@ main(int argc, char* argv[])
     // ---- Real interfaces of this VM (adjust to your lab) ----
     std::string devSift  = "eth0";
     std::string devKms   = "eth1";
-    std::string myIpSift = "192.168.114.3";
-    std::string myIpKms  = "192.168.115.3";
+    std::string myIpSift = "192.168.114.4";
+    std::string myIpKms  = "192.168.116.4";
     uint16_t    siftPort = 7102;
 
     // ---- Peers (real IPs of the other VMs) ----
-    std::string peerBobIp   = "192.168.114.4"; // HOST4, same sifting link
-    std::string kmsRelayIp  = "192.168.115.6"; // HOST6 (KMS Relay)
+    std::string peerRelayBIp = "192.168.114.3"; // RELAY_PP_B, same sifting link
+    std::string kmsBobIp     = "192.168.116.7"; // RELAY_KMS_BOB (KMS Bob)
 
     // ---- Identifier contract shared between VMs ----
-    std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // must match HOST6
-    std::string ppBobId    = "dddddddd-0000-0000-0000-000000000002"; // must match HOST4
+    std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // must match RELAY_PP_B
+    std::string ppBobId    = "dddddddd-0000-0000-0000-000000000002"; // must match RELAY_KMS_BOB
 
     // ---- QKD link parameters (same values as scenario 1) ----
     uint32_t ppKeySize     = 256;
@@ -80,14 +80,14 @@ main(int argc, char* argv[])
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
-    cmd.AddValue("devSift", "Real NIC toward HOST4", devSift);
-    cmd.AddValue("devKms", "Real NIC toward HOST6", devKms);
-    cmd.AddValue("myIpSift", "Local IP on the link toward HOST4", myIpSift);
-    cmd.AddValue("myIpKms", "Local IP on the link toward HOST6", myIpKms);
-    cmd.AddValue("peerBobIp", "Real IP of HOST4", peerBobIp);
-    cmd.AddValue("kmsRelayIp", "Real IP of HOST6 (KMS Relay)", kmsRelayIp);
-    cmd.AddValue("ppRelayBId", "UUID of this module (must match HOST6)", ppRelayBId);
-    cmd.AddValue("ppBobId", "UUID of the peer module on HOST4", ppBobId);
+    cmd.AddValue("devSift", "Real NIC toward RELAY_PP_B", devSift);
+    cmd.AddValue("devKms", "Real NIC toward RELAY_KMS_BOB", devKms);
+    cmd.AddValue("myIpSift", "Local IP on the link toward RELAY_PP_B", myIpSift);
+    cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_BOB", myIpKms);
+    cmd.AddValue("peerRelayBIp", "Real IP of RELAY_PP_B", peerRelayBIp);
+    cmd.AddValue("kmsBobIp", "Real IP of RELAY_KMS_BOB (KMS Bob)", kmsBobIp);
+    cmd.AddValue("ppRelayBId", "UUID of the peer module on RELAY_PP_B", ppRelayBId);
+    cmd.AddValue("ppBobId", "UUID of this module (must match RELAY_KMS_BOB)", ppBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -102,12 +102,12 @@ main(int argc, char* argv[])
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(self);
 
-    AddEmuInterface(node, devSift, myIpSift, "00:00:00:00:13:01");
-    AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:13:02");
+    AddEmuInterface(node, devSift, myIpSift, "00:00:00:00:14:01");
+    AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:14:02");
 
     InetSocketAddress selfSiftAddr(Ipv4Address(myIpSift.c_str()), siftPort);
-    InetSocketAddress peerSiftAddr(Ipv4Address(peerBobIp.c_str()), siftPort);
-    InetSocketAddress kmsAddr(Ipv4Address(kmsRelayIp.c_str()), 80);
+    InetSocketAddress peerSiftAddr(Ipv4Address(peerRelayBIp.c_str()), siftPort);
+    InetSocketAddress kmsAddr(Ipv4Address(kmsBobIp.c_str()), 80);
 
     Ptr<QKDPostprocessingApplication> app = CreateObject<QKDPostprocessingApplication>();
     app->SetAttribute("Local", AddressValue(selfSiftAddr));
@@ -121,26 +121,26 @@ main(int argc, char* argv[])
     app->SetAttribute("DataRate", DataRateValue(DataRate(ppDataRateBps)));
     node->AddApplication(app);
 
-    // Local identifier for "Bob" - never runs code, only provides a GetId()
-    Ptr<Node> bobHandle = CreateObject<Node>();
+    // Local identifier for "Relay-B" - never runs code, only provides a GetId()
+    Ptr<Node> relayBHandle = CreateObject<Node>();
     app->SetSrc(node);
-    app->SetDst(bobHandle);
+    app->SetDst(relayBHandle);
 
     TypeId tcpTid = TypeId::LookupByName("ns3::TcpSocketFactory");
     TypeId udpTid = TypeId::LookupByName("ns3::UdpSocketFactory");
 
     Ptr<Socket> sData = Socket::CreateSocket(node, tcpTid);
     Ptr<Socket> sSink = Socket::CreateSocket(node, tcpTid);
-    app->SetSocket("send", sData, true);
-    app->SetSocket("sink", sSink, true);
+    app->SetSocket("send", sData, false);
+    app->SetSocket("sink", sSink, false);
 
     Ptr<Socket> sSiftSend = Socket::CreateSocket(node, udpTid);
     Ptr<Socket> sSiftSink = Socket::CreateSocket(node, udpTid);
     app->SetSiftingSocket("send", sSiftSend);
     app->SetSiftingSocket("sink", sSiftSink);
 
-    app->SetId(ppRelayBId);
-    app->SetPeerId(ppBobId);
+    app->SetId(ppBobId);
+    app->SetPeerId(ppRelayBId);
 
     app->SetStartTime(Seconds(qkdStartTime));
     app->SetStopTime(Seconds(simulationTime));
@@ -149,7 +149,11 @@ main(int argc, char* argv[])
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/TxKMS",
                      MakeCallback(+[](std::string ctx, Ptr<const Packet> p) {
-                         std::cout << "[HOST3] Key delivered to KMS Relay (Bob side), bytes=" << p->GetSize() << std::endl;
+                         std::cout << "[RELAY_PP_BOB] Key delivered to KMS Bob, bytes=" << p->GetSize() << std::endl;
+                     }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDPostprocessingApplication/ListenReady",
+                     MakeCallback(+[](std::string ctx, const uint32_t& node) {
+                         std::cout << "[RELAY_PP_BOB] Post-processing Bob listening" << std::endl;
                      }));
 
     Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
