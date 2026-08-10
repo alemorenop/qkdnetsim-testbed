@@ -18,7 +18,7 @@ Container-based adaptation of the network emulation experiment shown in Fig. 3 o
 
 > Mehic, M., Dervisevic, E., Burdiak, P., Lipovac, V., Fazio, P. and Voznak, M., 2024. *Emulation of quantum key distribution networks*. IEEE Network, 39(1), pp.116-123. https://doi.org/10.1109/MNET.2024.3398404
 
-The paper simulates both ends of every link inside a single ns-3 process. In this testbed, every role runs in a separate Docker container and communicates through real network interfaces using `EmuFdNetDevice`. The logical scenario is the same, but it is deployed as six independent nodes.
+The paper simulates both ends of every link inside a single ns-3 process. In this testbed, every role runs in a separate Docker container. Each ns-3 `EmuFdNetDevice` opens an `AF_PACKET` raw socket bound to a Linux `ethX` interface backed by a Docker veth; this veth is the equivalent of the paper diagrams' “Real Net Device”. Native VPN endpoints do not use ns-3 or `EmuFdNetDevice`: strongSwan and the VPN consumer use the Linux network stack and Docker veth directly. The logical scenario is the same, but it is deployed as six independent nodes.
 
 The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob ETSI 014 applications. Alice and Bob communicate directly, without an intermediate node.
 

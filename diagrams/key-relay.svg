@@ -64,9 +64,10 @@
     <text x="110" y="57" text-anchor="middle" class="role">PP Alice</text>
     <rect x="14" y="76" width="192" height="32" rx="6" fill="#f2e4bd"></rect>
     <text x="110" y="97" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="114" width="192" height="32" rx="6" fill="#f7c9de"></rect>
-    <text x="110" y="134" text-anchor="middle" class="layer" font-size="10">EmuFdNetDevice</text>
-    <text x="110" y="172" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H2, H5</text>
+    <rect x="14" y="114" width="192" height="48" rx="6" fill="#f7c9de"></rect>
+    <text x="110" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
+    <text x="110" y="149" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H2, H5</text>
   </g>
   <g transform="translate(476 50)">
     <rect width="200" height="190" rx="13" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -75,9 +76,10 @@
     <text x="100" y="57" text-anchor="middle" class="role">PP Relay-A</text>
     <rect x="12" y="76" width="176" height="32" rx="6" fill="#f2e4bd"></rect>
     <text x="100" y="97" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="12" y="114" width="176" height="32" rx="6" fill="#f7c9de"></rect>
-    <text x="100" y="134" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
-    <text x="100" y="172" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H1, H6</text>
+    <rect x="12" y="114" width="176" height="48" rx="6" fill="#f7c9de"></rect>
+    <text x="100" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
+    <text x="100" y="149" text-anchor="middle" class="layer" font-size="8">AF_PACKET → Linux veth (ethX)</text>
+    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H1, H6</text>
   </g>
   <g transform="translate(706 50)">
     <rect width="200" height="190" rx="13" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -86,9 +88,10 @@
     <text x="100" y="57" text-anchor="middle" class="role">PP Relay-B</text>
     <rect x="12" y="76" width="176" height="32" rx="6" fill="#f2e4bd"></rect>
     <text x="100" y="97" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="12" y="114" width="176" height="32" rx="6" fill="#f7c9de"></rect>
-    <text x="100" y="134" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
-    <text x="100" y="172" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H4, H6</text>
+    <rect x="12" y="114" width="176" height="48" rx="6" fill="#f7c9de"></rect>
+    <text x="100" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
+    <text x="100" y="149" text-anchor="middle" class="layer" font-size="8">AF_PACKET → Linux veth (ethX)</text>
+    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H4, H6</text>
   </g>
   <g transform="translate(1106 50)">
     <rect width="220" height="190" rx="13" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -97,9 +100,10 @@
     <text x="110" y="57" text-anchor="middle" class="role">PP Bob</text>
     <rect x="14" y="76" width="192" height="32" rx="6" fill="#f2e4bd"></rect>
     <text x="110" y="97" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="114" width="192" height="32" rx="6" fill="#f7c9de"></rect>
-    <text x="110" y="134" text-anchor="middle" class="layer" font-size="10">EmuFdNetDevice</text>
-    <text x="110" y="172" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H3, H7</text>
+    <rect x="14" y="114" width="192" height="48" rx="6" fill="#f7c9de"></rect>
+    <text x="110" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
+    <text x="110" y="149" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H3, H7</text>
   </g>
 
   <g transform="translate(46 330)">
@@ -109,10 +113,11 @@
     <text x="120" y="58" text-anchor="middle" class="role">KMS Alice</text>
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#f2e4bd"></rect>
     <text x="120" y="100" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="118" width="212" height="34" rx="6" fill="#f7c9de"></rect>
-    <text x="120" y="139" text-anchor="middle" class="layer" font-size="10">EmuFdNetDevice ×3</text>
-    <text x="120" y="164" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H1, H6, H8</text>
-    <text x="120" y="192" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
+    <rect x="14" y="118" width="212" height="50" rx="6" fill="#f7c9de"></rect>
+    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
+    <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H1, H6, H8</text>
+    <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
   <g transform="translate(576 330)">
     <rect width="230" height="230" rx="13" fill="#fff7e6" stroke="#d97706" stroke-width="3"></rect>
@@ -121,11 +126,12 @@
     <text x="115" y="61" text-anchor="middle" class="role">Trusted KMS</text>
     <rect x="14" y="82" width="202" height="34" rx="6" fill="#f2e4bd"></rect>
     <text x="115" y="104" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="122" width="202" height="34" rx="6" fill="#f7c9de"></rect>
-    <text x="115" y="143" text-anchor="middle" class="layer" font-size="10">EmuFdNetDevice ×4</text>
-    <text x="115" y="172" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H2, H3, H5, H7</text>
-    <text x="115" y="194" text-anchor="middle" class="detail">decrypts / re-encrypts keys</text>
-    <text x="115" y="211" text-anchor="middle" class="detail">independent hop keys A, B</text>
+    <rect x="14" y="122" width="202" height="50" rx="6" fill="#f7c9de"></rect>
+    <text x="115" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×4</text>
+    <text x="115" y="159" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="115" y="184" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H2, H3, H5, H7</text>
+    <text x="115" y="204" text-anchor="middle" class="detail">decrypts / re-encrypts keys</text>
+    <text x="115" y="221" text-anchor="middle" class="detail">independent hop keys A, B</text>
   </g>
   <g transform="translate(1096 330)">
     <rect width="240" height="210" rx="13" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -134,10 +140,11 @@
     <text x="120" y="58" text-anchor="middle" class="role">KMS Bob</text>
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#f2e4bd"></rect>
     <text x="120" y="100" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="118" width="212" height="34" rx="6" fill="#f7c9de"></rect>
-    <text x="120" y="139" text-anchor="middle" class="layer" font-size="10">EmuFdNetDevice ×3</text>
-    <text x="120" y="164" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H4, H6, H9</text>
-    <text x="120" y="192" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
+    <rect x="14" y="118" width="212" height="50" rx="6" fill="#f7c9de"></rect>
+    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
+    <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H4, H6, H9</text>
+    <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
 
   <g transform="translate(46 650)">
@@ -147,9 +154,10 @@
     <text x="120" y="59" text-anchor="middle" class="role">ETSI 014 Alice</text>
     <rect x="14" y="80" width="212" height="34" rx="6" fill="#f2e4bd"></rect>
     <text x="120" y="102" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="120" width="212" height="34" rx="6" fill="#f7c9de"></rect>
-    <text x="120" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
-    <text x="120" y="166" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H5, H9</text>
+    <rect x="14" y="120" width="212" height="50" rx="6" fill="#f7c9de"></rect>
+    <text x="120" y="139" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
+    <text x="120" y="157" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="120" y="183" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H5, H9</text>
   </g>
   <g transform="translate(1096 650)">
     <rect width="240" height="190" rx="13" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -158,9 +166,10 @@
     <text x="120" y="59" text-anchor="middle" class="role">ETSI 014 Bob</text>
     <rect x="14" y="80" width="212" height="34" rx="6" fill="#f2e4bd"></rect>
     <text x="120" y="102" text-anchor="middle" class="layer">ns-3 node</text>
-    <rect x="14" y="120" width="212" height="34" rx="6" fill="#f7c9de"></rect>
-    <text x="120" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
-    <text x="120" y="166" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H7, H8</text>
+    <rect x="14" y="120" width="212" height="50" rx="6" fill="#f7c9de"></rect>
+    <text x="120" y="139" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
+    <text x="120" y="157" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
+    <text x="120" y="183" text-anchor="middle" font-size="9.5" fill="#8a6a4a">↔ H7, H8</text>
   </g>
 
 </svg>
