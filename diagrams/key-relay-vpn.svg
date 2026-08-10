@@ -153,7 +153,8 @@
     <rect x="14" y="32" width="212" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="120" y="59" text-anchor="middle" class="role">strongSwan Client</text>
     <rect x="14" y="82" width="212" height="34" rx="6" fill="#f0e6c8"></rect>
-    <text x="120" y="104" text-anchor="middle" class="layer">qkd-vpn.py</text>
+    <text x="120" y="98" text-anchor="middle" class="layer">QKD VPN consumer</text>
+    <text x="120" y="112" text-anchor="middle" font-size="9.5" class="layer">ETSI 004 / ETSI 014</text>
   </g>
   <g transform="translate(1096 650)">
     <rect width="240" height="150" rx="13" fill="#fff" stroke="#5b3a99" stroke-width="2.5"></rect>
@@ -161,7 +162,8 @@
     <rect x="14" y="32" width="212" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="120" y="59" text-anchor="middle" class="role">strongSwan Server</text>
     <rect x="14" y="82" width="212" height="34" rx="6" fill="#f0e6c8"></rect>
-    <text x="120" y="104" text-anchor="middle" class="layer">qkd-vpn.py</text>
+    <text x="120" y="98" text-anchor="middle" class="layer">QKD VPN consumer</text>
+    <text x="120" y="112" text-anchor="middle" font-size="9.5" class="layer">ETSI 004 / ETSI 014</text>
   </g>
 
 </svg>

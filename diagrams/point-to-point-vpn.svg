@@ -104,7 +104,8 @@
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">strongSwan Client</text>
     <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
-      <text x="130" y="108" text-anchor="middle" class="layer">qkd-vpn.py</text>
+      <text x="130" y="102" text-anchor="middle" class="layer">QKD VPN consumer</text>
+      <text x="130" y="116" text-anchor="middle" font-size="10" class="layer">ETSI 004 / ETSI 014</text>
 
   </g>
 
@@ -114,7 +115,8 @@
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">strongSwan Server</text>
     <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
-      <text x="130" y="108" text-anchor="middle" class="layer">qkd-vpn.py</text>
+      <text x="130" y="102" text-anchor="middle" class="layer">QKD VPN consumer</text>
+      <text x="130" y="116" text-anchor="middle" font-size="10" class="layer">ETSI 004 / ETSI 014</text>
 
   </g>
 
