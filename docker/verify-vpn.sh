@@ -4,6 +4,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 docker_bin="${DOCKER_BIN:-docker}"
+source docker/verify-link-budget.sh
 expected_interface="${QKD_INTERFACE:-004}"
 startup_timeout="${1:-240}"
 rotation_timeout="${2:-120}"
@@ -134,6 +135,8 @@ echo "=== 1) Waiting for the initial QKD-backed VPN ==="
 wait_for_health qkd-p2p-vpn-alice
 wait_for_health qkd-p2p-vpn-bob
 assert_running_without_restarts
+verify_qkd_link_budget_pair "$docker_bin" qkd-p2p-vpn-pp-alice qkd-p2p-vpn-pp-bob alice-bob ||
+    fail "the point-to-point QKD endpoints do not use the same link budget"
 initial_generation=$(assert_peer_state_matches)
 [ "$initial_generation" -ge 1 ] ||
     fail "the first committed generation was not reached"

@@ -21,6 +21,8 @@
 
 #include "ns3/qkd-postprocessing-application.h"
 
+#include "../qkd-link-budget.h"
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("RELAY_PP_ALICE_PP_ALICE");
@@ -71,9 +73,11 @@ main(int argc, char* argv[])
     std::string ppAliceId  = "cccccccc-0000-0000-0000-000000000001"; // must match RELAY_KMS_ALICE
     std::string ppRelayAId = "cccccccc-0000-0000-0000-000000000002"; // must match RELAY_PP_A
 
-    // ---- QKD link parameters (same values as scenario 1) ----
-    uint32_t ppKeySize     = 256;    // bytes (2048 bits)
-    uint32_t ppKeyRateBps  = 150000; // 150 kbps
+    // ---- Alice-relay QKD link (distance/loss model) ----
+    uint32_t ppKeySize     = 256; // bytes (2048 bits)
+    double fiberLengthKm = qkd_testbed::DEFAULT_FIBER_LENGTH_KM;
+    double fiberAttenuationDbPerKm = qkd_testbed::DEFAULT_FIBER_ATTENUATION_DB_PER_KM;
+    double zeroLossKeyRateBps = qkd_testbed::DEFAULT_ZERO_LOSS_KEY_RATE_BPS;
     uint32_t ppPacketSize  = 300;    // bytes
     uint32_t ppDataRateBps = 2000;   // 2 kbps
 
@@ -89,8 +93,16 @@ main(int argc, char* argv[])
     cmd.AddValue("kmsAliceIp", "Real IP of RELAY_KMS_ALICE (KMS Alice)", kmsAliceIp);
     cmd.AddValue("ppAliceId", "UUID of this module (must match RELAY_KMS_ALICE)", ppAliceId);
     cmd.AddValue("ppRelayAId", "UUID of the peer module on RELAY_PP_A", ppRelayAId);
+    cmd.AddValue("fiberLengthKm", "QKD-link fiber length (km)", fiberLengthKm);
+    cmd.AddValue("fiberAttenuationDbPerKm", "QKD-link fiber attenuation (dB/km)", fiberAttenuationDbPerKm);
+    cmd.AddValue("zeroLossKeyRateBps", "QKD system key rate before fiber loss (bps)", zeroLossKeyRateBps);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+
+    const auto linkBudget = qkd_testbed::CalculateQkdLinkBudget(
+        fiberLengthKm, fiberAttenuationDbPerKm, zeroLossKeyRateBps);
+    const uint64_t ppKeyRateBps = linkBudget.keyRateBps;
+    std::cout << qkd_testbed::DescribeQkdLinkBudget("alice-relay", linkBudget) << std::endl;
 
     NodeContainer self;
     self.Create(1);

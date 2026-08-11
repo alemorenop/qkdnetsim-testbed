@@ -19,6 +19,8 @@
 
 #include "ns3/qkd-postprocessing-application.h"
 
+#include "../qkd-link-budget.h"
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("P2P_PP_BOB_PP_BOB");
@@ -69,9 +71,11 @@ main(int argc, char* argv[])
     std::string ppAliceId = "aaaaaaaa-0000-0000-0000-000000000001"; // must match P2P_PP_ALICE/P2P_KMS_ALICE
     std::string ppBobId   = "aaaaaaaa-0000-0000-0000-000000000002"; // must match P2P_KMS_BOB
 
-    // ---- QKD link parameters (values from the paper) ----
-    uint32_t ppKeySize     = 256;    // bytes (2048 bits)
-    uint32_t ppKeyRateBps  = 150000; // 150 kbps
+    // ---- Distance-aware QKD link parameters ----
+    uint32_t ppKeySize     = 256; // bytes (2048 bits)
+    double fiberLengthKm = qkd_testbed::DEFAULT_FIBER_LENGTH_KM;
+    double fiberAttenuationDbPerKm = qkd_testbed::DEFAULT_FIBER_ATTENUATION_DB_PER_KM;
+    double zeroLossKeyRateBps = qkd_testbed::DEFAULT_ZERO_LOSS_KEY_RATE_BPS;
     uint32_t ppPacketSize  = 300;    // bytes
     uint32_t ppDataRateBps = 2000;   // 2 kbps
 
@@ -88,9 +92,16 @@ main(int argc, char* argv[])
     cmd.AddValue("ppAliceId", "UUID of the peer module on P2P_PP_ALICE", ppAliceId);
     cmd.AddValue("ppBobId", "UUID of this module (must match P2P_KMS_BOB)", ppBobId);
     cmd.AddValue("ppKeySize", "Key size (bytes)", ppKeySize);
-    cmd.AddValue("ppKeyRateBps", "Average key generation rate (bps)", ppKeyRateBps);
+    cmd.AddValue("fiberLengthKm", "QKD-link fiber length (km)", fiberLengthKm);
+    cmd.AddValue("fiberAttenuationDbPerKm", "QKD-link fiber attenuation (dB/km)", fiberAttenuationDbPerKm);
+    cmd.AddValue("zeroLossKeyRateBps", "QKD system key rate before fiber loss (bps)", zeroLossKeyRateBps);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+
+    const auto linkBudget = qkd_testbed::CalculateQkdLinkBudget(
+        fiberLengthKm, fiberAttenuationDbPerKm, zeroLossKeyRateBps);
+    const uint64_t ppKeyRateBps = linkBudget.keyRateBps;
+    std::cout << qkd_testbed::DescribeQkdLinkBudget("alice-bob", linkBudget) << std::endl;
 
     NodeContainer self;
     self.Create(1);

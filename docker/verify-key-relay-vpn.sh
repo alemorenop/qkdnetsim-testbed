@@ -4,6 +4,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
 docker_bin="${DOCKER_BIN:-docker}"
+source docker/verify-link-budget.sh
 expected_interface="${QKD_INTERFACE:-004}"
 startup_timeout="${1:-360}"
 rotation_timeout="${2:-180}"
@@ -129,6 +130,10 @@ echo "=== 1) Waiting for the initial relayed QKD-backed VPN ==="
 wait_for_health qkd-relay-vpn-alice
 wait_for_health qkd-relay-vpn-bob
 assert_stable_containers
+verify_qkd_link_budget_pair "$docker_bin" qkd-relay-vpn-pp-alice qkd-relay-vpn-pp-a alice-relay ||
+    fail "the Alice-relay QKD endpoints do not use the same link budget"
+verify_qkd_link_budget_pair "$docker_bin" qkd-relay-vpn-pp-b qkd-relay-vpn-pp-bob relay-bob ||
+    fail "the relay-Bob QKD endpoints do not use the same link budget"
 initial_state=$(assert_peer_state_matches)
 initial_generation=${initial_state%%|*}
 initial_reference=${initial_state#*|}

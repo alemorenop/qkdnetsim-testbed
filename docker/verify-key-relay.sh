@@ -10,6 +10,7 @@ set -uo pipefail
 # argument is meant for a process inside the container. Docker needs to
 # receive the unmodified Linux paths here.
 export MSYS_NO_PATHCONV=1
+source docker/verify-link-budget.sh
 COMPOSE="docker compose -f docker/docker-compose.key-relay.yml"
 CAPTURE_S="${1:-10}"
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-120}"
@@ -45,6 +46,15 @@ for service in $($COMPOSE config --services); do
         failures=$((failures + 1))
     fi
 done
+echo
+
+echo "=== QKD link budgets ==="
+if ! verify_qkd_link_budget_pair docker qkd-relay-pp-alice qkd-relay-pp-a alice-relay; then
+    failures=$((failures + 1))
+fi
+if ! verify_qkd_link_budget_pair docker qkd-relay-pp-b qkd-relay-pp-bob relay-bob; then
+    failures=$((failures + 1))
+fi
 echo
 
 # The two physical QKD links become ready before the end-to-end relay buffer.

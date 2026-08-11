@@ -4,6 +4,7 @@
 
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
+source docker/verify-link-budget.sh
 
 COMPOSE="docker compose -f docker/docker-compose.yml"
 CAPTURE_S="${1:-6}"
@@ -32,6 +33,12 @@ for service in $($COMPOSE config --services); do
         failures=$((failures + 1))
     fi
 done
+echo
+
+echo "=== QKD link budget ==="
+if ! verify_qkd_link_budget_pair docker qkd-p2p-pp-alice qkd-p2p-pp-bob alice-bob; then
+    failures=$((failures + 1))
+fi
 echo
 
 echo "=== 2) Expected activity per container ==="

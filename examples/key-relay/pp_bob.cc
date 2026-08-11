@@ -20,6 +20,8 @@
 
 #include "ns3/qkd-postprocessing-application.h"
 
+#include "../qkd-link-budget.h"
+
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("RELAY_PP_BOB_PP_BOB");
@@ -70,9 +72,11 @@ main(int argc, char* argv[])
     std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // must match RELAY_PP_B
     std::string ppBobId    = "dddddddd-0000-0000-0000-000000000002"; // must match RELAY_KMS_BOB
 
-    // ---- QKD link parameters (same values as scenario 1) ----
+    // ---- Relay-Bob QKD link (distance/loss model) ----
     uint32_t ppKeySize     = 256;
-    uint32_t ppKeyRateBps  = 150000;
+    double fiberLengthKm = qkd_testbed::DEFAULT_FIBER_LENGTH_KM;
+    double fiberAttenuationDbPerKm = qkd_testbed::DEFAULT_FIBER_ATTENUATION_DB_PER_KM;
+    double zeroLossKeyRateBps = qkd_testbed::DEFAULT_ZERO_LOSS_KEY_RATE_BPS;
     uint32_t ppPacketSize  = 300;
     uint32_t ppDataRateBps = 2000;
 
@@ -88,8 +92,16 @@ main(int argc, char* argv[])
     cmd.AddValue("kmsBobIp", "Real IP of RELAY_KMS_BOB (KMS Bob)", kmsBobIp);
     cmd.AddValue("ppRelayBId", "UUID of the peer module on RELAY_PP_B", ppRelayBId);
     cmd.AddValue("ppBobId", "UUID of this module (must match RELAY_KMS_BOB)", ppBobId);
+    cmd.AddValue("fiberLengthKm", "QKD-link fiber length (km)", fiberLengthKm);
+    cmd.AddValue("fiberAttenuationDbPerKm", "QKD-link fiber attenuation (dB/km)", fiberAttenuationDbPerKm);
+    cmd.AddValue("zeroLossKeyRateBps", "QKD system key rate before fiber loss (bps)", zeroLossKeyRateBps);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+
+    const auto linkBudget = qkd_testbed::CalculateQkdLinkBudget(
+        fiberLengthKm, fiberAttenuationDbPerKm, zeroLossKeyRateBps);
+    const uint64_t ppKeyRateBps = linkBudget.keyRateBps;
+    std::cout << qkd_testbed::DescribeQkdLinkBudget("relay-bob", linkBudget) << std::endl;
 
     NodeContainer self;
     self.Create(1);

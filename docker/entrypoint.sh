@@ -56,6 +56,19 @@ for iface in $(ls /sys/class/net | grep -v '^lo$'); do
     ethtool -K "$iface" tx off rx off sg off tso off gso off gro off >/dev/null 2>&1 || true
 done
 
+# QKD post-processing containers receive the physical link parameters through
+# Compose. Only services that define these variables get the corresponding
+# command-line options, so KMS and application binaries remain unchanged.
+if [ -n "${QKD_FIBER_LENGTH_KM:-}" ]; then
+    extra_args+=("--fiberLengthKm=${QKD_FIBER_LENGTH_KM}")
+fi
+if [ -n "${QKD_FIBER_ATTENUATION_DB_PER_KM:-}" ]; then
+    extra_args+=("--fiberAttenuationDbPerKm=${QKD_FIBER_ATTENUATION_DB_PER_KM}")
+fi
+if [ -n "${QKD_ZERO_LOSS_KEY_RATE_BPS:-}" ]; then
+    extra_args+=("--zeroLossKeyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS}")
+fi
+
 # Mirror all output (from here on) to a fixed file inside the container, in
 # addition to normal stdout. Required for the HEALTHCHECK in
 # docker-compose.key-relay.yml: a HEALTHCHECK runs INSIDE the container

@@ -3,7 +3,8 @@
     {
       "startTime": 0,
       "stopTime": 150,
-      "keyRate": 28549.242,
+      "fiberAttenuationDbPerKm": 0.2417,
+      "zeroLossKeyRateBps": 17094000,
       "keySize": 10000,
       "ppPacketSize": 100,
       "ppRate": 1000,
@@ -14,7 +15,8 @@
     {
       "startTime": 0,
       "stopTime": 150,
-      "keyRate": 28890.624,
+      "fiberAttenuationDbPerKm": 0.2303,
+      "zeroLossKeyRateBps": 17094000,
       "keySize": 10000,
       "ppPacketSize": 100,
       "ppRate": 1000,

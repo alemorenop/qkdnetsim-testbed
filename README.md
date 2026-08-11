@@ -2,6 +2,99 @@
 
 This repository is a testbed built on top of **QKDNetSim** (see the original project documentation below). It provides real-network emulation scenarios in which every node or role runs in its own Docker container and communicates over actual network interfaces instead of being simulated inside a single ns-3 process.
 
+## Distance-aware QKD link budget
+
+All four testbed scenarios derive the average secret-key generation rate of
+each physical QKD link from its fiber length and attenuation. QKDNetSim
+abstracts the quantum channel, so the calculation is performed before the
+post-processing application starts and its result is assigned to the
+`QKDPostprocessingApplication::KeyRate` attribute:
+
+```text
+totalLossDb = fiberLengthKm * fiberAttenuationDbPerKm
+keyRateBps  = zeroLossKeyRateBps * 10^(-totalLossDb / 10)
+```
+
+The implementation uses general link-budget parameter names. Its current
+default zero-loss rate is `17,094,000 bit/s`, calibrated from the equipment
+and processing factors used to estimate the reference network links:
+
+```text
+1e9 * 0.42 * 0.5 * 0.25 * 0.88 * 0.37 = 17,094,000 bit/s
+```
+
+The model and the 85 km/100 km reference links come from:
+
+> Mehic, M., Dervisevic, E., Fazio, P. and Voznak, M., 2025. *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*. IEEE Network, 39(3), pp.173-179. https://doi.org/10.1109/MNET.2025.3540705
+
+With the published link parameters, the implementation reproduces the paper's
+reported estimates:
+
+| Fiber length | Attenuation | Total loss | Calculated `keyRate` |
+|---:|---:|---:|---:|
+| 85 km | 0.2417 dB/km | 20.5445 dB | 150,797 bit/s |
+| 100 km | 0.2303 dB/km | 23.03 dB | 85,083 bit/s |
+
+The paper's prose lists a 20% detector efficiency, while its reported rates
+are reproduced by the 25% factor shown above. The implementation follows the
+published rates and exposes `QKD_ZERO_LOSS_KEY_RATE_BPS` so experiments can
+select a different equipment model explicitly instead of hiding that
+assumption.
+
+The two post-processing processes at the ends of one QKD link must receive
+identical parameters. Compose enforces this automatically. Point-to-point and
+point-to-point VPN scenarios use:
+
+- `QKD_FIBER_LENGTH_KM` (default `85`)
+- `QKD_FIBER_ATTENUATION_DB_PER_KM` (default `0.2417`)
+- `QKD_ZERO_LOSS_KEY_RATE_BPS` (default `17094000`)
+
+For example, run any point-to-point variant with the reference 100 km profile:
+
+```bash
+QKD_FIBER_LENGTH_KM=100 \
+QKD_FIBER_ATTENUATION_DB_PER_KM=0.2303 \
+docker compose -f docker/docker-compose.vpn.yml up -d --build
+```
+
+Key-relay and key-relay VPN scenarios configure both physical QKD segments
+independently:
+
+- `QKD_ALICE_RELAY_FIBER_LENGTH_KM` and
+  `QKD_ALICE_RELAY_ATTENUATION_DB_PER_KM` (defaults: 85 km, 0.2417 dB/km)
+- `QKD_RELAY_BOB_FIBER_LENGTH_KM` and
+  `QKD_RELAY_BOB_ATTENUATION_DB_PER_KM` (defaults: 100 km, 0.2303 dB/km)
+- the common `QKD_ZERO_LOSS_KEY_RATE_BPS`
+
+Each post-processing process prints a `[QKD_LINK_BUDGET]` line containing the
+fiber length, attenuation, total loss and resulting rate. This makes the
+physical assumptions recorded in the container logs and allows a verifier or
+experiment harness to confirm that both ends used the same link profile.
+
+The original `examples_qkdnetsim_etsi_combined_input` scenario is not used by
+the four Docker scenario families described below. It was nevertheless updated
+because it is the generic topology-from-JSON entry point and already exposes
+`srcDstDistance`; leaving it unchanged would make distance affect the Docker
+links while being ignored by configurable JSON topologies. It now uses the
+same calculation when a `qkd_links` entry contains
+`fiberAttenuationDbPerKm`. In that JSON schema, `srcDstDistance` remains in
+meters and `zeroLossKeyRateBps` is optional:
+
+```json
+{
+  "srcDstDistance": 100000,
+  "fiberAttenuationDbPerKm": 0.2303,
+  "zeroLossKeyRateBps": 17094000
+}
+```
+
+Old web-generated JSON files containing only `keyRate` remain supported, but
+that value is treated as a legacy explicit rate and no distance calculation is
+performed. The link-budget calculation changes only QKD key generation; it
+does not yet emulate classical propagation delay. Classical delay will be
+introduced separately with Linux `tc netem` or COREEMU so the optical model
+and classical-network model can be varied independently.
+
 ## Scenarios
 
 The diagrams and tables use `H1`–`H9` as compact deployment identifiers. Each
@@ -364,6 +457,10 @@ the relay layer transports larger storage blocks internally.
   increasing ETSI 004 stream indices after a completely consumed stream is
   refilled.
 - **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for every scenario binary.
+- **[`examples/qkd-link-budget.h`](examples/qkd-link-budget.h)** — shared,
+  validated fiber-loss model used by the point-to-point, key-relay and
+  topology-input post-processing applications. Compose passes the same
+  physical parameters to both ends of every distributed QKD link.
 - **[`docker/vpn/`](docker/vpn/)** — the strongSwan endpoint image, its
   interface-aware entrypoint, and the transactional ETSI 004/014 consumer
   (`qkd-vpn.py`).
