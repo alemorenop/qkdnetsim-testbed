@@ -8,24 +8,65 @@ All four testbed scenarios derive the average secret-key generation rate of
 each physical QKD link from its fiber length and attenuation. QKDNetSim
 abstracts the quantum channel, so the calculation is performed before the
 post-processing application starts and its result is assigned to the
-`QKDPostprocessingApplication::KeyRate` attribute:
+`QKDPostprocessingApplication::KeyRate` attribute.
 
-```text
-totalLossDb = fiberLengthKm * fiberAttenuationDbPerKm
-keyRateBps  = zeroLossKeyRateBps * 10^(-totalLossDb / 10)
-```
+For a fiber of length $L$ and attenuation coefficient $\alpha$, the total
+channel loss is:
+
+$$
+A_{\mathrm{dB}}(L) = \alpha L
+$$
+
+The corresponding fiber transmittance is:
+
+$$
+\eta(L) = 10^{-A_{\mathrm{dB}}(L)/10}
+        = 10^{-\alpha L/10}
+$$
+
+The testbed uses a loss-budget-based key-rate model in which the rate scales
+linearly with this transmittance:
+
+$$
+R_{\mathrm{model}}(L) = R_0\eta(L)
+                       = R_0 10^{-\alpha L/10}
+$$
+
+where $L$ is expressed in kilometres, $\alpha$ in dB/km, $A_{\mathrm{dB}}$
+in dB, $\eta$ is dimensionless, and $R_0$ is the configurable secret-key rate
+before fiber loss.
 
 The implementation uses general link-budget parameter names. Its current
 default zero-loss rate is `17,094,000 bit/s`, calibrated from the equipment
 and processing factors used to estimate the reference network links:
 
-```text
-1e9 * 0.42 * 0.5 * 0.25 * 0.88 * 0.37 = 17,094,000 bit/s
-```
+$$
+\begin{aligned}
+R_0 &= 10^9 \times 0.42 \times 0.50 \times 0.25
+       \times 0.88 \times 0.37 \\
+    &= 17{,}094{,}000\ \mathrm{bit/s}
+\end{aligned}
+$$
 
-The model and the 85 km/100 km reference links come from:
+This model is supported by the following sources:
 
-> Mehic, M., Dervisevic, E., Fazio, P. and Voznak, M., 2025. *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*. IEEE Network, 39(3), pp.173-179. https://doi.org/10.1109/MNET.2025.3540705
+- Mehic et al., *Virtual Quantum Key Distribution Network Ecosystem: The
+  National Czech QKD Network*, use the 85 km and 100 km reference links and
+  report approximately 150 kbit/s and 85.083 kbit/s respectively
+  ([IEEE Network, 2025](https://doi.org/10.1109/MNET.2025.3540705)).
+- The source cited by that paper, Andrew Shields' *Performance Limits for
+  Quantum Key Distribution Networks*, explicitly presents the equipment-factor
+  product above, includes channel transmittance $\eta$, and identifies the
+  loss-budget-dominated operating regime
+  ([ITU-T workshop presentation, 2019](https://www.itu.int/en/ITU-T/Workshops-and-Seminars/2019060507/Documents/Andrew_Shields_Presentation.pdf)).
+- Peer-reviewed QKD analyses use the same conversion from fiber distance and
+  attenuation to transmittance, $T=10^{-\alpha L/10}$
+  ([Scientific Reports, 2021](https://doi.org/10.1038/s41598-021-90055-3)).
+- Fundamental rate-loss studies show that repeaterless optical QKD rates decay
+  exponentially with distance and scale linearly with transmittance in the
+  high-loss limit
+  ([Nature Communications, 2014](https://doi.org/10.1038/ncomms6235);
+  [Nature Communications, 2017](https://doi.org/10.1038/ncomms15043)).
 
 With the published link parameters, the implementation reproduces the paper's
 reported estimates:
@@ -40,6 +81,24 @@ are reproduced by the 25% factor shown above. The implementation follows the
 published rates and exposes `QKD_ZERO_LOSS_KEY_RATE_BPS` so experiments can
 select a different equipment model explicitly instead of hiding that
 assumption.
+
+### Model scope
+
+$R_{\mathrm{model}}=R_0\eta$ is a calibrated link-budget approximation, not a
+universal or protocol-specific secret-key-rate equation. It is suitable for
+the current experiments because it provides a transparent, reproducible way
+to map fiber distance to QKDNetSim's average `KeyRate` and reproduces the
+selected reference results.
+
+It does not model QBER, detector dark counts, Raman noise, optical
+misalignment, finite-key effects, or processing saturation as functions of
+distance. A detailed BB84, decoy-state, CV-QKD, or other implementation would
+need its own security and device model. The approximation must also not be
+applied unchanged to protocols with different rate-loss scaling, such as
+Twin-Field QKD, whose ideal scaling can approach $\sqrt{\eta}$ rather than
+$\eta$. The configurable $R_0$ and attenuation parameters allow the current
+model to be recalibrated, while a future protocol-specific model can replace
+the calculation without changing the scenario architecture.
 
 The two post-processing processes at the ends of one QKD link must receive
 identical parameters. Compose enforces this automatically. Point-to-point and
