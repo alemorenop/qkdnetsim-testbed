@@ -3,11 +3,14 @@
 This repository is a testbed built on top of
 [QKDNetSim](https://www.qkdnetsim.info/). It provides real-network emulation
 scenarios in which every node or role runs in its own Docker container and
-communicates over actual network interfaces instead of being simulated inside
-a single ns-3 process.
+communicates over actual network interfaces instead of placing all logical
+roles inside one conventional ns-3 simulation process.
 
 ## Contents
 
+- [Architecture and motivation](#architecture-and-motivation)
+  - [Research basis and testbed extensions](#research-basis-and-testbed-extensions)
+- [Installation and execution](#installation-and-execution)
 - [Distance-aware QKD link budget](#distance-aware-qkd-link-budget)
 - [CORE classical-network integration](#core-classical-network-integration)
 - [Scenarios](#scenarios)
@@ -17,6 +20,169 @@ a single ns-3 process.
   - [4. Key-relay QKD-backed VPN](#scenario-key-relay-vpn)
 - [Testbed additions to QKDNetSim](#testbed-additions-to-qkdnetsim)
 - [External documentation](#external-documentation)
+
+## Architecture and motivation
+
+This testbed turns QKDNetSim scenarios into distributed emulation
+environments. QKD post-processing, KMS and application roles execute as
+independent processes with real Linux network interfaces, while Docker
+Compose provides the persistent QKD/KMS infrastructure and CORE creates the
+classical Alice-Bob topology and its transient endpoints. The result combines
+QKDNetSim's repeatable key-generation and key-management models with real
+network stacks, strongSwan and configurable direct or multi-hop classical
+paths.
+
+### Research basis and testbed extensions
+
+The four scenarios combine two published reference architectures with
+extensions developed for this testbed:
+
+| Testbed scenario | Research basis | Extension in this repository |
+|---|---|---|
+| Point-to-point traffic | Distributed six-VM QKDNetSim emulation from *Emulation of Quantum Key Distribution Networks* | VMs replaced by role-specific containers; Alice-Bob classical path moved to CORE |
+| Key-relay traffic | Point-to-point emulation pattern and QKDNetSim's trusted-node relay functions | Two QKD links and an intermediate trusted KMS added; this topology is not part of the reference emulation paper |
+| Point-to-point VPN | QKD-fed strongSwan architecture from *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network* | Reproducible Docker/CORE deployment with selectable ETSI 004 or ETSI 014 consumption |
+| Key-relay VPN | Containerized key-relay topology and point-to-point strongSwan integration above | QKD-backed IPsec extended across the trusted-node path for both ETSI interfaces; this combined scenario is specific to this testbed |
+
+The reference emulation architecture in Mehic et al.,
+[*Emulation of Quantum Key Distribution Networks*](https://doi.org/10.1109/MNET.2024.3398404),
+places QKD components in separate virtual machines. This testbed applies the
+same principle of distributing roles across isolated network hosts, but uses
+Linux containers instead of one complete guest operating system per role.
+Each container retains its own process tree, network namespace, interfaces,
+routes and sockets; QKDNetSim reaches the corresponding Docker veth through
+`EmuFdNetDevice`, and native VPN endpoints use the Linux network stack
+directly.
+
+The process boundary is therefore preserved rather than introduced by the
+container conversion: the paper's point-to-point emulation assigns its six
+roles to six VMs, each with an independent QKDNetSim/ns-3 execution. The
+equivalent synthetic-traffic scenario in this repository uses six independent
+role-specific ns-3 programs in six containers. In the VPN variants, only the
+QKD post-processing and KMS roles run ns-3; the two application containers run
+native strongSwan and the Python QKD key consumer instead. This differs from
+the conventional all-in-one QKDNetSim examples, where several simulated nodes
+and applications can belong to the same ns-3 process.
+
+The VPN integration is based on Mehic et al.,
+[*Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*](https://doi.org/10.1109/MNET.2025.3540705),
+where strongSwan consumes QKD-derived key material. That work provides the
+application-integration pattern; this repository adapts it to the common
+Docker/CORE architecture and then applies it to both the direct and trusted
+key-relay QKD topologies.
+
+Containers were selected for this implementation because they provide:
+
+- lower CPU, memory and storage overhead than a deployment based on one VM per
+  role;
+- faster creation and cleanup, which supports repeated experiments and larger
+  topologies;
+- reproducible images, dependencies, interface assignments and startup
+  conditions through Docker and Compose;
+- identical scenario definitions on native Linux and Docker Desktop; and
+- direct integration with CORE's DockerNode lifecycle and per-link NetEm
+  configuration.
+
+This is an implementation choice rather than a claim that containers and VMs
+are equivalent. Containers share the host Linux kernel and therefore provide
+less isolation and do not reproduce hypervisor or guest-OS overhead. VMs
+remain preferable when an experiment requires different operating systems,
+stronger host boundaries, virtual-hardware effects or deployment across
+independent hypervisors. The container approach is intended to study the QKD,
+KMS, application and network behaviour of this testbed with lower operational
+cost and greater experimental repeatability.
+
+## Installation and execution
+
+### Requirements
+
+The recommended workflow runs the complete testbed in Linux containers and
+requires:
+
+- Git;
+- Docker Engine with the Docker Compose plugin;
+- an x86-64 Linux host, or Docker Desktop configured to use Linux containers
+  on Windows. Commands may be issued from PowerShell, WSL or a Linux shell.
+
+A pre-existing ns-3 or QKDNetSim installation is not required for this Docker
+workflow. This repository contains the QKDNetSim module together with the
+testbed changes. During the image build,
+[`docker/Dockerfile`](docker/Dockerfile) clones ns-3.46, copies this checkout to
+`contrib/qkdnetsim`, applies the required patches and compiles the scenario
+binaries.
+
+Clone the repository in any working directory:
+
+```bash
+git clone https://github.com/alemorenop/qkdnetsim-testbed.git
+cd qkdnetsim-testbed
+```
+
+### Initial build
+
+Build the QKDNetSim traffic image and the strongSwan VPN endpoint image:
+
+```bash
+docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
+docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
+```
+
+Build and start the shared CORE runtime:
+
+```bash
+docker compose -f docker/docker-compose.core.yml up -d --build core
+```
+
+The first build takes longer because ns-3, QKDNetSim, CORE, EMANE and the
+routing components are compiled. Docker reuses these layers on subsequent
+builds.
+
+### Running a scenario
+
+CORE is shared by all four scenarios and normally remains running between
+experiments. Each experiment then consists of two steps:
+
+1. Start the selected persistent QKD/KMS infrastructure with its Compose
+   file.
+2. Execute `traffic-topology.py` for synthetic encrypted traffic or
+   `vpn-topology.py` for a strongSwan tunnel inside the CORE container.
+
+For example, run the point-to-point synthetic-traffic scenario over a direct
+classical link:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+
+docker compose -f docker/docker-compose.core.yml exec core \
+  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
+  --qkd-topology point-to-point --routers 0 --delay-ms 5 \
+  --bandwidth-mbps 100 --loss-percent 0
+```
+
+The runner waits for the infrastructure, creates the transient Alice and Bob
+DockerNodes, verifies the end-to-end result and removes those endpoints when
+the experiment finishes. Detailed commands for every traffic and VPN variant
+are provided in the corresponding [scenario sections](#scenarios), while all
+CORE topology parameters and smoke tests are documented in the
+[local CORE integration guide](core/README.md).
+
+Stop the example infrastructure and the shared CORE runtime when they are no
+longer required:
+
+```bash
+docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.core.yml down
+```
+
+### Optional native ns-3 development
+
+Docker is the supported execution path for the emulation testbed. To compile
+the module directly instead, use an ns-3.46 source tree and place this
+repository at `ns-3-dev/contrib/qkdnetsim`. Native compilation also requires
+the QKDNetSim system dependencies listed in its
+[official documentation](https://www.qkdnetsim.info/). Do not clone the
+upstream QKDNetSim module first: this repository already contains that module
+and the testbed-specific changes.
 
 ## Distance-aware QKD link budget
 
@@ -221,6 +387,8 @@ bridge/router and NetEm path shown in the data plane.
 
 ## Scenarios
 
+All commands in this section are run from the repository root.
+
 The diagrams and tables use `H1`–`H9` as compact deployment identifiers. Each
 identifier represents a Docker container, but its architectural role may be
 an ns-3 node, a KMS node, a synthetic QKD application, or a native Linux VPN
@@ -237,7 +405,14 @@ Container-based adaptation of the network emulation experiment shown in Fig. 3 o
 
 > Mehic, M., Dervisevic, E., Burdiak, P., Lipovac, V., Fazio, P. and Voznak, M., 2024. *Emulation of quantum key distribution networks*. IEEE Network, 39(1), pp.116-123. https://doi.org/10.1109/MNET.2024.3398404
 
-The paper simulates both ends of every link inside a single ns-3 process. In this testbed, every role runs in a separate Docker container. Each ns-3 `EmuFdNetDevice` opens an `AF_PACKET` raw socket bound to a Linux `ethX` interface backed by a Docker veth; this veth is the equivalent of the paper diagrams' “Real Net Device”. Native VPN endpoints do not use ns-3 or `EmuFdNetDevice`: strongSwan and the VPN consumer use the Linux network stack and Docker veth directly. The logical scenario is the same, but it is deployed as six independent nodes; the four QKD/KMS nodes are persistent Compose services and the two application nodes are transient CORE DockerNodes.
+The paper deploys the six roles in separate VMs, with an independent
+QKDNetSim/ns-3 execution in each VM. This testbed preserves that distributed
+process model but replaces every VM with a lighter Docker container. Each ns-3
+`EmuFdNetDevice` opens an `AF_PACKET` raw socket bound to a Linux `ethX`
+interface backed by a Docker veth; this veth is the equivalent of the paper
+diagrams' “Real Net Device”. The logical scenario is the same: the four
+persistent QKD/KMS roles are managed by Compose and the two application roles
+are transient CORE DockerNodes.
 
 The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob ETSI 014 applications. The QKD path is a direct Alice–Bob link without a trusted intermediate node. Their classical application path can be direct or contain CORE routers.
 
@@ -255,7 +430,6 @@ The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob E
 Quick start:
 
 ```bash
-cd contrib/qkdnetsim-testbed
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.core.yml up -d --build core
@@ -276,7 +450,16 @@ routers; delay, bandwidth and packet loss apply independently to every link.
 
 ### 2. Key relay — intermediate node without a direct Alice–Bob link (`examples/key-relay/`)
 
-In this scenario, Alice and Bob do not have a direct QKD link. They communicate through a trusted intermediate node with its own KMS. The node relays keys using the functionality already provided by `QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`, `ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP encryption through `skey_create`. Alice and Bob ultimately share actual key material without either endpoint seeing the raw key from the other QKD segment. End-to-end encrypted traffic flows between the H8 and H9 application nodes and is verified with temporary `tcpdump` samples.
+This scenario is a testbed extension rather than a topology reproduced from
+the point-to-point emulation paper. Alice and Bob do not have a direct QKD
+link: two QKD segments are joined by a trusted intermediate node with its own
+KMS. The node relays keys using the functionality already provided by
+`QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`,
+`ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP
+encryption through `skey_create`. Alice and Bob ultimately share actual key
+material without either endpoint seeing the raw key from the other QKD
+segment. End-to-end encrypted traffic flows between the H8 and H9 application
+nodes and is verified with temporary `tcpdump` samples.
 
 Topology (9 Docker containers):
 
@@ -297,7 +480,6 @@ Topology (9 Docker containers):
 Start the scenario:
 
 ```bash
-cd contrib/qkdnetsim-testbed
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker compose -f docker/docker-compose.key-relay.yml up -d
 docker compose -f docker/docker-compose.core.yml up -d --build core
@@ -376,7 +558,15 @@ the required encrypted application traffic or VPN tunnel has been observed.
 
 ### 3. Point-to-point QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.vpn.yml`)
 
-Replaces the synthetic ETSI 014 application nodes at H5/H6 with real strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting synthetic traffic by hand, the H5 and H6 endpoints are native Ubuntu containers that periodically fetch real key material from the H3 and H4 KMS nodes and hand it to strongSwan as the connection's pre-shared key — the QKD stack's only remaining job is producing the key that protects a real IPsec tunnel. The overall architecture (a client/server pair of strongSwan encryptors fed by a periodic key-fetch script) follows:
+This scenario applies the strongSwan integration pattern from the Czech QKD
+network paper to the containerized point-to-point topology from scenario 1.
+It replaces the synthetic ETSI 014 application nodes at H5/H6 with real
+strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting
+synthetic traffic, the H5 and H6 native Ubuntu containers periodically obtain
+real key material from the H3 and H4 KMS nodes and hand it to strongSwan as
+the connection's pre-shared key. The reference architecture—a client/server
+pair of strongSwan encryptors fed by a periodic key-fetch script—is described
+in:
 
 > Mehic, M., Dervisevic, E., Fazio, P. and Voznak, M., 2025. *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*. IEEE Network. https://doi.org/10.1109/MNET.2025.3540705
 
@@ -435,7 +625,6 @@ truncated fingerprint and status; raw keys are never written to state or logs.
 Quick start with ETSI 004:
 
 ```bash
-cd contrib/qkdnetsim-testbed
 docker compose -f docker/docker-compose.yml down
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
@@ -484,7 +673,9 @@ that command can return success even when no matching IKE_SA was established.
 
 This scenario keeps the complete trusted-node topology from scenario 2 and
 replaces only the synthetic H8/H9 ETSI 014 application nodes with native
-strongSwan endpoints:
+strongSwan endpoints. It is the testbed-specific combination of the key-relay
+extension and the point-to-point VPN integration; neither reference paper
+defines this complete topology:
 
 ![Trusted-node QKD-backed IPsec/IKEv2 VPN architecture](diagrams/key-relay-vpn.svg)
 
@@ -555,7 +746,6 @@ The synthetic and VPN key-relay projects use the same explicit subnets, so
 stop scenario 2 before starting scenario 4:
 
 ```bash
-cd contrib/qkdnetsim-testbed
 docker compose -f docker/docker-compose.key-relay.yml down
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
