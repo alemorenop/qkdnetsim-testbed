@@ -346,7 +346,10 @@ Originally, there was no guarantee that a server had reached `Listen()` before i
   `Listen()` complete. Compose consumes PP/KMS readiness; the CORE runner
   consumes endpoint readiness and traffic markers.
 - A role-specific readiness marker attached to each trace, for example `"[RELAY_KMS_ALICE] KMS Alice listening"`, alongside the existing `stores key` and `serves key` markers.
-- `entrypoint.sh` mirrors stdout to `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside the container namespace and cannot read the host-side `docker logs` view provided by the logging driver.
+- [`entrypoint.sh`](docker/entrypoint.sh) mirrors stdout to
+  `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside
+  the container namespace and cannot read the host-side `docker logs` view
+  provided by the logging driver.
 - Health checks on the PP and KMS infrastructure, plus a
   `depends_on: condition: service_healthy` chain that follows the QKD topology.
   H8 and H9 are subsequently created and ordered by CORE:
@@ -459,7 +462,7 @@ fingerprint, the exact established IKE SA, successful ping, outbound ESP and
 zero plaintext ICMP. Its transient endpoints and capture are deleted after
 each run, while the QKD/KMS infrastructure may remain active for comparisons.
 
-**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The H5/H6 VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. `entrypoint.sh` and `entrypoint-vpn.sh` now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
+**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The H5/H6 VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. [`entrypoint.sh`](docker/entrypoint.sh) and [`entrypoint-vpn.sh`](docker/vpn/entrypoint-vpn.sh) now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
 
 #### How the VPN endpoints are implemented
 
@@ -600,10 +603,10 @@ the relay layer transports larger storage blocks internally.
   point-to-point QKD/KMS infrastructure. It deliberately contains neither
   Alice/Bob application services nor a classical data network.
 - **[`docker-compose.key-relay.yml`](docker/docker-compose.key-relay.yml)** — the seven-service trusted-node QKD/KMS infrastructure and its readiness dependency chain. The two application endpoints are added by CORE at run time.
-- **`entrypoint.sh`** — detects interfaces by subnet, normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or random jitter.
-- **`verify-link-budget.sh`** — checks only the distance-to-key-rate model and
-  its input validation. It does not create or verify an Alice–Bob classical
-  path; end-to-end scenario verification belongs to the CORE runners.
+- **[`entrypoint.sh`](docker/entrypoint.sh)** — detects interfaces by subnet,
+  normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors
+  stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or
+  random jitter.
 - **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
 - **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
 - **[`model/qkd-key-manager-system-application.cc`](model/qkd-key-manager-system-application.cc)**
