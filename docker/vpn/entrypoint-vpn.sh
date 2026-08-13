@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# CORE creates Docker nodes with this keepalive command and configures their
+# interfaces afterwards. Do not start strongSwan until the CORE topology runner
+# explicitly invokes this entrypoint with the required environment.
+if [ "${1:-}" = "tail" ] && [ "${2:-}" = "-f" ]; then
+    exec "$@"
+fi
+
 required_vars=(
     VPN_ROLE
     OWN_IP

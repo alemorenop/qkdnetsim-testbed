@@ -1,13 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="860" viewBox="0 0 1200 860" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1020" viewBox="0 0 1200 1020" role="img" aria-labelledby="title desc">
   <title id="title">Point-to-point QKD-backed VPN architecture</title>
-  <desc id="desc">Point-to-point QKDNetSim scenario with H5 and H6 implemented as native strongSwan IPsec/IKEv2 VPN endpoints fed by real key material from the KMS containers.</desc>
+  <desc id="desc">Point-to-point QKDNetSim scenario with H5 and H6 implemented as strongSwan DockerNode endpoints inside the common CORE classical network.</desc>
   <defs>
     
     <marker id="ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2374d8"></path></marker>
     <marker id="ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2f9e62"></path></marker>
     <marker id="ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#5b3a99"></path></marker>
+    <marker id="ac" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#4b647a"></path></marker>
   </defs>
-  <rect width="1200" height="860" fill="#f7f9fc"></rect>
+  <rect width="1200" height="1020" fill="#f7f9fc"></rect>
   <text x="230" y="19" text-anchor="middle" class="site" fill="#2358a5">ALICE</text>
   <text x="970" y="19" text-anchor="middle" class="site" fill="#2358a5">BOB</text>
 
@@ -42,13 +43,13 @@
   <text x="995" y="630" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.6</text>
 
   <rect x="70" y="598" width="1040" height="210" rx="16" fill="none" stroke="#7550b5" stroke-width="2" stroke-dasharray="9 6"></rect>
-  <text x="600" y="618" text-anchor="middle" class="group">Host OS layer — Ubuntu 22.04, no ns-3 process</text>
+  <text x="600" y="618" text-anchor="middle" class="group">CORE-managed classical data plane · strongSwan DockerNodes · optional routers</text>
   <rect x="364" y="678" width="472" height="30" rx="15" fill="#5b3a99"></rect>
   <rect x="594" y="692" width="12" height="10" rx="2" fill="#fff"></rect>
   <path d="M596 692v-4a4 4 0 0 1 8 0v4" stroke="#fff" stroke-width="1.8" fill="none"></path>
-  <text x="600" y="674" text-anchor="middle" class="edge" fill="#5b3a99">IPsec/IKEv2 VPN tunnel · 192.168.56.0/24</text>
-  <text x="370" y="726" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.5</text>
-  <text x="830" y="726" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.6</text>
+  <text x="600" y="674" text-anchor="middle" class="edge" fill="#5b3a99">IPsec/IKEv2 tunnel · direct or routed CORE path</text>
+  <text x="370" y="726" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">10.253.0.1</text>
+  <text x="830" y="726" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">10.253.R.2</text>
 
   <g transform="translate(100 24)">
     <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -104,26 +105,46 @@
 
   <g transform="translate(100 636)">
     <rect width="260" height="150" rx="14" fill="#fff" stroke="#5b3a99" stroke-width="2.5"></rect>
-      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · vpn_alice</text>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · Alice VPN DockerNode</text>
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">strongSwan Client</text>
     <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
       <text x="130" y="102" text-anchor="middle" class="layer">QKD VPN consumer</text>
       <text x="130" y="116" text-anchor="middle" font-size="10" class="layer">ETSI 004 / ETSI 014</text>
     <rect x="16" y="124" width="228" height="20" rx="5" fill="#dce8f5"></rect>
-    <text x="130" y="138" text-anchor="middle" class="layer" font-size="9.5">Linux network stack → Docker veth (ethX)</text>
+    <text x="130" y="138" text-anchor="middle" class="layer" font-size="9.5">eth0: KMS · eth1: CORE (Linux)</text>
   </g>
 
   <g transform="translate(840 636)">
     <rect width="260" height="150" rx="14" fill="#fff" stroke="#5b3a99" stroke-width="2.5"></rect>
-      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · vpn_bob</text>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · Bob VPN DockerNode</text>
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#5b3a99"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">strongSwan Server</text>
     <rect x="16" y="86" width="228" height="34" rx="6" fill="#f0e6c8"></rect>
       <text x="130" y="102" text-anchor="middle" class="layer">QKD VPN consumer</text>
       <text x="130" y="116" text-anchor="middle" font-size="10" class="layer">ETSI 004 / ETSI 014</text>
     <rect x="16" y="124" width="228" height="20" rx="5" fill="#dce8f5"></rect>
-    <text x="130" y="138" text-anchor="middle" class="layer" font-size="9.5">Linux network stack → Docker veth (ethX)</text>
+    <text x="130" y="138" text-anchor="middle" class="layer" font-size="9.5">eth0: KMS · eth1: CORE (Linux)</text>
   </g>
 
+  <rect x="70" y="845" width="1040" height="155" rx="16" fill="#edf3f8" stroke="#4b647a" stroke-width="2"></rect>
+  <text x="600" y="869" text-anchor="middle" font-size="14" font-weight="700" fill="#304b63">CONTROL / ORCHESTRATION PLANE · IPsec traffic does not traverse this layer</text>
+  <rect x="90" y="882" width="720" height="100" rx="12" fill="#fff" stroke="#6c8296" stroke-width="1.8"></rect>
+  <text x="106" y="902" font-size="12" font-weight="700" fill="#304b63">qkdnetsim-core container</text>
+  <rect x="105" y="912" width="215" height="54" rx="8" fill="#dfeaf4" stroke="#6385a3"></rect>
+  <text x="212" y="933" text-anchor="middle" font-size="12" font-weight="700" fill="#24445f">vpn-topology.py</text>
+  <text x="212" y="952" text-anchor="middle" font-size="10.5" fill="#415f77">embedded CoreEmu session</text>
+  <path d="M320 939H342" fill="none" stroke="#4b647a" stroke-width="2" marker-end="url(#ac)"></path>
+  <rect x="342" y="912" width="215" height="54" rx="8" fill="#e8e1f5" stroke="#7550b5"></rect>
+  <text x="449" y="933" text-anchor="middle" font-size="12" font-weight="700" fill="#50337e">CORE runtime</text>
+  <text x="449" y="952" text-anchor="middle" font-size="10.5" fill="#604a78">DockerNode · router · NetEm lifecycle</text>
+  <rect x="579" y="912" width="215" height="54" rx="8" fill="#f4f6f8" stroke="#8b99a6"></rect>
+  <text x="686" y="933" text-anchor="middle" font-size="12" font-weight="700" fill="#465866">core-daemon</text>
+  <text x="686" y="952" text-anchor="middle" font-size="10.5" fill="#657481">gRPC :50051 · external API</text>
+  <rect x="870" y="902" width="220" height="64" rx="10" fill="#fff4d8" stroke="#b98722" stroke-width="1.8"></rect>
+  <text x="980" y="928" text-anchor="middle" font-size="12" font-weight="700" fill="#72520d">Host Docker Engine</text>
+  <text x="980" y="949" text-anchor="middle" font-size="10.5" fill="#735f32">creates sibling VPN containers</text>
+  <path d="M810 939H870" fill="none" stroke="#4b647a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ac)"></path>
+  <text x="840" y="929" text-anchor="middle" font-size="9.5" fill="#4b647a">docker.sock</text>
+  <path d="M160 882V790" fill="none" stroke="#4b647a" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#ac)"></path>
 </svg>

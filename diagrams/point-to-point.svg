@@ -1,15 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="880" viewBox="0 0 1200 880" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1040" viewBox="0 0 1200 1040" role="img" aria-labelledby="title desc">
   <title id="title">Point-to-point QKDNetSim testbed architecture</title>
-  <desc id="desc">Six role-named Docker containers, each an independent ns-3 process, forming a direct Alice-Bob QKD link with layered software stacks.</desc>
+  <desc id="desc">Point-to-point QKDNetSim infrastructure with the ETSI 014 Alice and Bob DockerNode consumers running inside the common CORE classical network.</desc>
   <defs>
     
     <marker id="ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2374d8"></path></marker>
     <marker id="ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#2f9e62"></path></marker>
     <marker id="ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#7550b5"></path></marker>
+    <marker id="ac" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#4b647a"></path></marker>
   </defs>
-  <rect width="1200" height="880" fill="#f7f9fc"></rect>
+  <rect width="1200" height="1040" fill="#f7f9fc"></rect>
   <text x="230" y="19" text-anchor="middle" class="site" fill="#2358a5">ALICE</text>
   <text x="970" y="19" text-anchor="middle" class="site" fill="#2358a5">BOB</text>
+  <rect x="70" y="598" width="1040" height="246" rx="16" fill="#f2effa" stroke="#7550b5" stroke-width="2.5"></rect>
+  <text x="600" y="620" text-anchor="middle" class="group">CORE-managed classical data plane · DockerNode endpoints · optional routers</text>
 
   <path d="M362 81H838" fill="none" stroke="#2374d8" stroke-width="5" marker-end="url(#ab)"></path>
   <text x="600" y="67" text-anchor="middle" class="edge" fill="#2374d8">QKD post-processing / sifting · 192.168.11.0/24</text>
@@ -40,9 +43,9 @@
   <text x="995" y="620" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.46.6</text>
 
   <path d="M362 681H838" fill="none" stroke="#7550b5" stroke-width="5" marker-end="url(#ap)"></path>
-  <text x="600" y="658" text-anchor="middle" class="edge" fill="#7550b5">OTP-protected application traffic · 192.168.56.0/24</text>
-  <text x="368" y="700" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.5</text>
-  <text x="832" y="700" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">192.168.56.6</text>
+  <text x="600" y="658" text-anchor="middle" class="edge" fill="#7550b5">OTP-protected application traffic · direct or routed CORE path</text>
+  <text x="368" y="700" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">10.254.0.1</text>
+  <text x="832" y="700" text-anchor="end" font-size="10.5" fill="#5b6b82" font-family="Consolas, monospace">10.254.R.2</text>
 
   <g transform="translate(100 24)">
     <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
@@ -98,28 +101,48 @@
 
   <g transform="translate(100 624)">
     <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
-      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · etsi014_alice</text>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H5 · ETSI 014 Alice DockerNode</text>
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#7550b5"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">ETSI 014 Alice</text>
     <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
     <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
     <rect x="16" y="126" width="228" height="54" rx="6" fill="#f7c9de"></rect>
     <text x="130" y="147" text-anchor="middle" class="layer">EmuFdNetDevice · OTP</text>
-    <text x="130" y="166" text-anchor="middle" class="layer" font-size="9.5">AF_PACKET raw socket → Linux veth (ethX)</text>
+    <text x="130" y="166" text-anchor="middle" class="layer" font-size="9.5">eth0: KMS · eth1: CORE (EmuFD)</text>
       <text x="130" y="201" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H3, H6</text>
   </g>
 
   <g transform="translate(840 624)">
     <rect width="260" height="210" rx="14" fill="#fff" stroke="#aab5c5" stroke-width="2"></rect>
-      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · etsi014_bob</text>
+      <text x="20" y="26" class="host" fill="#1d3a63" font-weight="800">H6 · ETSI 014 Bob DockerNode</text>
     <rect x="16" y="36" width="228" height="42" rx="7" fill="#7550b5"></rect>
     <text x="130" y="63" text-anchor="middle" class="role">ETSI 014 Bob</text>
     <rect x="16" y="84" width="228" height="36" rx="6" fill="#f2e4bd"></rect>
     <text x="130" y="107" text-anchor="middle" class="layer">ns-3 node</text>
     <rect x="16" y="126" width="228" height="54" rx="6" fill="#f7c9de"></rect>
     <text x="130" y="147" text-anchor="middle" class="layer">EmuFdNetDevice · OTP</text>
-    <text x="130" y="166" text-anchor="middle" class="layer" font-size="9.5">AF_PACKET raw socket → Linux veth (ethX)</text>
+    <text x="130" y="166" text-anchor="middle" class="layer" font-size="9.5">eth0: KMS · eth1: CORE (EmuFD)</text>
       <text x="130" y="201" text-anchor="middle" font-size="10" fill="#8a6a4a">↔ H4, H5</text>
   </g>
 
+  <rect x="70" y="865" width="1040" height="155" rx="16" fill="#edf3f8" stroke="#4b647a" stroke-width="2"></rect>
+  <text x="600" y="889" text-anchor="middle" font-size="14" font-weight="700" fill="#304b63">CONTROL / ORCHESTRATION PLANE · application traffic does not traverse this layer</text>
+  <rect x="90" y="902" width="720" height="100" rx="12" fill="#fff" stroke="#6c8296" stroke-width="1.8"></rect>
+  <text x="106" y="922" font-size="12" font-weight="700" fill="#304b63">qkdnetsim-core container</text>
+  <rect x="105" y="932" width="215" height="54" rx="8" fill="#dfeaf4" stroke="#6385a3"></rect>
+  <text x="212" y="953" text-anchor="middle" font-size="12" font-weight="700" fill="#24445f">Scenario runner</text>
+  <text x="212" y="972" text-anchor="middle" font-size="10.5" fill="#415f77">embedded CoreEmu session</text>
+  <path d="M320 959H342" fill="none" stroke="#4b647a" stroke-width="2" marker-end="url(#ac)"></path>
+  <rect x="342" y="932" width="215" height="54" rx="8" fill="#e8e1f5" stroke="#7550b5"></rect>
+  <text x="449" y="953" text-anchor="middle" font-size="12" font-weight="700" fill="#50337e">CORE runtime</text>
+  <text x="449" y="972" text-anchor="middle" font-size="10.5" fill="#604a78">DockerNode · router · NetEm lifecycle</text>
+  <rect x="579" y="932" width="215" height="54" rx="8" fill="#f4f6f8" stroke="#8b99a6"></rect>
+  <text x="686" y="953" text-anchor="middle" font-size="12" font-weight="700" fill="#465866">core-daemon</text>
+  <text x="686" y="972" text-anchor="middle" font-size="10.5" fill="#657481">gRPC :50051 · external API</text>
+  <rect x="870" y="922" width="220" height="64" rx="10" fill="#fff4d8" stroke="#b98722" stroke-width="1.8"></rect>
+  <text x="980" y="948" text-anchor="middle" font-size="12" font-weight="700" fill="#72520d">Host Docker Engine</text>
+  <text x="980" y="969" text-anchor="middle" font-size="10.5" fill="#735f32">creates sibling endpoint containers</text>
+  <path d="M810 959H870" fill="none" stroke="#4b647a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#ac)"></path>
+  <text x="840" y="949" text-anchor="middle" font-size="9.5" fill="#4b647a">docker.sock</text>
+  <path d="M160 902V822" fill="none" stroke="#4b647a" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#ac)"></path>
 </svg>

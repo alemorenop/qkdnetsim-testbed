@@ -1,6 +1,6 @@
 # "Key relay" scenario (Alice - Relay - Bob, no direct Alice-Bob link),
-# 9 containers. Uses the same image as docker-compose.yml (scenario 1); both
-# binaries live in the same image.
+# seven persistent QKD/KMS containers. CORE creates the two application
+# endpoints and their classical Alice-Bob network.
 #
 # Usage:
 #   docker compose -f docker/docker-compose.key-relay.yml up -d
@@ -60,16 +60,11 @@ networks:
       config:
         - subnet: 192.168.120.0/24
           gateway: 192.168.120.254
-  net_app_data:   # H8 <-> H9  (encrypted ETSI014 Alice-Bob traffic)
-    ipam:
-      config:
-        - subnet: 192.168.121.0/24
-          gateway: 192.168.121.254
 
 services:
 
   pp_alice:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-pp-alice
     hostname: relay-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -94,7 +89,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_alice-default"]
 
   pp_relay_a:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-pp-a
     hostname: relay-pp-a
     cap_add: [NET_ADMIN, NET_RAW]
@@ -120,7 +115,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_a-default"]
 
   pp_relay_b:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-pp-b
     hostname: relay-pp-b
     cap_add: [NET_ADMIN, NET_RAW]
@@ -142,7 +137,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_b-default"]
 
   pp_bob:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-pp-bob
     hostname: relay-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -168,7 +163,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_bob-default"]
 
   kms_alice:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-kms-alice
     hostname: relay-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -197,7 +192,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_alice-default"]
 
   kms_trusted:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-kms-trusted
     hostname: relay-kms-trusted
     cap_add: [NET_ADMIN, NET_RAW]
@@ -223,7 +218,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_trusted-default"]
 
   kms_bob:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-relay-kms-bob
     hostname: relay-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -244,56 +239,3 @@ services:
       retries: 20
       start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_bob-default"]
-
-  etsi014_alice:
-    image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-etsi014-alice
-    hostname: relay-etsi014-alice
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      DEV_MAP_KMS: "192.168.119"
-      DEV_MAP_DATA: "192.168.121"
-    networks:
-      net_alice_kms_app: { ipv4_address: 192.168.119.8 }
-      net_app_data: { ipv4_address: 192.168.121.8 }
-    # H8 connects as a client to BOTH: H5 (its KMS) and H9 (data
-    # socket of the peer app) -- waits for both to confirm they are listening.
-    depends_on:
-      kms_alice:
-        condition: service_healthy
-      etsi014_bob:
-        condition: service_healthy
-    # appStartTime=20 (not 1): QKDApp014::ConnectionToKMSFailed() does not
-    # retry the TCP connection if the first attempt fails -- if H8 tries to
-    # connect before H5's KMS listener is actually listening (quite
-    # possible with only 1s of margin and 9 RealtimeSimulatorImpl instances
-    # starting at once), the socket stays broken forever and the app "sends"
-    # in a loop over a dead socket without EVER producing real traffic.
-    # Confirmed with tcpdump: 0 packets on the wire despite the internal trace
-    # firing nonstop.
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_alice-default", "--appStartTime=20"]
-
-  etsi014_bob:
-    image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-relay-etsi014-bob
-    hostname: relay-etsi014-bob
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      DEV_MAP_KMS: "192.168.120"
-      DEV_MAP_DATA: "192.168.121"
-    networks:
-      net_bob_kms_app: { ipv4_address: 192.168.120.9 }
-      net_app_data: { ipv4_address: 192.168.121.9 }
-    depends_on:
-      kms_bob:
-        condition: service_healthy
-    # "listening" takes ~appStartTime=20s to show up (SetStartTime delays THE
-    # WHOLE app, not just the socket to the KMS) -- generous start_period so
-    # it doesn't count as a failure in the meantime.
-    healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Listening for application traffic' /tmp/qkdnetsim.log"]
-      interval: 2s
-      timeout: 2s
-      retries: 15
-      start_period: 20s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_bob-default", "--appStartTime=20"]

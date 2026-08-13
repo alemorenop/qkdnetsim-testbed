@@ -1,7 +1,6 @@
-# Point-to-point scenario (Fig. 3 from the paper, adapted to containers), 6
-# containers, each with an independent ns-3 process. The IPs of
-# each network match the defaults already written in the point-to-point/
-# .cc files, so there is no need to pass --myIpXXX on the command line.
+# Point-to-point QKD/KMS infrastructure (Fig. 3 from the paper, adapted to
+# containers). CORE creates the two application endpoints and their classical
+# Alice-Bob network separately.
 #
 # Usage:
 #   docker compose -f docker/docker-compose.yml up
@@ -11,7 +10,7 @@
 # docker-compose.key-relay.yml lives in the same folder, both would end up
 # merged into the same project (with a real risk that an "up" of one
 # recreates/removes containers of the other if they share a service key).
-name: qkdnetsim-fig3-6host
+name: qkdnetsim-point-to-point
 
 # Note on DEV_MAP_*: Docker does not guarantee that the order in which a
 # service's networks are attached translates into the same eth0/eth1/eth2
@@ -56,16 +55,11 @@ networks:
       config:
         - subnet: 192.168.46.0/24
           gateway: 192.168.46.254
-  net_app_data:   # H5 <-> H6  (trafico cifrado ETSI014 Alice-Bob)
-    ipam:
-      config:
-        - subnet: 192.168.56.0/24
-          gateway: 192.168.56.254
 
 services:
 
   pp_alice:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-p2p-pp-alice
     hostname: p2p-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -87,7 +81,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_alice-default"]
 
   pp_bob:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-p2p-pp-bob
     hostname: p2p-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -113,7 +107,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_bob-default"]
 
   kms_alice:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-p2p-kms-alice
     hostname: p2p-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -137,7 +131,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_alice-default"]
 
   kms_bob:
-    image: qkdnetsim-6vm-emulation:latest
+    image: qkdnetsim-testbed:latest
     container_name: qkd-p2p-kms-bob
     hostname: p2p-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -156,43 +150,3 @@ services:
       retries: 20
       start_period: 3s
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_bob-default"]
-
-  etsi014_alice:
-    image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-p2p-etsi014-alice
-    hostname: p2p-etsi014-alice
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      DEV_MAP_DATA: "192.168.56"
-      DEV_MAP_KMS: "192.168.35"
-    networks:
-      net_app_data: { ipv4_address: 192.168.56.5 }
-      net_alice_kms_app: { ipv4_address: 192.168.35.5 }
-    depends_on:
-      kms_alice:
-        condition: service_healthy
-      etsi014_bob:
-        condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_alice-default", "--appStartTime=20"]
-
-  etsi014_bob:
-    image: qkdnetsim-6vm-emulation:latest
-    container_name: qkd-p2p-etsi014-bob
-    hostname: p2p-etsi014-bob
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      DEV_MAP_DATA: "192.168.56"
-      DEV_MAP_KMS: "192.168.46"
-    networks:
-      net_app_data: { ipv4_address: 192.168.56.6 }
-      net_bob_kms_app: { ipv4_address: 192.168.46.6 }
-    depends_on:
-      kms_bob:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "grep -q 'Listening for application traffic' /tmp/qkdnetsim.log"]
-      interval: 2s
-      timeout: 2s
-      retries: 15
-      start_period: 20s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_bob-default", "--appStartTime=20"]

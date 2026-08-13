@@ -1,0 +1,45 @@
+# CORE provides only the emulated classical Alice-Bob network. QKD
+# post-processing and KMS services remain in their existing Compose projects.
+#
+# Start from Windows (PowerShell), WSL or Linux with the same command:
+#   docker compose -f docker/docker-compose.core.yml up -d --build
+name: qkdnetsim-core
+
+services:
+  core:
+    build:
+      context: ..
+      dockerfile: docker/core/Dockerfile.core
+      args:
+        CORE_VERSION: "${CORE_VERSION:-9.2.1}"
+    image: qkdnetsim-core:${CORE_VERSION:-9.2.1}
+    container_name: qkdnetsim-core
+    hostname: qkdnetsim-core
+    privileged: true
+    pid: host
+    init: true
+    volumes:
+      # CORE's DockerNode implementation creates sibling containers through
+      # the same engine used by this project. It does not run an inner daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../core:/workspace/core:ro
+    ports:
+      # CORE is still restricted to host loopback by this publication rule.
+      - "127.0.0.1:${CORE_GRPC_PORT:-50051}:50051"
+    command:
+      - /opt/core/venv/bin/core-daemon
+      - --grpc-address
+      - 0.0.0.0
+      - --grpc-port
+      - "50051"
+    restart: "no"
+
+  # Build-only profile: CORE later starts instances of this image itself with
+  # --net=none and attaches every interface defined by the emulation session.
+  core-node-image:
+    profiles: ["node-image"]
+    build:
+      context: ..
+      dockerfile: docker/core/Dockerfile.node
+    image: qkdnetsim-core-node:${CORE_NODE_TAG:-22.04}
+    command: ["/bin/true"]

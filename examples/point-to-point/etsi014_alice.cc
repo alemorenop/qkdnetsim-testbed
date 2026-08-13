@@ -1,16 +1,9 @@
 /*
  * Point-to-point ETSI 014 ALICE (master)
  *
- * A single real node with two interfaces:
- *   --devData / --myIpData  link to P2P_ETSI014_BOB (ETSI014 Bob)     [encrypted traffic]
- *   --devKms  / --myIpKms   link to P2P_KMS_ALICE (KMS Alice)       [GET_KEY]
- *
- * In addition to this ns-3 simulation, the "hey" HTTP load generator
- * (https://github.com/rakyll/hey) is launched externally on this same VM,
- * pointed at P2P_KMS_ALICE's port 80, to reproduce the paper's benchmark, e.g.:
- *
- *   hey -n 2200 -c 1 -m GET \
- *       http://192.168.13.3/api/v1/keys/<etsiAliceId>/enc_keys/number/100/size/1024
+ * CORE runs this process in a DockerNode with two interfaces:
+ *   --devData / --myIpData  eth1 on the CORE classical path to Bob
+ *   --devKms  / --myIpKms   eth0 on the Docker KMS network
  *
  * Contract shared with the other VMs (must match exactly):
  *   etsiAliceId -> also used on P2P_KMS_ALICE when registering the app pair
@@ -62,18 +55,19 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Real interfaces of this VM (adjust to your lab) ----
-    std::string devData  = "eth0";
-    std::string devKms   = "eth1";
-    std::string myIpData = "192.168.56.5";
+    // ---- CORE DockerNode interfaces (the runner overrides routed addresses) ----
+    std::string devData  = "eth1";
+    std::string devKms   = "eth0";
+    std::string myIpData = "10.254.0.1";
     std::string myIpKms  = "192.168.35.5";
     uint16_t    dataPort = 8081;
 
-    // ---- Peers (real IPs of the other VMs) ----
-    std::string peerBobIp   = "192.168.56.6"; // P2P_ETSI014_BOB
+    // ---- Peer and KMS addresses ----
+    std::string peerBobIp   = "10.254.0.2"; // P2P_ETSI014_BOB
     std::string kmsAliceIp  = "192.168.35.3"; // P2P_KMS_ALICE (KMS Alice)
+    std::string dataGateway = ""; // first CORE router; empty for a direct link
 
-    // ---- Identifier contract shared between VMs ----
+    // ---- Identifier contract shared between DockerNodes and KMSs ----
     std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // must match P2P_KMS_ALICE
     std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // must match P2P_ETSI014_BOB/P2P_KMS_BOB
 
@@ -87,7 +81,7 @@ main(int argc, char* argv[])
     uint32_t aesLifetime = 10000;
     uint32_t useCrypto = 1;
 
-    uint32_t appStartTime = 50;
+    uint32_t appStartTime = 2;
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
@@ -97,6 +91,7 @@ main(int argc, char* argv[])
     cmd.AddValue("myIpKms", "Local IP on the link toward P2P_KMS_ALICE", myIpKms);
     cmd.AddValue("peerBobIp", "Real IP of P2P_ETSI014_BOB", peerBobIp);
     cmd.AddValue("kmsAliceIp", "Real IP of P2P_KMS_ALICE (KMS Alice)", kmsAliceIp);
+    cmd.AddValue("dataGateway", "Optional gateway on the CORE data interface", dataGateway);
     cmd.AddValue("etsiAliceId", "UUID of this app (must match P2P_KMS_ALICE)", etsiAliceId);
     cmd.AddValue("etsiBobId", "UUID of the peer app on P2P_ETSI014_BOB", etsiBobId);
     cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
@@ -146,6 +141,11 @@ main(int argc, char* argv[])
     Simulator::ScheduleNow(&KeepAlive, MilliSeconds(100), Seconds(simulationTime));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    if (!dataGateway.empty()) {
+        Ipv4StaticRoutingHelper helper;
+        Ptr<Ipv4StaticRouting> routing = helper.GetStaticRouting(node->GetObject<Ipv4>());
+        routing->AddHostRouteTo(Ipv4Address(peerBobIp.c_str()), Ipv4Address(dataGateway.c_str()), 1);
+    }
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/TxKMS",
                      MakeCallback(+[](std::string ctx, const std::string& appId, Ptr<const Packet> p) {

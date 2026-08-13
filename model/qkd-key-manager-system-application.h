@@ -33,6 +33,7 @@
 #include "ns3/uuid.h"
 
 #include <iostream>
+#include <list>
 #include <sstream>
 #include <unistd.h>
 #include <sstream>
@@ -743,6 +744,8 @@ private:
   std::set<std::string> m_etsi004FillPending; //!< Multi-hop streams with an in-flight FILL transaction
 
   Ptr<Socket> m_sinkSocket;       // Associated socket
+
+  std::list<Ptr<Socket>> m_appAcceptedSockets; //!< Active APP-KMS accepted sockets
 
   Ptr<Socket> m_sinkSocketKMS;       // Associated socket KMS
 

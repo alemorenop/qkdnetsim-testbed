@@ -1,11 +1,9 @@
-# Scenario 4: key relay (Alice - trusted relay - Bob) with native
-# strongSwan consumers.  H1-H7 are extended unchanged from the
-# synthetic key-relay scenario. H8/H9 use the multi-hop ETSI GS QKD
-# 004 implementation by default; set QKD_INTERFACE=014 to compare it with
-# the key-oriented interface over the same trusted-node topology.
+# Scenario 4: key-relay QKD/KMS infrastructure for the strongSwan consumer.
+# CORE always creates Alice and Bob and their classical network. The CORE
+# runner selects ETSI GS QKD 004 or 014.
 #
 # Usage:
-#   docker compose -f docker/docker-compose.key-relay-vpn.yml up -d --build
+#   docker compose -f docker/docker-compose.key-relay-vpn.yml up -d
 name: qkdnetsim-key-relay-vpn
 
 networks:
@@ -59,11 +57,6 @@ networks:
       config:
         - subnet: 192.168.120.0/24
           gateway: 192.168.120.254
-  net_app_data:
-    ipam:
-      config:
-        - subnet: 192.168.121.0/24
-          gateway: 192.168.121.254
 
 services:
   pp_alice:
@@ -107,66 +100,3 @@ services:
       file: docker-compose.key-relay.yml
       service: kms_bob
     container_name: qkd-relay-vpn-kms-bob
-
-  vpn_bob:
-    build:
-      context: ..
-      dockerfile: docker/vpn/Dockerfile.vpn
-    image: qkdnetsim-vpn-endpoint:latest
-    container_name: qkd-relay-vpn-bob
-    hostname: relay-vpn-bob
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      VPN_ROLE: "bob"
-      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
-      OWN_IP: "192.168.121.9"
-      PEER_IP: "192.168.121.8"
-      KMS_IP: "192.168.120.7"
-      OWN_APP_ID: "eeeeeeee-0000-0000-0000-000000000002"
-      PEER_APP_ID: "eeeeeeee-0000-0000-0000-000000000001"
-      CONTROL_PORT: "9090"
-      KEY_CHUNK_SIZE_BITS: "256"
-      REKEY_INTERVAL_S: "60"
-    networks:
-      net_bob_kms_app: { ipv4_address: 192.168.120.9 }
-      net_app_data: { ipv4_address: 192.168.121.9 }
-    depends_on:
-      kms_bob:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import json; s=json.load(open('/run/qkd-vpn/state.json')); raise SystemExit(0 if s.get('tunnel_up') else 1)\" && ipsec statusall | grep -q 'ESTABLISHED'"]
-      interval: 3s
-      timeout: 3s
-      retries: 120
-      start_period: 5s
-
-  vpn_alice:
-    image: qkdnetsim-vpn-endpoint:latest
-    container_name: qkd-relay-vpn-alice
-    hostname: relay-vpn-alice
-    cap_add: [NET_ADMIN, NET_RAW]
-    environment:
-      VPN_ROLE: "alice"
-      QKD_INTERFACE: "${QKD_INTERFACE:-004}"
-      OWN_IP: "192.168.121.8"
-      PEER_IP: "192.168.121.9"
-      KMS_IP: "192.168.119.5"
-      OWN_APP_ID: "eeeeeeee-0000-0000-0000-000000000001"
-      PEER_APP_ID: "eeeeeeee-0000-0000-0000-000000000002"
-      CONTROL_PORT: "9090"
-      KEY_CHUNK_SIZE_BITS: "256"
-      REKEY_INTERVAL_S: "60"
-    networks:
-      net_alice_kms_app: { ipv4_address: 192.168.119.8 }
-      net_app_data: { ipv4_address: 192.168.121.8 }
-    depends_on:
-      kms_alice:
-        condition: service_healthy
-      vpn_bob:
-        condition: service_started
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import json; s=json.load(open('/run/qkd-vpn/state.json')); raise SystemExit(0 if s.get('tunnel_up') else 1)\" && ipsec statusall | grep -q 'ESTABLISHED'"]
-      interval: 3s
-      timeout: 3s
-      retries: 120
-      start_period: 5s

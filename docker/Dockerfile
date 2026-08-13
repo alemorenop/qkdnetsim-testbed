@@ -1,6 +1,6 @@
 # Base image shared by the emulation scenarios (point-to-point and key-relay).
 # Build context = root of this qkdnetsim checkout (contrib/qkdnetsim), e.g.:
-#   docker build -t qkdnetsim-6vm-emulation:latest -f docker/Dockerfile .
+#   docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 # (run from inside contrib/qkdnetsim)
 
 FROM ubuntu:22.04

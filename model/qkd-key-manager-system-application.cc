@@ -755,6 +755,12 @@ void
 QKDKeyManagerSystemApplication::DoDispose()
 {
   NS_LOG_FUNCTION(this);
+  while(!m_appAcceptedSockets.empty())
+  {
+    Ptr<Socket> acceptedSocket = m_appAcceptedSockets.front();
+    m_appAcceptedSockets.pop_front();
+    acceptedSocket->Close();
+  }
   if(m_sinkSocket) {
     //m_sinkSocket->Close();
     m_sinkSocket = nullptr;
@@ -775,6 +781,11 @@ QKDKeyManagerSystemApplication::HandleAccept(Ptr<Socket> s, const Address& from)
 {
   NS_LOG_FUNCTION(this << s << from << InetSocketAddress::ConvertFrom(from).GetIpv4());
   s->SetRecvCallback(MakeCallback(&QKDKeyManagerSystemApplication::HandleRead, this));
+  s->SetCloseCallbacks(
+    MakeCallback(&QKDKeyManagerSystemApplication::HandlePeerClose, this),
+    MakeCallback(&QKDKeyManagerSystemApplication::HandlePeerError, this)
+  );
+  m_appAcceptedSockets.push_back(s);
 }
 
 void
@@ -864,6 +875,12 @@ void
 QKDKeyManagerSystemApplication::HandlePeerClose(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  Address peer;
+  if(socket->GetPeerName(peer) == 0)
+  {
+    m_buffer.erase(peer);
+  }
+  m_appAcceptedSockets.remove(socket);
 }
 
 void
@@ -876,6 +893,7 @@ void
 QKDKeyManagerSystemApplication::HandlePeerError(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  HandlePeerClose(socket);
 }
 
 void
@@ -1251,6 +1269,12 @@ void
 QKDKeyManagerSystemApplication::StopApplication() // Called at time specified by Stop
 {
   NS_LOG_FUNCTION(this);
+  while(!m_appAcceptedSockets.empty())
+  {
+    Ptr<Socket> acceptedSocket = m_appAcceptedSockets.front();
+    m_appAcceptedSockets.pop_front();
+    acceptedSocket->Close();
+  }
   if(m_sinkSocket)
   {
     m_sinkSocket->Close();

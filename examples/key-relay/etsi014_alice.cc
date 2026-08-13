@@ -1,8 +1,9 @@
 /*
  * Key-relay ETSI 014 ALICE (master)
  *
- *   --devData / --myIpData  link to RELAY_ETSI014_BOB (ETSI014 Bob)     [encrypted traffic]
- *   --devKms  / --myIpKms   link to RELAY_KMS_ALICE (KMS Alice)       [GET_KEY]
+ * CORE runs this process in a DockerNode with two interfaces:
+ *   --devData / --myIpData  eth1 on the CORE classical path to Bob
+ *   --devKms  / --myIpKms   eth0 on the Docker KMS network
  *
  * Contract shared with the other VMs (must match exactly):
  *   etsiAliceId -> also used on RELAY_KMS_ALICE when registering the app pair
@@ -22,13 +23,8 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("RELAY_ETSI014_ALICE_ETSI014_ALICE");
 
-// Mitigation (does not fix the root cause) for a known race condition at
-// RealtimeSimulatorImpl startup (confirmed via strace: a futex loop between
-// 2 threads with the simulated clock not advancing and no network syscalls
-// being made). Suspicion: the synchronizer thread is more vulnerable when
-// there is NO event scheduled until appStartTime (here the app does nothing
-// until then). We keep the event loop busy from t=0 with a trivial
-// high-frequency event, in case that reduces the probability of the race.
+// Keep a nearby event scheduled while the realtime process waits for external
+// frames from its EmuFdNetDevices.
 static void
 KeepAlive(Time period, Time stopTime)
 {
@@ -61,18 +57,19 @@ main(int argc, char* argv[])
     GlobalValue::Bind("SimulatorImplementationType", StringValue("ns3::RealtimeSimulatorImpl"));
     GlobalValue::Bind("ChecksumEnabled", BooleanValue(true));
 
-    // ---- Real interfaces of this VM (adjust to your lab) ----
-    std::string devData  = "eth0";
-    std::string devKms   = "eth1";
-    std::string myIpData = "192.168.121.8";
+    // ---- CORE DockerNode interfaces (the runner overrides routed addresses) ----
+    std::string devData  = "eth1";
+    std::string devKms   = "eth0";
+    std::string myIpData = "10.254.0.1";
     std::string myIpKms  = "192.168.119.8";
     uint16_t    dataPort = 8081;
 
-    // ---- Peers (real IPs of the other VMs) ----
-    std::string peerBobIp  = "192.168.121.9"; // RELAY_ETSI014_BOB
+    // ---- Peer and KMS addresses ----
+    std::string peerBobIp  = "10.254.0.2"; // RELAY_ETSI014_BOB
     std::string kmsAliceIp = "192.168.119.5"; // RELAY_KMS_ALICE (KMS Alice)
+    std::string dataGateway = ""; // first CORE router; empty for a direct link
 
-    // ---- Identifier contract shared between VMs ----
+    // ---- Identifier contract shared between DockerNodes and KMSs ----
     std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // must match RELAY_KMS_ALICE
     std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // must match RELAY_ETSI014_BOB/RELAY_KMS_BOB
 
@@ -85,7 +82,7 @@ main(int argc, char* argv[])
     uint32_t aesLifetime = 10000;
     uint32_t useCrypto = 1;
 
-    uint32_t appStartTime = 50;
+    uint32_t appStartTime = 2;
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
@@ -95,6 +92,7 @@ main(int argc, char* argv[])
     cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_ALICE", myIpKms);
     cmd.AddValue("peerBobIp", "Real IP of RELAY_ETSI014_BOB", peerBobIp);
     cmd.AddValue("kmsAliceIp", "Real IP of RELAY_KMS_ALICE (KMS Alice)", kmsAliceIp);
+    cmd.AddValue("dataGateway", "Optional gateway on the CORE data interface", dataGateway);
     cmd.AddValue("etsiAliceId", "UUID of this app (must match RELAY_KMS_ALICE)", etsiAliceId);
     cmd.AddValue("etsiBobId", "UUID of the peer app on RELAY_ETSI014_BOB", etsiBobId);
     cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
@@ -144,6 +142,11 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(0.0), &KeepAlive, MilliSeconds(100), Seconds(simulationTime));
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    if (!dataGateway.empty()) {
+        Ipv4StaticRoutingHelper helper;
+        Ptr<Ipv4StaticRouting> routing = helper.GetStaticRouting(node->GetObject<Ipv4>());
+        routing->AddHostRouteTo(Ipv4Address(peerBobIp.c_str()), Ipv4Address(dataGateway.c_str()), 1);
+    }
 
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/TxKMS",
                      MakeCallback(+[](std::string ctx, const std::string& appId, Ptr<const Packet> p) {

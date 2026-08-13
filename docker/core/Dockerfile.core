@@ -1,0 +1,133 @@
+# syntax=docker/dockerfile:1
+
+# The official CORE Docker build compiles the EMANE Python bindings in a
+# separate image before installing them into the final CORE environment.
+FROM ubuntu:22.04 AS emane-python
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /opt
+
+ARG PROTOC_VERSION=3.19.6
+ARG EMANE_PYTHON_REF=v1.5.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        automake \
+        ca-certificates \
+        g++ \
+        git \
+        libpcap-dev \
+        libpcre3-dev \
+        libprotobuf-dev \
+        libtool \
+        libxml2-dev \
+        make \
+        pkg-config \
+        python3 \
+        python3-pip \
+        unzip \
+        uuid-dev \
+        wget \
+    && wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+    && mkdir protoc \
+    && unzip -q "protoc-${PROTOC_VERSION}-linux-x86_64.zip" -d protoc \
+    && git clone https://github.com/adjacentlink/emane.git \
+    && cd emane \
+    && git checkout "${EMANE_PYTHON_REF}" \
+    && ./autogen.sh \
+    && PYTHON=python3 ./configure --prefix=/usr \
+    && cd src/python \
+    && PATH=/opt/protoc/bin:${PATH} make \
+    && python3 setup.py bdist_wheel \
+    && mv dist/*.whl /opt/ \
+    && cd /opt \
+    && rm -rf emane protoc "protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /opt
+
+# CORE 9.2.1 is the latest upstream release. The upstream release-9.2.1
+# Dockerfile still defaults to 9.2.0, so the corrected version is explicit.
+ARG CORE_VERSION=9.2.1
+ARG CORE_PACKAGE=core_${CORE_VERSION}_amd64.deb
+ARG CORE_PACKAGE_URL=https://github.com/coreemu/core/releases/download/release-${CORE_VERSION}/${CORE_PACKAGE}
+ARG EMANE_RELEASE=emane-1.5.1-release-1
+ARG EMANE_PACKAGE=${EMANE_RELEASE}.ubuntu-22_04.amd64.tar.gz
+
+# This is the complete Ubuntu CORE runtime dependency set, plus Docker CLI and
+# the networking tools required by this testbed's DockerNode integration.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        automake \
+        ca-certificates \
+        curl \
+        docker.io \
+        ethtool \
+        g++ \
+        gawk \
+        git \
+        iproute2 \
+        iputils-ping \
+        libreadline-dev \
+        libtool \
+        make \
+        nftables \
+        pkg-config \
+        procps \
+        psmisc \
+        python3 \
+        python3-pip \
+        python3-tk \
+        python3-venv \
+        tcpdump \
+        util-linux \
+        wget \
+        xterm \
+    && wget -q "${CORE_PACKAGE_URL}" \
+    && apt-get install -y --no-install-recommends "./${CORE_PACKAGE}" \
+    && rm -f "${CORE_PACKAGE}" \
+    && rm -rf /var/lib/apt/lists/*
+
+# OSPF-MDR is built from the source used by the official CORE image. Keeping
+# it in the runtime makes CORE's complete NRL routing service set available.
+RUN git clone https://github.com/USNavalResearchLaboratory/ospf-mdr.git \
+    && cd ospf-mdr \
+    && ./bootstrap.sh \
+    && ./configure --disable-doc --enable-user=root --enable-group=root \
+        --with-cflags=-ggdb --sysconfdir=/usr/local/etc/quagga --enable-vtysh \
+        --localstatedir=/var/run/quagga \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd /opt \
+    && rm -rf ospf-mdr
+
+# Install the official EMANE runtime packages and the Python wheel produced by
+# the first stage, matching CORE's documented full Ubuntu Docker image.
+RUN apt-get update \
+    && wget -q "https://adjacentlink.com/downloads/emane/${EMANE_PACKAGE}" \
+    && tar xf "${EMANE_PACKAGE}" \
+    && cd "${EMANE_RELEASE}/debs/ubuntu-22_04/amd64" \
+    && rm emane-spectrum-tools*.deb emane-model-lte*.deb \
+    && rm *dev*.deb \
+    && apt-get install -y --no-install-recommends ./emane*.deb ./python3-emane_*.deb \
+    && cd /opt \
+    && rm -rf "${EMANE_PACKAGE}" "${EMANE_RELEASE}" \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG CORE_VENV=/opt/core/venv
+COPY --from=emane-python /opt/emane-*.whl /opt/
+RUN "${CORE_VENV}/bin/python" -m pip install /opt/emane-*.whl \
+    && rm -f /opt/emane-*.whl
+
+COPY docker/core/entrypoint-core.sh /usr/local/bin/entrypoint-core
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint-core \
+    && chmod 0755 /usr/local/bin/entrypoint-core
+
+WORKDIR /workspace
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=12 \
+    CMD /opt/core/venv/bin/python -c "import socket; socket.create_connection(('127.0.0.1', 50051), 2).close()"
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-core"]
+CMD ["/opt/core/venv/bin/core-daemon"]

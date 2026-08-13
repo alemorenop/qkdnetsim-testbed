@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# CORE creates application endpoints first, attaches their classical
+# interfaces and starts the real ns-3 command afterwards. Keep the container
+# dormant until the CORE runner invokes this entrypoint explicitly.
+if [ "${1:-}" = "tail" ] && [ "${2:-}" = "-f" ]; then
+    exec "$@"
+fi
+
 # Docker does not guarantee that the order in which a service's networks
 # are attached translates into the same eth0/eth1/eth2 inside the container
 # between one "up" and the next. To avoid depending on that order, we

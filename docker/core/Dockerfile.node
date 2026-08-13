@@ -1,0 +1,16 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# CORE configures DockerNode interfaces from outside the container. iproute2
+# and ethtool are the upstream minimum; ping and tcpdump make connectivity and
+# packet-path verification possible before the VPN software is introduced.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ethtool \
+        iproute2 \
+        iputils-ping \
+        procps \
+        tcpdump \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
