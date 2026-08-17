@@ -798,6 +798,8 @@ private:
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&>
+    m_etsi004RelayControlTrace; //!< Phase, operation, request ID and HTTP/status code for routed ETSI 004 control
   // Fires once, when m_sinkSocket and m_sinkSocketKMS are already in
   // Listen(). Meant for an external healthcheck (Docker depends_on) to know
   // when this KMS can already accept incoming connections, instead of

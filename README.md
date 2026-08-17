@@ -11,6 +11,7 @@ roles inside one conventional ns-3 simulation process.
 - [Architecture and motivation](#architecture-and-motivation)
   - [Research basis and testbed extensions](#research-basis-and-testbed-extensions)
 - [Installation and execution](#installation-and-execution)
+  - [Automated regression matrix](#automated-regression-matrix)
 - [Distance-aware QKD link budget](#distance-aware-qkd-link-budget)
 - [CORE classical-network integration](#core-classical-network-integration)
 - [Scenarios](#scenarios)
@@ -101,6 +102,7 @@ requires:
 
 - Git;
 - Docker Engine with the Docker Compose plugin;
+- Python 3.10 or newer for the host-side regression orchestrator;
 - an x86-64 Linux host, or Docker Desktop configured to use Linux containers
   on Windows. Commands may be issued from PowerShell, WSL or a Linux shell.
 
@@ -173,6 +175,72 @@ longer required:
 docker compose -f docker/docker-compose.yml down
 docker compose -f docker/docker-compose.core.yml down
 ```
+
+### Automated regression matrix
+
+[`automation/run-regression.py`](automation/run-regression.py) is the
+recommended way to validate the complete testbed. It builds the images when
+requested, starts CORE, selects and recreates the required Compose project,
+runs the corresponding topology runner, saves the evidence, and tears down
+both persistent infrastructure and transient CORE endpoints. Before every
+case it also removes only stale containers whose names begin with
+`qkd-core-vpn-` or `qkd-core-traffic-`; an interrupted experiment therefore
+cannot retain a fixed endpoint IP and contaminate the next run.
+
+Run the complete campaign from the repository root:
+
+```bash
+python3 automation/run-regression.py --build
+```
+
+On Windows, the equivalent command is `py -3 automation/run-regression.py
+--build`. The default campaign runs each of the six functional variants three
+times:
+
+1. point-to-point encrypted test traffic;
+2. key-relay encrypted test traffic;
+3. point-to-point VPN with ETSI 004;
+4. point-to-point VPN with ETSI 014;
+5. key-relay VPN with ETSI 004; and
+6. key-relay VPN with ETSI 014.
+
+It then runs one expected-failure test in which Bob deliberately derives a
+different test key. That case passes only when the consumers report `KMS
+streams diverged` and refuse to establish the tunnel. The fault hook is
+disabled unless the runner receives `--fault-mode bob-key-mismatch`.
+
+The traffic cases require multiple encrypted TCP/8081 packets and, for key
+relay, explicit trusted-node consumption and delivery at both endpoint KMSs.
+The VPN cases require at least two different QKD generations, continuous ping
+during rekey, retirement of the previous IKE SA, sustained `iperf3` traffic,
+ESP on the exterior path, no clear ICMP or TCP payload, and explicit relay
+evidence. ETSI 004 relay verification additionally requires the routed
+`new_app`, `register`, and `fill` control operations.
+
+Each run is written below `results/regression-<UTC timestamp>/` unless
+`--output-dir` is supplied. `summary.json` contains the complete structured
+campaign, `summary.csv` provides a compact table, and every case has its own
+`runner.log`, `infrastructure.log`, and `result.json`. Infrastructure logs
+also contribute the applied `[QKD_LINK_BUDGET]` lines. These result
+directories are ignored by Git and contain no stored packet captures.
+
+Useful shorter invocations are:
+
+```bash
+# One pass through all six variants plus the negative test
+python3 automation/run-regression.py --repetitions 1
+
+# One selected case; repeat --case to select several
+python3 automation/run-regression.py --case vpn-key-relay-etsi004
+
+# Display the matrix without accessing Docker
+python3 automation/run-regression.py --list
+```
+
+Network conditions and acceptance limits are configurable with `--routers`,
+`--delay-ms`, `--bandwidth-mbps`, `--loss-percent`, `--traffic-duration`,
+`--min-generations`, `--rekey-interval`, and
+`--max-rekey-loss-percent`. Use `--help` for the complete interface.
 
 ### Optional native ns-3 development
 
@@ -646,10 +714,12 @@ docker compose -f docker/docker-compose.core.yml exec core \
   --routers 0 --delay-ms 5 --bandwidth-mbps 100 --loss-percent 0
 ```
 
-The runner verifies the selected interface, matching generation and key
-fingerprint, the exact established IKE SA, successful ping, outbound ESP and
-zero plaintext ICMP. Its transient endpoints and capture are deleted after
-each run, while the QKD/KMS infrastructure may remain active for comparisons.
+The runner verifies the selected interface, multiple matching generations
+with different key fingerprints, traffic continuity during rekey, retirement
+of the previous IKE SA, successful ping, sustained `iperf3` throughput, ESP,
+and zero plaintext ICMP or TCP payload. Its transient endpoints and temporary
+capture are deleted after each run, while the QKD/KMS infrastructure may
+remain active for comparisons.
 
 **Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The H5/H6 VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. [`entrypoint.sh`](docker/entrypoint.sh) and [`entrypoint-vpn.sh`](docker/vpn/entrypoint-vpn.sh) now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
 
@@ -766,9 +836,12 @@ docker compose -f docker/docker-compose.core.yml exec core \
   --routers 0 --delay-ms 5 --bandwidth-mbps 100 --loss-percent 0
 ```
 
-As in scenario 3, the runner confirms matching fingerprints and either ETSI
-004 KSID/index or ETSI 014 `key_ID`, validates the exact IKE SA, and requires
-real ping traffic to produce ESP with no plaintext ICMP.
+As in scenario 3, the runner confirms multiple matching fingerprints and
+either ETSI 004 KSID/index or ETSI 014 `key_ID`, validates the exact current
+IKE SA and retirement of its predecessor, and requires sustained traffic to
+produce ESP with no plaintext application payload. It also requires relay
+consumption plus both endpoint deliveries; ETSI 004 additionally checks the
+routed `new_app`, `register`, and `fill` transactions.
 
 #### Stream-index continuity
 
@@ -829,6 +902,10 @@ the relay layer transports larger storage blocks internally.
   — the selectable ETSI 004/014 seven-service key-relay VPN infrastructure. CORE
   supplies its two application endpoints and performs the end-to-end
   association, synchronized rotation and ESP verification.
+- **[`automation/run-regression.py`](automation/run-regression.py)** — the
+  host-side six-variant regression orchestrator. It owns image/Compose
+  lifecycle, repeated execution, expected negative testing, stale endpoint
+  cleanup, and JSON/CSV/log evidence collection.
 
 ---
 

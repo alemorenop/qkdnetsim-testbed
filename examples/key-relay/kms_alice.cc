@@ -236,6 +236,10 @@ main(int argc, char* argv[])
                      MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_ALICE] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/Etsi004RelayControl",
+                     MakeCallback(+[](std::string ctx, const std::string& phase, const std::string& operation, const std::string& requestId, const uint32_t& code) {
+                         std::cout << "[RELAY_ETSI004_CONTROL] kms=alice phase=" << phase << " operation=" << operation << " requestId=" << requestId << " code=" << code << std::endl;
+                     }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
                          std::cout << "[RELAY_KMS_ALICE] KMS Alice listening" << std::endl;

@@ -94,6 +94,9 @@ QKDKeyManagerSystemApplication::GetTypeId()
     .AddTraceSource("WasteRelay", "The trace to monitor failed relays",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyWasteRelay),
                      "ns3::QKDKeyManagerSystemApplication::WasteRelay")
+    .AddTraceSource("Etsi004RelayControl", "Routed ETSI 004 control-plane transaction progress",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_etsi004RelayControlTrace),
+                     "ns3::QKDKeyManagerSystemApplication::Etsi004RelayControl")
     .AddTraceSource("ListenReady", "El KMS ya tiene sus sockets de escucha activos (Bind+Listen completado)",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_listenReadyTrace),
                      "ns3::QKDKeyManagerSystemApplication::ListenReady")
@@ -3026,6 +3029,8 @@ QKDKeyManagerSystemApplication::SendEtsi004RelayControl(
   HttpKMSAddQuery(nextHopAddress, query);
   HttpProxyRequestAdd(query);
   sendSocket->Send(packet);
+  const uint32_t nextHopTrace = nextHop;
+  m_etsi004RelayControlTrace("request-sent", operation, query.req_id, nextHopTrace);
   NS_LOG_FUNCTION(this << "ETSI004 relay-control request sent"
                        << operation << query.req_id << nextHop);
 }
@@ -3166,6 +3171,8 @@ QKDKeyManagerSystemApplication::ProcessEtsi004RelayControlRequest(
   Ptr<Socket> sendSocket = GetSocketKMS(previousAddress);
   NS_ASSERT(sendSocket);
   sendSocket->Send(packet);
+  const uint32_t statusTrace = static_cast<uint32_t>(status);
+  m_etsi004RelayControlTrace("request-processed", operation, reqId, statusTrace);
 }
 
 void
@@ -3252,6 +3259,10 @@ QKDKeyManagerSystemApplication::ProcessEtsi004RelayControlResponse(
   {
     CompleteEtsi004RelayFill(query, headerIn);
   }
+
+  const uint32_t responseStatusTrace = static_cast<uint32_t>(headerIn.GetStatus());
+  m_etsi004RelayControlTrace(
+    "response-received", query.operation, reqId, responseStatusTrace);
 
   HttpKMSCompleteQuery(nextHopAddress);
   RemoveProxyQuery(reqId);

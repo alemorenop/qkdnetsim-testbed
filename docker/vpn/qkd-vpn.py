@@ -33,6 +33,7 @@ KEY_CHUNK_SIZE_BITS = int(os.getenv("KEY_CHUNK_SIZE_BITS", "256"))
 REKEY_INTERVAL_S = int(os.getenv("REKEY_INTERVAL_S", "60"))
 RETRY_INTERVAL_S = float(os.getenv("RETRY_INTERVAL_S", "2"))
 RETRY_LIMIT = int(os.getenv("RETRY_LIMIT", "60"))
+TEST_TAMPER_KEY = os.getenv("QKD_TEST_TAMPER_KEY", "0") == "1"
 
 RUN_DIR = pathlib.Path("/run/qkd-vpn")
 STATE_FILE = RUN_DIR / "state.json"
@@ -154,6 +155,32 @@ class KeyVersion:
     key_id: str | None
     value: str
     digest: str
+
+
+def tamper_key_for_negative_test(key: KeyVersion) -> KeyVersion:
+    """Return deliberately divergent material for the opt-in fail-closed test."""
+    if not TEST_TAMPER_KEY:
+        return key
+    if key.value.startswith("0x"):
+        material = bytearray.fromhex(key.value[2:])
+        material[0] ^= 0x01
+        value = f"0x{material.hex()}"
+        digest = hashlib.sha256(material).hexdigest()
+    else:
+        replacement = "0" if key.value[0] != "0" else "1"
+        value = replacement + key.value[1:]
+        digest = hashlib.sha256(value.encode()).hexdigest()
+    log(
+        f"TEST-ONLY tampered generation={key.generation} "
+        "to verify mismatched-key rejection"
+    )
+    return KeyVersion(
+        generation=key.generation,
+        index=key.index,
+        key_id=key.key_id,
+        value=value,
+        digest=digest,
+    )
 
 
 def parse_key_response(response: dict[str, Any], generation: int) -> KeyVersion:
@@ -398,6 +425,7 @@ def prepare_bob(
                 lambda: fetch_etsi014_dec_key(key_id, generation),
                 f"dec_keys generation {generation}",
             )
+        key = tamper_key_for_negative_test(key)
         install_connection(generation)
         install_secret(key)
         STATE.pending = key

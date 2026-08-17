@@ -208,13 +208,30 @@ network namespaces and start Bob before Alice. Application-level TCP/KMS
 retries cover the remaining key-availability window, so no fixed sleep,
 watchdog or manual container ordering is required.
 
-The traffic runner requires key requests at both consumers and encrypted
-TCP/8081 traffic. The VPN runner requires matching generations and
-fingerprints, established strongSwan state, successful ping, outbound ESP and
-zero plaintext ICMP. Both remove their endpoint containers automatically. The
+The traffic runner requires key requests at both consumers and multiple
+encrypted TCP/8081 packets. In key-relay mode it also requires trusted-node
+consumption and key delivery at both endpoint KMSs. The VPN runner requires
+multiple distinct matching generations, continuous traffic during rekey,
+retirement of old IKE SAs, sustained `iperf3` throughput, ESP and zero
+plaintext ICMP or TCP payload. Key-relay VPN runs additionally validate relay
+consumption; ETSI 004 requires routed `new_app`, `register` and `fill`
+operations. Both runners emit a machine-readable `[CORE_RESULT]` JSON line
+and remove their endpoint containers automatically. The
 KMS retains accepted APP–KMS sockets while active and removes them and any
 partial HTTP buffer when the peer closes, allowing repeated experiments
 without restarting QKDNetSim.
+
+For complete repeated validation, use the host-side orchestrator from the
+repository root:
+
+```bash
+python3 automation/run-regression.py --build
+```
+
+It automatically starts and stops every Compose project, runs all six
+functional variants three times by default, executes the expected mismatched
+key rejection once, and writes JSON, CSV and per-run logs below `results/`.
+Use `--repetitions 1` for a single pass or `--case NAME` for a targeted run.
 
 Stop both runtimes afterwards:
 
@@ -254,8 +271,10 @@ strongSwan, KMS and routed-classical-path integration.
   attaches them to the selected point-to-point or key-relay KMS infrastructure
   and verifies encrypted TCP/8081 traffic.
 - `core/vpn-topology.py` creates the strongSwan Alice/Bob DockerNodes, selects
-  ETSI 004 or ETSI 014, establishes the IPsec tunnel and verifies ESP with no
-  plaintext ICMP.
+  ETSI 004 or ETSI 014, verifies rekeys and old-SA retirement, drives ping and
+  `iperf3`, and checks ESP with no plaintext application payload.
+- `automation/run-regression.py` orchestrates builds, Compose lifecycle,
+  repeated scenario execution, negative testing and structured evidence.
 
 The topology runners own the complete endpoint lifecycle: they wait for both
 KMS containers, create Bob and Alice, attach `eth0` to Docker KMS networks and

@@ -3,7 +3,9 @@
 
 import argparse
 import ipaddress
+import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -139,6 +141,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bandwidth-mbps", type=positive_int, default=100)
     parser.add_argument("--loss-percent", type=percentage, default=0.0)
     parser.add_argument("--startup-timeout", type=positive_int, default=240)
+    parser.add_argument("--traffic-duration", type=positive_int, default=8)
+    parser.add_argument("--min-traffic-packets", type=positive_int, default=3)
     return parser.parse_args()
 
 
@@ -211,25 +215,67 @@ def start_endpoint(
     docker(*command)
 
 
-def wait_for_traffic(alice: EndpointNode, bob: EndpointNode, scenario: Scenario, timeout: int) -> None:
+def wait_for_traffic(
+    alice: EndpointNode,
+    bob: EndpointNode,
+    scenario: Scenario,
+    timeout: int,
+    traffic_duration: int,
+    min_packets: int,
+) -> dict[str, int]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         alice_log = docker("exec", alice.name, "sh", "-c", "cat /tmp/qkdnetsim.log 2>/dev/null", check=False).stdout
         bob_log = docker("exec", bob.name, "sh", "-c", "cat /tmp/qkdnetsim.log 2>/dev/null", check=False).stdout
         if "GET_KEY request" in alice_log and "GET_KEY request" in bob_log:
             capture = docker(
-                "exec", alice.name, "timeout", "8", "tcpdump", "-nn", "-i", "eth1",
-                "-c", "1", "tcp port 8081", check=False
+                "exec", alice.name, "timeout", str(traffic_duration),
+                "tcpdump", "-nn", "-i", "eth1", "-c", str(min_packets),
+                "tcp port 8081", check=False
             )
             if capture.returncode == 0:
-                print("[CORE_TRAFFIC] encryptedApplicationTraffic=OK tcp8081Packets>=1")
-                return
+                match = re.search(r"(\d+) packets captured", capture.stdout)
+                packets = int(match.group(1)) if match else min_packets
+                print(
+                    "[CORE_TRAFFIC] encryptedApplicationTraffic=OK "
+                    f"tcp8081Packets={packets} durationSeconds={traffic_duration}"
+                )
+                return {"tcp8081_packets": packets}
         time.sleep(3)
     raise RuntimeError("QKDNetSim application traffic did not become ready")
 
 
+def verify_relay_evidence() -> dict[str, int]:
+    containers = (
+        "qkd-relay-kms-alice",
+        "qkd-relay-kms-trusted",
+        "qkd-relay-kms-bob",
+    )
+    logs = {name: docker("logs", name, check=False).stdout for name in containers}
+    relay_consumed = sum(text.count("Relay consumed") for text in logs.values())
+    alice_served = logs[containers[0]].count("KMS Alice serves key")
+    bob_served = logs[containers[2]].count("KMS Bob serves key")
+    if relay_consumed < 1 or alice_served < 1 or bob_served < 1:
+        raise RuntimeError(
+            "key-relay evidence incomplete: "
+            f"relayConsumed={relay_consumed} aliceServed={alice_served} "
+            f"bobServed={bob_served}"
+        )
+    print(
+        "[CORE_TRAFFIC] relayEvidence=OK "
+        f"relayConsumed={relay_consumed} aliceServed={alice_served} "
+        f"bobServed={bob_served}"
+    )
+    return {
+        "relay_consumed": relay_consumed,
+        "alice_keys_served": alice_served,
+        "bob_keys_served": bob_served,
+    }
+
+
 def main() -> None:
     args = parse_args()
+    started = time.monotonic()
     scenario = SCENARIOS[args.qkd_topology]
     suffix = str(os.getpid())
     names = (f"qkd-core-traffic-alice-{suffix}", f"qkd-core-traffic-bob-{suffix}")
@@ -240,7 +286,8 @@ def main() -> None:
     own_data = (str(networks[0].network_address + 1), str(networks[-1].network_address + 2))
 
     coreemu = CoreEmu()
-    session = coreemu.create_session()
+    session_id = (time.time_ns() ^ os.getpid()) % 2_000_000_000 + 1
+    session = coreemu.create_session(session_id)
     session.set_state(EventTypes.CONFIGURATION_STATE)
     try:
         for network in scenario.kms_networks:
@@ -284,7 +331,12 @@ def main() -> None:
             endpoints[0], scenario.binaries[0], own_data[0], own_data[1],
             scenario.app_kms_ips[0], scenario.kms_ips[0], scenario.peer_flags[0], alice_gateway
         )
-        wait_for_traffic(endpoints[0], endpoints[1], scenario, args.startup_timeout)
+        metrics = wait_for_traffic(
+            endpoints[0], endpoints[1], scenario, args.startup_timeout,
+            args.traffic_duration, args.min_traffic_packets,
+        )
+        if args.qkd_topology == "key-relay":
+            metrics.update(verify_relay_evidence())
         print(
             f"[CORE_TRAFFIC] OK topology={args.qkd_topology} routers={args.routers} "
             f"delayPerLinkMs={args.delay_ms} bandwidthPerLinkMbps={args.bandwidth_mbps} "
@@ -298,7 +350,38 @@ def main() -> None:
     if leaked:
         raise RuntimeError(f"CORE did not remove endpoints: {leaked}")
     print("[CORE_TRAFFIC] cleanup=OK")
+    result = {
+        "schema_version": 1,
+        "runner": "traffic",
+        "status": "passed",
+        "topology": args.qkd_topology,
+        "routers": args.routers,
+        "links": args.routers + 1,
+        "delay_per_link_ms": args.delay_ms,
+        "bandwidth_per_link_mbps": args.bandwidth_mbps,
+        "loss_per_link_percent": args.loss_percent,
+        "traffic_duration_seconds": args.traffic_duration,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "metrics": metrics,
+    }
+    print(f"[CORE_RESULT] {json.dumps(result, sort_keys=True)}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(
+            "[CORE_RESULT] "
+            + json.dumps(
+                {
+                    "schema_version": 1,
+                    "runner": "traffic",
+                    "status": "failed",
+                    "error": str(error),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        raise
