@@ -72,6 +72,34 @@ application-integration pattern; this repository adapts it to the common
 Docker/CORE architecture and then applies it to both the direct and trusted
 key-relay QKD topologies.
 
+The geographical and transport basis of the Czech experiment is not
+arbitrary. It comes from
+[CESNET3](https://www.cesnet.cz/en/sit-cesnet3-eng), the operational Czech
+national research and education network. The paper uses data from its
+deployed optical routes: 304 km and 70 dB between Prague and Brno, and 257 km
+and 62 dB between Brno and Ostrava. Over that physical basis it anticipates
+the Prague--Brno--Ostrava QKD backbone proposed by
+[CZQCI](https://www.cesnet.cz/en/science).
+
+CZQCI was still under consideration when the article was prepared and the
+final QKD equipment was not known. The authors therefore represent the route
+as five virtual QKD links joined by trusted nodes, divide it into nominal
+100 km and 85 km segments, estimate the secret-key rates from optical and
+device assumptions, and emulate the full Qiskit--QKDNetSim--strongSwan stack
+on one host. Names such as `Prague1`, `Prague2` and `Brno1` denote logical
+QKD roles rather than confirmed institutions or physical sites. The result
+is a model calibrated against real research-network routes, not an exact
+digital twin.
+
+The distinction is also confirmed by the later deployment. The Czech
+cybersecurity authority
+[reported in July 2026](https://nukib.gov.cz/cs/kyberneticka-bezpecnost/nkc/projekty-nkc/)
+that physical implementation had finished on 30 June 2026 with approximately
+600 km and six QKD segments between Prague, Brno and Ostrava, plus commercial
+and experimental metropolitan branches. The article's five-link topology is
+therefore best understood as a pre-deployment experimental abstraction of the
+national architecture that was subsequently built.
+
 Containers were selected for this implementation because they provide:
 
 - lower CPU, memory and storage overhead than a deployment based on one VM per
