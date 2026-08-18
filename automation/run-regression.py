@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the complete six-variant QKDNetSim testbed regression matrix."""
+"""Run the four supported QKD-backed VPN regression variants."""
 
 from __future__ import annotations
 
@@ -23,15 +23,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 CORE_COMPOSE = ROOT / "docker" / "docker-compose.core.yml"
 COMPOSE_FILES = (
-    ROOT / "docker" / "docker-compose.yml",
-    ROOT / "docker" / "docker-compose.key-relay.yml",
     ROOT / "docker" / "docker-compose.vpn.yml",
     ROOT / "docker" / "docker-compose.key-relay-vpn.yml",
 )
 RESULT_MARKER = "[CORE_RESULT] "
 CASE_NAMES = (
-    "traffic-point-to-point",
-    "traffic-key-relay",
     "vpn-point-to-point-etsi004",
     "vpn-point-to-point-etsi014",
     "vpn-key-relay-etsi004",
@@ -66,7 +62,7 @@ def percentage(value: str) -> float:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build/start the testbed, run all traffic and VPN variants, "
+            "Build/start the testbed, run all supported VPN variants, "
             "collect structured evidence and clean every Compose project"
         )
     )
@@ -85,7 +81,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--startup-timeout", type=positive_int, default=300)
     parser.add_argument("--command-timeout", type=positive_int, default=900)
     parser.add_argument("--traffic-duration", type=positive_int, default=8)
-    parser.add_argument("--min-traffic-packets", type=positive_int, default=3)
     parser.add_argument("--min-generations", type=positive_int, default=2)
     parser.add_argument("--rekey-interval", type=positive_int, default=10)
     parser.add_argument(
@@ -204,7 +199,7 @@ def stop_infrastructure() -> None:
 
 def remove_stale_endpoints() -> None:
     identifiers: list[str] = []
-    for prefix in ("qkd-core-vpn-", "qkd-core-traffic-"):
+    for prefix in ("qkd-core-vpn-",):
         result = run(
             ["docker", "ps", "-aq", "--filter", f"name={prefix}"],
             check=False,
@@ -251,11 +246,6 @@ def matrix(args: argparse.Namespace) -> list[Case]:
         "--loss-percent", str(args.loss_percent),
         "--startup-timeout", str(args.startup_timeout),
     )
-    traffic = (
-        *common,
-        "--traffic-duration", str(args.traffic_duration),
-        "--min-traffic-packets", str(args.min_traffic_packets),
-    )
     vpn = (
         *common,
         "--traffic-duration", str(args.traffic_duration),
@@ -265,27 +255,19 @@ def matrix(args: argparse.Namespace) -> list[Case]:
     )
     return [
         Case(
-            "traffic-point-to-point", COMPOSE_FILES[0], "traffic-topology.py",
-            ("--qkd-topology", "point-to-point", *traffic),
-        ),
-        Case(
-            "traffic-key-relay", COMPOSE_FILES[1], "traffic-topology.py",
-            ("--qkd-topology", "key-relay", *traffic),
-        ),
-        Case(
-            "vpn-point-to-point-etsi004", COMPOSE_FILES[2], "vpn-topology.py",
+            "vpn-point-to-point-etsi004", COMPOSE_FILES[0], "vpn-topology.py",
             ("--qkd-topology", "point-to-point", "--qkd-interface", "004", *vpn),
         ),
         Case(
-            "vpn-point-to-point-etsi014", COMPOSE_FILES[2], "vpn-topology.py",
+            "vpn-point-to-point-etsi014", COMPOSE_FILES[0], "vpn-topology.py",
             ("--qkd-topology", "point-to-point", "--qkd-interface", "014", *vpn),
         ),
         Case(
-            "vpn-key-relay-etsi004", COMPOSE_FILES[3], "vpn-topology.py",
+            "vpn-key-relay-etsi004", COMPOSE_FILES[1], "vpn-topology.py",
             ("--qkd-topology", "key-relay", "--qkd-interface", "004", *vpn),
         ),
         Case(
-            "vpn-key-relay-etsi014", COMPOSE_FILES[3], "vpn-topology.py",
+            "vpn-key-relay-etsi014", COMPOSE_FILES[1], "vpn-topology.py",
             ("--qkd-topology", "key-relay", "--qkd-interface", "014", *vpn),
         ),
     ]
@@ -294,7 +276,7 @@ def matrix(args: argparse.Namespace) -> list[Case]:
 def negative_case(args: argparse.Namespace) -> Case:
     return Case(
         "negative-vpn-rejects-mismatched-key",
-        COMPOSE_FILES[2],
+        COMPOSE_FILES[0],
         "vpn-topology.py",
         (
             "--qkd-topology", "point-to-point",

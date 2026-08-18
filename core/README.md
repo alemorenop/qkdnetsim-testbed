@@ -1,9 +1,9 @@
 # CORE classical-network integration
 
-CORE emulates the classical path between Alice and Bob in every testbed
-scenario. Both the ns-3 traffic consumers and the strongSwan consumers run as
-CORE-managed DockerNode endpoints. QKD post-processing, KMS synchronization
-and trusted key relay stay outside CORE in the Docker Compose infrastructure.
+CORE emulates the classical path between Alice and Bob in every supported
+testbed scenario. The strongSwan consumers run as CORE-managed DockerNode
+endpoints. QKD post-processing, KMS synchronization and trusted key relay stay
+outside CORE in the Docker Compose infrastructure.
 
 ## Step 1: CORE runtime
 
@@ -131,127 +131,61 @@ checks connectivity and RTT, and removes the Docker endpoints on shutdown.
 Additional options are available through `--help`, including per-link packet
 loss and the ping sample count.
 
-## Step 4: run any testbed scenario
+## Step 4: run a supported VPN scenario
 
-CORE is the classical Alice–Bob network in all four scenarios. Compose starts
-the persistent QKD post-processing and KMS infrastructure; a runner creates
-the two transient application DockerNodes, connects `eth0` to their KMS
-networks and gives `eth1` to CORE. Compose contains no application endpoints
-or Alice–Bob data network: CORE is the only implementation of that layer.
+CORE is the classical Alice–Bob network in both supported scenarios. Compose
+starts the persistent QKD post-processing and KMS infrastructure;
+`vpn-topology.py` creates the two transient strongSwan DockerNodes, attaches
+`eth0` to their KMS networks and gives `eth1` to CORE. The former ns-3
+synthetic-traffic runner is preserved only under
+[`historical/toy-traffic/`](../historical/toy-traffic/).
 
-Start CORE once:
+Start CORE and the selected VPN infrastructure:
 
 ```bash
 docker compose -f docker/docker-compose.core.yml up -d --build core
-```
-
-Build the two endpoint images used by the runners:
-
-```bash
-docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
-docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
-```
-
-For point-to-point QKD, start its four infrastructure services:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-Run the ns-3 ETSI 014 traffic consumer or the strongSwan consumer:
-
-```bash
-docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
-  --qkd-topology point-to-point --routers 0 --delay-ms 5 \
-  --bandwidth-mbps 100 --loss-percent 0
-
 docker compose -f docker/docker-compose.vpn.yml up -d
+```
+
+Run point-to-point QKD with either ETSI interface:
+
+```bash
 docker compose -f docker/docker-compose.core.yml exec core \
   /opt/core/venv/bin/python /workspace/core/vpn-topology.py \
   --qkd-topology point-to-point --qkd-interface 004 \
   --routers 0 --delay-ms 5 --bandwidth-mbps 100 --loss-percent 0
 ```
 
-For trusted-node key relay, use the corresponding infrastructure and select
-`key-relay` in exactly the same runners:
+For trusted-node key relay, start
+`docker/docker-compose.key-relay-vpn.yml` instead and pass
+`--qkd-topology key-relay`. Both topologies accept ETSI 004 or ETSI 014 and
+zero to eight classical routers. Delay, bandwidth and loss apply to each link.
 
-```bash
-docker compose -f docker/docker-compose.key-relay.yml up -d
-docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
-  --qkd-topology key-relay --routers 3 --delay-ms 5 \
-  --bandwidth-mbps 100 --loss-percent 0
+The runner waits for both KMS containers, creates Bob before Alice and relies
+on bounded application-level TCP/KMS retries for the remaining readiness
+window. No fixed sleep, watchdog or manual endpoint ordering is required. It
+requires multiple matching QKD generations, continuous traffic during rekey,
+old-IKE-SA retirement, sustained `iperf3` throughput, ESP and no plaintext
+ICMP or TCP payload. Key-relay runs additionally verify trusted-node
+consumption; ETSI 004 also verifies `new_app`, `register` and `fill`.
+Every run emits a machine-readable `[CORE_RESULT]` JSON record and removes
+its endpoint containers and temporary capture.
 
-docker compose -f docker/docker-compose.key-relay-vpn.yml up -d
-docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/vpn-topology.py \
-  --qkd-topology key-relay --qkd-interface 014 \
-  --routers 3 --delay-ms 5 --bandwidth-mbps 100 --loss-percent 0
-```
-
-Only one QKD infrastructure project should be active at a time. For the VPN,
-`--qkd-interface` accepts `004` or `014`. Both runners accept zero to eight
-routers. `--delay-ms`, `--bandwidth-mbps` and `--loss-percent` apply to every
-individual link.
-
-The KMS-facing interfaces use fixed, locally administered MAC addresses.
-QKDNetSim's `EmuFdNetDevice` keeps an ARP cache across experiments; a new
-random MAC for the same endpoint IP would make later TCP replies target the
-removed container. The native traffic runner additionally installs a host
-route in the ns-3 endpoint stack when routers exist. A Linux route alone would
-not affect packets produced by ns-3.
-
-Both runners explicitly wait for the Alice-side and Bob-side KMS containers
-to report `healthy` before creating either endpoint. They then create both
-network namespaces and start Bob before Alice. Application-level TCP/KMS
-retries cover the remaining key-availability window, so no fixed sleep,
-watchdog or manual container ordering is required.
-
-The traffic runner requires key requests at both consumers and multiple
-encrypted TCP/8081 packets. In key-relay mode it also requires trusted-node
-consumption and key delivery at both endpoint KMSs. The VPN runner requires
-multiple distinct matching generations, continuous traffic during rekey,
-retirement of old IKE SAs, sustained `iperf3` throughput, ESP and zero
-plaintext ICMP or TCP payload. Key-relay VPN runs additionally validate relay
-consumption; ETSI 004 requires routed `new_app`, `register` and `fill`
-operations. Both runners emit a machine-readable `[CORE_RESULT]` JSON line
-and remove their endpoint containers automatically. The
-KMS retains accepted APP–KMS sockets while active and removes them and any
-partial HTTP buffer when the peer closes, allowing repeated experiments
-without restarting QKDNetSim.
-
-For complete repeated validation, use the host-side orchestrator from the
-repository root:
+Run the complete supported matrix from the repository root:
 
 ```bash
 python3 automation/run-regression.py --build
 ```
 
-It automatically starts and stops every Compose project, runs all six
-functional variants three times by default, executes the expected mismatched
-key rejection once, and writes JSON, CSV and per-run logs below `results/`.
-Use `--repetitions 1` for a single pass or `--case NAME` for a targeted run.
-
-Stop both runtimes afterwards:
-
-```bash
-docker compose -f docker/docker-compose.core.yml down
-docker compose -f docker/docker-compose.vpn.yml down
-docker compose -f docker/docker-compose.yml down
-docker compose -f docker/docker-compose.key-relay.yml down
-docker compose -f docker/docker-compose.key-relay-vpn.yml down
-```
-
-The first build compiles EMANE's Python bindings and OSPF-MDR, so it takes
-longer than subsequent builds, which reuse Docker's cached layers.
+It runs the four VPN variants three times by default, then executes the
+expected mismatched-key rejection once and writes JSON, CSV and per-run logs
+below `results/`. Use `--repetitions 1`, `--case NAME` or `--list` for
+shorter workflows.
 
 The commands are identical on native Linux, WSL and Windows PowerShell. On
 Windows they target Docker Desktop's Linux engine; on native Linux they target
-the local Docker Engine. Docker Desktop must be running Linux containers, and
-the current CORE package targets x86-64 hosts. The smoke tests isolate the
-runtime and Docker-node requirements, while the VPN test verifies the complete
-strongSwan, KMS and routed-classical-path integration.
+the local Docker Engine. Docker Desktop must use Linux containers and the
+current CORE package targets x86-64 hosts.
 
 ## Files and responsibilities
 
@@ -267,9 +201,6 @@ strongSwan, KMS and routed-classical-path integration.
   of real DockerNodes.
 - `core/classical-topology.py` is an isolated classical-network laboratory for
   direct and multi-router paths without QKDNetSim or strongSwan.
-- `core/traffic-topology.py` creates the ETSI 014 ns-3 Alice/Bob DockerNodes,
-  attaches them to the selected point-to-point or key-relay KMS infrastructure
-  and verifies encrypted TCP/8081 traffic.
 - `core/vpn-topology.py` creates the strongSwan Alice/Bob DockerNodes, selects
   ETSI 004 or ETSI 014, verifies rekeys and old-SA retirement, drives ping and
   `iperf3`, and checks ESP with no plaintext application payload.

@@ -64,15 +64,13 @@ build_qkd_example(examples_qkdnetsim_secoqc examples_qkdnetsim_secoqc.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation_tap examples_qkdnetsim_etsi_014_emulation_tap.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation examples_qkdnetsim_etsi_014_emulation.cc)
 
-# --- Point-to-point scenario (Fig. 3 from the paper, one independent process per container) ---
+# --- Point-to-point QKD/KMS infrastructure used by the VPN scenarios ---
 build_qkd_example(p2p_pp_alice point-to-point/pp_alice.cc)
 build_qkd_example(p2p_pp_bob point-to-point/pp_bob.cc)
 build_qkd_example(p2p_kms_alice point-to-point/kms_alice.cc)
 build_qkd_example(p2p_kms_bob point-to-point/kms_bob.cc)
-build_qkd_example(p2p_etsi014_alice point-to-point/etsi014_alice.cc)
-build_qkd_example(p2p_etsi014_bob point-to-point/etsi014_bob.cc)
 
-# --- Key-relay scenario (Alice-Relay-Bob, no direct Alice-Bob link) ---
+# --- Key-relay QKD/KMS infrastructure used by the VPN scenarios ---
 build_qkd_example(relay_pp_alice key-relay/pp_alice.cc)
 build_qkd_example(relay_pp_relay_a key-relay/pp_relay_a.cc)
 build_qkd_example(relay_pp_relay_b key-relay/pp_relay_b.cc)
@@ -80,5 +78,3 @@ build_qkd_example(relay_pp_bob key-relay/pp_bob.cc)
 build_qkd_example(relay_kms_alice key-relay/kms_alice.cc)
 build_qkd_example(relay_kms_trusted key-relay/kms_trusted.cc)
 build_qkd_example(relay_kms_bob key-relay/kms_bob.cc)
-build_qkd_example(relay_etsi014_alice key-relay/etsi014_alice.cc)
-build_qkd_example(relay_etsi014_bob key-relay/etsi014_bob.cc)

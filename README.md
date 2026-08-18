@@ -15,10 +15,9 @@ roles inside one conventional ns-3 simulation process.
 - [Distance-aware QKD link budget](#distance-aware-qkd-link-budget)
 - [CORE classical-network integration](#core-classical-network-integration)
 - [Scenarios](#scenarios)
-  - [1. Point-to-point](#scenario-point-to-point)
-  - [2. Key relay](#scenario-key-relay)
-  - [3. Point-to-point QKD-backed VPN](#scenario-point-to-point-vpn)
-  - [4. Key-relay QKD-backed VPN](#scenario-key-relay-vpn)
+  - [Historical prototypes with synthetic traffic](#historical-toy-traffic-prototypes)
+  - [1. Point-to-point QKD-backed VPN](#scenario-point-to-point-vpn)
+  - [2. Key-relay QKD-backed VPN](#scenario-key-relay-vpn)
 - [Testbed additions to QKDNetSim](#testbed-additions-to-qkdnetsim)
 - [External documentation](#external-documentation)
 
@@ -35,13 +34,12 @@ paths.
 
 ### Research basis and testbed extensions
 
-The four scenarios combine two published reference architectures with
-extensions developed for this testbed:
+The two supported scenarios combine two published reference architectures
+with extensions developed for this testbed. The earlier synthetic-traffic
+prototypes are retained separately as project history.
 
 | Testbed scenario | Research basis | Extension in this repository |
 |---|---|---|
-| Point-to-point traffic | Distributed six-VM QKDNetSim emulation from *Emulation of Quantum Key Distribution Networks* | VMs replaced by role-specific containers; Alice-Bob classical path moved to CORE |
-| Key-relay traffic | Point-to-point emulation pattern and QKDNetSim's trusted-node relay functions | Two QKD links and an intermediate trusted KMS added; this topology is not part of the reference emulation paper |
 | Point-to-point VPN | QKD-fed strongSwan architecture from *Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network* | Reproducible Docker/CORE deployment with selectable ETSI 004 or ETSI 014 consumption |
 | Key-relay VPN | Containerized key-relay topology and point-to-point strongSwan integration above | QKD-backed IPsec extended across the trusted-node path for both ETSI interfaces; this combined scenario is specific to this testbed |
 
@@ -57,13 +55,14 @@ directly.
 
 The process boundary is therefore preserved rather than introduced by the
 container conversion: the paper's point-to-point emulation assigns its six
-roles to six VMs, each with an independent QKDNetSim/ns-3 execution. The
-equivalent synthetic-traffic scenario in this repository uses six independent
-role-specific ns-3 programs in six containers. In the VPN variants, only the
-QKD post-processing and KMS roles run ns-3; the two application containers run
-native strongSwan and the Python QKD key consumer instead. This differs from
-the conventional all-in-one QKDNetSim examples, where several simulated nodes
-and applications can belong to the same ns-3 process.
+roles to six VMs, each with an independent QKDNetSim/ns-3 execution. The first
+prototype in this repository reproduced those six independent roles with
+containers and QKDNetSim's synthetic consumers. That prototype is now
+historical. In the supported VPN scenarios, the QKD post-processing and KMS
+roles still run as independent ns-3 processes, while the application
+containers run native strongSwan and the Python QKD key consumer. This differs
+from conventional all-in-one QKDNetSim examples, where several simulated
+nodes and applications can belong to one ns-3 process.
 
 The VPN integration is based on Mehic et al.,
 [*Virtual Quantum Key Distribution Network Ecosystem: The National Czech QKD Network*](https://doi.org/10.1109/MNET.2025.3540705),
@@ -150,7 +149,7 @@ cd qkdnetsim-testbed
 
 ### Initial build
 
-Build the QKDNetSim traffic image and the strongSwan VPN endpoint image:
+Build the QKDNetSim QKD/KMS image and the strongSwan VPN endpoint image:
 
 ```bash
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
@@ -169,29 +168,30 @@ builds.
 
 ### Running a scenario
 
-CORE is shared by all four scenarios and normally remains running between
+CORE is shared by both supported scenarios and normally remains running between
 experiments. Each experiment then consists of two steps:
 
 1. Start the selected persistent QKD/KMS infrastructure with its Compose
    file.
-2. Execute `traffic-topology.py` for synthetic encrypted traffic or
-   `vpn-topology.py` for a strongSwan tunnel inside the CORE container.
+2. Execute `vpn-topology.py` to create and verify the strongSwan tunnel inside
+   the CORE container.
 
-For example, run the point-to-point synthetic-traffic scenario over a direct
-classical link:
+For example, run the point-to-point VPN with ETSI 014 over a direct classical
+link:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.vpn.yml up -d
 
 docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
-  --qkd-topology point-to-point --routers 0 --delay-ms 5 \
+  /opt/core/venv/bin/python /workspace/core/vpn-topology.py \
+  --qkd-topology point-to-point --qkd-interface 014 \
+  --routers 0 --delay-ms 5 \
   --bandwidth-mbps 100 --loss-percent 0
 ```
 
 The runner waits for the infrastructure, creates the transient Alice and Bob
 DockerNodes, verifies the end-to-end result and removes those endpoints when
-the experiment finishes. Detailed commands for every traffic and VPN variant
+the experiment finishes. Detailed commands for every VPN variant
 are provided in the corresponding [scenario sections](#scenarios), while all
 CORE topology parameters and smoke tests are documented in the
 [local CORE integration guide](core/README.md).
@@ -200,7 +200,7 @@ Stop the example infrastructure and the shared CORE runtime when they are no
 longer required:
 
 ```bash
-docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.vpn.yml down
 docker compose -f docker/docker-compose.core.yml down
 ```
 
@@ -212,7 +212,7 @@ requested, starts CORE, selects and recreates the required Compose project,
 runs the corresponding topology runner, saves the evidence, and tears down
 both persistent infrastructure and transient CORE endpoints. Before every
 case it also removes only stale containers whose names begin with
-`qkd-core-vpn-` or `qkd-core-traffic-`; an interrupted experiment therefore
+`qkd-core-vpn-`; an interrupted experiment therefore
 cannot retain a fixed endpoint IP and contaminate the next run.
 
 Run the complete campaign from the repository root:
@@ -222,23 +222,19 @@ python3 automation/run-regression.py --build
 ```
 
 On Windows, the equivalent command is `py -3 automation/run-regression.py
---build`. The default campaign runs each of the six functional variants three
+--build`. The default campaign runs each of the four supported variants three
 times:
 
-1. point-to-point encrypted test traffic;
-2. key-relay encrypted test traffic;
-3. point-to-point VPN with ETSI 004;
-4. point-to-point VPN with ETSI 014;
-5. key-relay VPN with ETSI 004; and
-6. key-relay VPN with ETSI 014.
+1. point-to-point VPN with ETSI 004;
+2. point-to-point VPN with ETSI 014;
+3. key-relay VPN with ETSI 004; and
+4. key-relay VPN with ETSI 014.
 
 It then runs one expected-failure test in which Bob deliberately derives a
 different test key. That case passes only when the consumers report `KMS
 streams diverged` and refuse to establish the tunnel. The fault hook is
 disabled unless the runner receives `--fault-mode bob-key-mismatch`.
 
-The traffic cases require multiple encrypted TCP/8081 packets and, for key
-relay, explicit trusted-node consumption and delivery at both endpoint KMSs.
 The VPN cases require at least two different QKD generations, continuous ping
 during rekey, retirement of the previous IKE SA, sustained `iperf3` traffic,
 ESP on the exterior path, no clear ICMP or TCP payload, and explicit relay
@@ -255,7 +251,7 @@ directories are ignored by Git and contain no stored packet captures.
 Useful shorter invocations are:
 
 ```bash
-# One pass through all six variants plus the negative test
+# One pass through all four variants plus the negative test
 python3 automation/run-regression.py --repetitions 1
 
 # One selected case; repeat --case to select several
@@ -462,11 +458,11 @@ it is no longer present as an executable scenario.
 The integration provides a reproducible, complete CORE 9.2.1 container with
 EMANE, its Python bindings and OSPF-MDR. Its smoke tests validate Linux
 namespaces, real Docker nodes, veth connectivity, NetEm delay and automatic
-container cleanup. The classical topology runner provides selectable direct or
-multi-router paths with independent per-link delay, bandwidth and loss.
-`traffic-topology.py` places the ns-3 ETSI 014 consumers on that path;
-`vpn-topology.py` places the native strongSwan consumers on the same path.
-Each runner selects point-to-point QKD or trusted-node key relay without
+container cleanup. The classical topology laboratory provides selectable
+direct or multi-router paths with independent per-link delay, bandwidth and
+loss. The supported `vpn-topology.py` runner places the native strongSwan
+consumers on that path and selects point-to-point QKD or trusted-node key
+relay without
 changing the classical topology. Compose defines only persistent QKD/KMS
 infrastructure; CORE is the sole owner of application endpoint creation,
 classical links and cleanup. Commands and verification criteria are documented
@@ -487,178 +483,188 @@ All commands in this section are run from the repository root.
 
 The diagrams and tables use `H1`–`H9` as compact deployment identifiers. Each
 identifier represents a Docker container, but its architectural role may be
-an ns-3 node, a KMS node, a synthetic QKD application, or a native Linux VPN
-endpoint. Internal names are role-based as well: for example, Compose uses
+an ns-3 post-processing node, a KMS node, or a native Linux VPN endpoint.
+Internal names are role-based as well: for example, Compose uses
 `kms_trusted`, the corresponding container is `qkd-relay-kms-trusted`, the
 binary is `relay_kms_trusted`, and its log marker is
 `[RELAY_KMS_TRUSTED]`.
 
+<a id="historical-toy-traffic-prototypes"></a>
+
+### Historical prototypes with synthetic traffic
+
+Before introducing strongSwan, the testbed was developed through two
+QKDNetSim-native prototypes. They are no longer supported executions and do
+not appear in the build or regression matrix, but they established the
+distributed architecture and exposed library faults that also affected the
+QKD/KMS pipeline now used by the VPN scenarios.
+
+#### Direct point-to-point prototype
+
+The first prototype separated the six roles of the reference emulation into
+six independent ns-3 processes: Alice/Bob post-processing, Alice/Bob KMS and
+two `QKDApp014` consumers. The consumers requested matching ETSI 014 keys and
+used QKDNetSim's OTP mode to protect synthetic TCP/8081 traffic over the CORE
+classical path. It demonstrated that:
+
+- `EmuFdNetDevice` could connect independent ns-3 processes through Docker
+  veth interfaces instead of keeping all roles in one simulation;
+- the PP pair delivered correlated material to two independent KMSs;
+- the ETSI 014 `enc_keys`/`dec_keys` flow returned the same key at both
+  endpoints; and
+- CORE could create the application endpoints and a direct or routed
+  Alice-Bob path independently of the QKD link.
+
+#### Trusted-node key-relay prototype
+
+The second prototype extended the same pattern to nine independent roles:
+four post-processing processes, Alice/trusted/Bob KMSs and two ETSI 014
+consumers. It demonstrated that two independent QKD links could feed a
+trusted KMS, that `skey_create` could transform material hop by hop, that the
+endpoint KMSs served the same end-to-end key ID, and that the resulting key
+could protect the synthetic application flow. Most of the difficult defects
+were exposed here because requests, buffers and responses crossed three KMS
+processes rather than one direct pair.
+
+#### QKDNetSim and ns-3 issues exposed by the prototypes
+
+The prototypes exposed two different classes of defects. The first group is
+still exercised by the current VPN scenarios because their PP/KMS containers
+use the same QKDNetSim classes and relay machinery. The second group belongs
+to the retired C++ `QKDApp014` data-plane consumer: its corrections remain in
+the library, but the active VPN uses `qkd-vpn.py` and strongSwan instead and
+does not execute those paths.
+
+##### Corrections exercised by the active VPN scenarios
+
+- **TCP sockets and startup ordering.** PP and KMS listeners now publish
+  readiness traces consumed by Compose health checks. A connecting
+  `QKDPostprocessingApplication` preserves its socket while it is in
+  `SYN_SENT`, lets TCP backoff proceed and reconnects only after a confirmed
+  failure or closure. Repeatedly destroying a socket during the handshake had
+  produced `TcpSocketBase` assertions when delayed packets arrived.
+- **Incorrect framing of the post-processing TCP stream.** A `Recv()` callback
+  was incorrectly treated as exactly one sent JSON message and a
+  `std::string` was constructed without its explicit byte length. TCP
+  fragmentation or coalescing therefore caused `JSON parse error` and process
+  termination. The receiver now maintains a buffer per connection, extracts
+  `;`-delimited frames, preserves incomplete suffixes and rejects malformed
+  JSON without aborting the container.
+- **Empty key material in `skey_create`.** `mergedKey` was consumed when the
+  local response was split and then reused empty for relay. The implementation
+  now preserves an exact copy, validates its size and encrypts that material
+  hop by hop, allowing both endpoint KMSs to serve the same key ID.
+- **Relay bit accounting stuck in `READY`.** In `Relay()`, the combination of
+  `StoreKey(key, true)` and `MarkKey(id, INIT)` had a net-zero effect on
+  `m_currentKeyBit`; after crossing the threshold once, `CheckState()` no
+  longer represented current depletion. `SBufferClientCheck` now also uses
+  `GetSBitCount()`, which reports the present content rather than historical
+  accumulated state.
+- **`skey_create` assumed one exact-size hop key.** Relay protection requested
+  a single key of the exact required length while buffers contained default
+  2048-bit objects. It now uses `GetTransformCandidate()` to merge several
+  keys, following the multi-key pattern used elsewhere in QKDNetSim.
+- **Unbalanced HTTP request bookkeeping.** A forwarded multi-hop
+  `skey_create` request was not inserted into `m_httpRequestsQueryKMS`.
+  Processing its response then attempted to `pop()` an empty queue and
+  terminated with `NS_FATAL_ERROR("HTTP query for this KMS is empty!")`.
+  Forwarded requests are now registered and matched to their responses.
+- **Late external frames in the real-time scheduler.** Under load, the
+  `FdNetDevice` thread could supply a timestamp just behind `m_currentTs`, and
+  ns-3 aborted with `schedule for time < m_currentTs`. The scoped
+  `realtime-simulator-clamp.patch` schedules an already-late external frame at
+  the current valid time without changing future-event ordering, preventing
+  the observed process termination reported by Docker as exit code 139.
+
+The TCP, framing, readiness and real-time corrections are exercised by both
+point-to-point and key-relay VPNs. Relay-buffer accounting is exercised by the
+key-relay infrastructure with either ETSI interface. The preserved relay
+material, multi-key hop protection and forwarded HTTP bookkeeping are
+functionally required by the ETSI 014 key-relay path; they are harmless but
+not traversed by the direct point-to-point flow.
+
+##### Corrections retained for the historical QKDApp consumers
+
+- **Uninitialized ETSI 014 application state.** `QKDApp014` read
+  `m_isSignalingConnectedToApp` and `m_isDataConnectedToApp` before
+  initialization, so some executions skipped socket creation. Both flags now
+  start explicitly as `false`.
+- **Encryption disabled in the relay prototype.** Its C++ consumers used
+  `useCrypto=0`, although the traffic was described as OTP-protected. The
+  prototype was corrected to `useCrypto=1`. This discovery also motivated the
+  active VPN acceptance rule: verify ESP and the absence of plaintext rather
+  than accepting key requests or TCP connectivity alone.
+- **Uninitialized bytes serialized by `QKDAppHeader`.** Its fixed 32-byte
+  authentication-tag field was only partially written by `SetAuthTag()`, so a
+  disabled authenticator could expose unrelated bytes from a reused ns-3
+  buffer. The setter now pads the whole field with leading `0` characters.
+
+These three fixes are compiled as part of QKDNetSim but are not runtime
+dependencies of the current VPN: `qkd-vpn.py` consumes ETSI 004/014 from the
+KMS and strongSwan/IPsec owns the encrypted data plane, so no `QKDApp014` or
+`QKDAppHeader` object is instantiated.
+
+##### Endpoint timing and infrastructure readiness
+
+In the historical deployment, H8 and H9 no longer depended on a fixed
+`appStartTime`: the runner waited for healthy KMS containers, created the
+endpoints, started Bob before Alice and observed key requests and application
+traffic. The names H8/H9 now exist only in the archived diagrams and sources.
+
+The replacement is still required by the active VPN architecture. Readiness
+follows the actual dependency graph rather than a guessed container delay:
+listeners emit role-specific markers after `Bind()` and `Listen()`;
+`entrypoint.sh` mirrors them to `/tmp/qkdnetsim.log`; Compose waits for healthy
+PP/KMS dependencies; and `core/vpn-topology.py` waits for the QKD/KMS
+infrastructure, starts the Bob VPN endpoint before Alice, and then waits for a
+committed common generation and an installed IPsec tunnel. TCP, KMS and peer
+API retries absorb the remaining convergence window. There is no random
+startup jitter, watchdog or fixed application start delay.
+
+The active readiness chain is split by responsibility:
+
+- `QKDKeyManagerSystemApplication` and
+  `QKDPostprocessingApplication` emit role-specific listener markers after
+  `Bind()` and `Listen()`; Compose turns those markers into health checks and
+  `depends_on: condition: service_healthy` dependencies.
+- The former `QKDApp014` readiness trace belongs only to the archived C++
+  consumer. Current endpoints expose `/health` and `/status` through
+  `qkd-vpn.py`, and the runner verifies their committed key generation and
+  strongSwan state.
+- Every active PP process schedules a lightweight event every 100 ms so that
+  `RealtimeSimulatorImpl` has a nearby event, while `entrypoint.sh` applies a
+  fixed veth stabilization interval before starting ns-3.
+
+If an initial PP SYN is lost, ns-3 TCP backoff can still make convergence take
+approximately one minute. This is expected: do not manually restart the
+containers during that interval, because doing so discards the connection
+state and restarts convergence. The CORE runner waits automatically and no
+separate verifier or manual delay is required.
+
+##### End-to-end verification in the current VPN
+
+The retired runner waited for ETSI requests and encrypted synthetic TCP/8081
+traffic. Its current replacement applies a stronger VPN-specific condition:
+`core/vpn-topology.py` requires matching key generations, the expected current
+IKE SA, retirement of the previous SA after rekey, successful ping, sustained
+`iperf3` traffic, ESP on the exterior path and no plaintext ICMP or TCP
+payload. Relay cases additionally require evidence from both QKD links and
+the trusted KMS. Packet inspection is transient; captures and CORE endpoints
+are deleted after the run and no capture is stored in the repository.
+
+The retired endpoint sources, former traffic runner and diagrams are retained
+under `historical/toy-traffic/`. The shared PP/KMS programs remain in their
+normal active directories because the two VPN scenarios below still execute
+them.
+
 <a id="scenario-point-to-point"></a>
 
-### 1. Point-to-point — direct Alice–Bob link (`examples/point-to-point/`)
-
-Container-based adaptation of the network emulation experiment shown in Fig. 3 of:
-
-> Mehic, M., Dervisevic, E., Burdiak, P., Lipovac, V., Fazio, P. and Voznak, M., 2024. *Emulation of quantum key distribution networks*. IEEE Network, 39(1), pp.116-123. https://doi.org/10.1109/MNET.2024.3398404
-
-The paper deploys the six roles in separate VMs, with an independent
-QKDNetSim/ns-3 execution in each VM. This testbed preserves that distributed
-process model but replaces every VM with a lighter Docker container. Each ns-3
-`EmuFdNetDevice` opens an `AF_PACKET` raw socket bound to a Linux `ethX`
-interface backed by a Docker veth; this veth is the equivalent of the paper
-diagrams' “Real Net Device”. The logical scenario is the same: the four
-persistent QKD/KMS roles are managed by Compose and the two application roles
-are transient CORE DockerNodes.
-
-The six containers run Alice/Bob post-processing, Alice/Bob KMS, and Alice/Bob ETSI 014 applications. The QKD path is a direct Alice–Bob link without a trusted intermediate node. Their classical application path can be direct or contain CORE routers.
-
-![Point-to-point QKDNetSim testbed architecture](diagrams/point-to-point.svg)
-
-| Node ID | Container role | IPs (network ↔ peer) |
-|---|---|---|
-| H1 | post-processing Alice (ns-3 node) | 192.168.11.1 (↔H2), 192.168.13.1 (↔H3) |
-| H2 | post-processing Bob (ns-3 node) | 192.168.11.2 (↔H1), 192.168.24.2 (↔H4) |
-| H3 | KMS Alice (ns-3 node) | 192.168.13.3 (↔H1), 192.168.34.3 (↔H4), 192.168.35.3 (↔H5) |
-| H4 | KMS Bob (ns-3 node) | 192.168.24.4 (↔H2), 192.168.34.4 (↔H3), 192.168.46.4 (↔H6) |
-| H5 | ETSI 014 Alice (CORE DockerNode) | 192.168.35.5 (eth0 ↔H3), 10.254.0.1 (eth1 ↔CORE) |
-| H6 | ETSI 014 Bob (CORE DockerNode) | 192.168.46.6 (eth0 ↔H4), 10.254.R.2 (eth1 ↔CORE) |
-
-Quick start:
-
-```bash
-docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.core.yml up -d --build core
-docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
-  --qkd-topology point-to-point --routers 0 --delay-ms 5 \
-  --bandwidth-mbps 100 --loss-percent 0
-```
-
-Container creation order does not affect the scenario. Compose health checks and dependency conditions make the PP/KMS infrastructure converge first. The CORE runner explicitly waits for both endpoint KMS containers to become healthy, then creates both endpoint network namespaces, starts Bob before Alice, and retries the application-level operations until the selected timeout. The first PP link may take about one minute to converge because of ns-3 TCP backoff; no container restart is required.
-
-The runner checks that both consumers request keys, observes encrypted
-application traffic on TCP/8081 and verifies automatic endpoint cleanup. H5
-and H6 use OTP with `useCrypto=1`. Set `--routers` above zero to insert CORE
-routers; delay, bandwidth and packet loss apply independently to every link.
-
-<a id="scenario-key-relay"></a>
-
-### 2. Key relay — intermediate node without a direct Alice–Bob link (`examples/key-relay/`)
-
-This scenario is a testbed extension rather than a topology reproduced from
-the point-to-point emulation paper. Alice and Bob do not have a direct QKD
-link: two QKD segments are joined by a trusted intermediate node with its own
-KMS. The node relays keys using the functionality already provided by
-`QKDKeyManagerSystemApplication` (`RelayConsumption`, `WasteRelay`,
-`ConfigureRSBuffers`, and related methods), together with hop-by-hop OTP
-encryption through `skey_create`. Alice and Bob ultimately share actual key
-material without either endpoint seeing the raw key from the other QKD
-segment. End-to-end encrypted traffic flows between the H8 and H9 application
-nodes and is verified with temporary `tcpdump` samples.
-
-Topology (9 Docker containers):
-
-![Trusted-node key-relay QKDNetSim testbed architecture](diagrams/key-relay.svg)
-
-| Node ID | Container role | IPs (network ↔ peer) |
-|---|---|---|
-| H1 | PP Alice (ns-3 node) | 192.168.111.1 (↔H2), 192.168.112.1 (↔H5) |
-| H2 | PP Relay-A (ns-3 node) | 192.168.111.2 (↔H1), 192.168.113.2 (↔H6) |
-| H3 | PP Relay-B (ns-3 node) | 192.168.114.3 (↔H4), 192.168.115.3 (↔H6) |
-| H4 | PP Bob (ns-3 node) | 192.168.114.4 (↔H3), 192.168.116.4 (↔H7) |
-| H5 | **KMS Alice** (ns-3 node) | 192.168.112.5 (↔H1), 192.168.117.5 (↔H6), 192.168.119.5 (↔H8) |
-| H6 | **KMS Relay** (trusted intermediate ns-3 node) | 192.168.113.6 (↔H2), 192.168.115.6 (↔H3), 192.168.117.6 (↔H5), 192.168.118.6 (↔H7) |
-| H7 | **KMS Bob** (ns-3 node) | 192.168.116.7 (↔H4), 192.168.118.7 (↔H6), 192.168.120.7 (↔H9) |
-| H8 | ETSI 014 Alice (CORE DockerNode) | 192.168.119.8 (eth0 ↔H5), 10.254.0.1 (eth1 ↔CORE) |
-| H9 | ETSI 014 Bob (CORE DockerNode) | 192.168.120.9 (eth0 ↔H7), 10.254.R.2 (eth1 ↔CORE) |
-
-Start the scenario:
-
-```bash
-docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
-docker compose -f docker/docker-compose.key-relay.yml up -d
-docker compose -f docker/docker-compose.core.yml up -d --build core
-docker compose -f docker/docker-compose.core.yml exec core \
-  /opt/core/venv/bin/python /workspace/core/traffic-topology.py \
-  --qkd-topology key-relay --routers 0 --delay-ms 5 \
-  --bandwidth-mbps 100 --loss-percent 0
-```
-
-`depends_on` and the health checks start containers according to the readiness of their actual listeners. PP links use TCP reconnection and may take about one minute to converge because of ns-3 TCP backoff. Do not restart containers during this window.
-
-#### End-to-end verification
-
-The CORE runner waits for both endpoint key requests and encrypted TCP/8081
-traffic before reporting success. Packet inspection is temporary and no
-capture is stored in the repository.
-
-#### Library issues fixed for this scenario
-
-- **TCP sockets and startup ordering.** PP and KMS listeners publish readiness
-  traces used by Compose health checks; ETSI endpoint traces are consumed by
-  the CORE traffic runner. `QKDPostprocessingApplication` preserves its socket
-  during `SYN_SENT`, allows TCP backoff to proceed, and reconnects after a
-  failure or closure. Periodically destroying a socket during the handshake
-  caused `TcpSocketBase` assertions when delayed packets arrived.
-- **Incorrect framing of the post-processing TCP stream.** The receiver assumed that every `Recv()` call contained exactly one sent packet and constructed a `std::string` without an explicit length. TCP fragmentation or coalescing consequently caused `JSON parse error` and terminated the process. The receiver now keeps a buffer per connection, extracts frames delimited by `;`, preserves incomplete fragments, and discards malformed JSON without aborting the container.
-- **Empty key material in `skey_create`.** `mergedKey` was consumed while splitting the local response and was then reused empty for the relay operation. An exact copy is now preserved, its size is validated, and the key is encrypted hop by hop. The H5 and H7 KMS nodes serve the same 6400-bit `keyId`.
-- **Uninitialized ETSI 014 state.** `m_isSignalingConnectedToApp` and `m_isDataConnectedToApp` were read before initialization, causing some runs to skip socket creation. Both now start explicitly as `false`.
-- **Encryption disabled in the scenario.** The H8 and H9 application nodes used `useCrypto=0`, so traffic described as OTP-protected was actually plaintext. The key-relay scenario now uses `useCrypto=1`.
-- **Uninitialized bytes leaked into the wire (applies to both scenarios).** `QKDAppHeader::GetSerializedSize()` reserves a fixed 32 bytes for the authentication tag field, but `SetAuthTag()` wrote exactly `value.size()` bytes with no padding. With authentication disabled (`authenticationType=0`, the default in both scenarios), `QKDEncryptor::Authenticate()` returns an empty string, so the remaining 32 bytes of that reservation were left untouched — whatever the ns-3 `Buffer` previously held (in one observed case, a literal fragment of an unrelated HTTP response, `"Vary: Accept-Encoding, Cookie"`) was sent on the wire as-is. `SetAuthTag()` now pads with leading `'0'` characters the same way `SetEncryptionKeyId()`/`SetAuthenticationKeyId()` already did.
-- **Bit accounting stuck in READY.** In `Relay()`, `StoreKey(key,true)` followed by `MarkKey(id,INIT)` has a net-zero effect on `m_currentKeyBit`. As a result, `CheckState()` stopped reflecting actual relay-buffer depletion after the threshold was crossed for the first time. `SBufferClientCheck` now also checks `GetSBitCount()`, which is the current count rather than historical accumulated state.
-- **`skey_create` assumed one exact-size key.** Hop-by-hop encryption material was requested as a single key with an exact bit length, while the buffer only contained default 2048-bit keys. It now uses the same multi-key merge pattern through `GetTransformCandidate` that is already used elsewhere in the implementation.
-- **Unbalanced HTTP request bookkeeping.** Multi-hop forwarding of `skey_create` sent the request to the next hop without adding it to `m_httpRequestsQueryKMS`. Processing the response then attempted to `pop()` an empty queue and terminated the process with `NS_FATAL_ERROR("HTTP query for this KMS is empty!")`.
-
-**Endpoint timing:** H8 and H9 no longer depend on a fixed `appStartTime` delay.
-The CORE runner waits until both endpoint KMS containers are healthy, creates
-both endpoints, starts Bob before Alice, and waits for key requests and
-application traffic. TCP/KMS retries absorb the remaining readiness window.
-
-#### Infrastructure readiness and CORE endpoint startup
-
-Originally, there was no guarantee that a server had reached `Listen()` before its client called `Connect()`. The following mechanisms now enforce the real dependency graph:
-
-- Readiness traces in `QKDKeyManagerSystemApplication`,
-  `QKDPostprocessingApplication`, and `QKDApp014`, emitted after `Bind()` and
-  `Listen()` complete. Compose consumes PP/KMS readiness; the CORE runner
-  consumes endpoint readiness and traffic markers.
-- A role-specific readiness marker attached to each trace, for example `"[RELAY_KMS_ALICE] KMS Alice listening"`, alongside the existing `stores key` and `serves key` markers.
-- [`entrypoint.sh`](docker/entrypoint.sh) mirrors stdout to
-  `/tmp/qkdnetsim.log` inside each container. Docker health checks run inside
-  the container namespace and cannot read the host-side `docker logs` view
-  provided by the logging driver.
-- Health checks on the PP and KMS infrastructure, plus a
-  `depends_on: condition: service_healthy` chain that follows the QKD topology.
-  H8 and H9 are subsequently created and ordered by CORE:
-
-```
-H7
-  ├─ H6
-  │    ├─ H2 ─ H1
-  │    └─ H5
-  ├─ H4 ─ H3
-  └─ CORE: H9 (Bob) → H8 (Alice)
-```
-
-All four PP applications schedule a lightweight event every 100 ms so that `RealtimeSimulatorImpl` always has a nearby event. The entrypoint applies a fixed veth stabilization delay. There is no random jitter and no watchdog that terminates processes or recreates containers.
-
-The image also applies `patches/realtime-simulator-clamp.patch` to ns-3.46. Under sustained load, the external `FdNetDevice` thread may observe a timestamp a few ticks behind `m_currentTs`. The original implementation aborts with `schedule for time < m_currentTs`; the patch schedules an already-late frame at the current valid timestamp and prevents the corresponding exit-code-139 failure.
-
-PP convergence may take approximately one minute because ns-3 backs off after
-the initial lost SYN packets. No separate verifier or manual timing is needed:
-the CORE runner waits for healthy KMS endpoints and reports success only after
-the required encrypted application traffic or VPN tunnel has been observed.
-
-<a id="scenario-point-to-point-vpn"></a>
-
-### 3. Point-to-point QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.vpn.yml`)
+### 1. Point-to-point QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.vpn.yml`)
 
 This scenario applies the strongSwan integration pattern from the Czech QKD
-network paper to the containerized point-to-point topology from scenario 1.
-It replaces the synthetic ETSI 014 application nodes at H5/H6 with real
-strongSwan IPsec/IKEv2 VPN endpoints. Instead of an ns-3 process encrypting
-synthetic traffic, the H5 and H6 native Ubuntu containers periodically obtain
+network paper to the distributed point-to-point QKD/KMS infrastructure.
+The H5 and H6 native Ubuntu containers run real strongSwan IPsec/IKEv2 VPN
+endpoints and periodically obtain
 real key material from the H3 and H4 KMS nodes and hand it to strongSwan as
 the connection's pre-shared key. The reference architecture—a client/server
 pair of strongSwan encryptors fed by a periodic key-fetch script—is described
@@ -692,7 +698,7 @@ setting it to `014` selects the second flow without changing the topology or
 VPN parameters.
 
 The same endpoint API is also available over the trusted-node path in
-scenario 4. That case adds an internal KMS-to-KMS control plane because ETSI
+scenario 2. That case adds an internal KMS-to-KMS control plane because ETSI
 GS QKD 004 defines the SAE-to-KMS stream API, but does not define how several
 KMSs must construct one association across a trusted-node network. The
 extension is described with the key-relay scenario below; it does not change
@@ -721,7 +727,6 @@ truncated fingerprint and status; raw keys are never written to state or logs.
 Quick start with ETSI 004:
 
 ```bash
-docker compose -f docker/docker-compose.yml down
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
 docker compose -f docker/docker-compose.vpn.yml up -d
@@ -767,19 +772,18 @@ that command can return success even when no matching IKE_SA was established.
 
 <a id="scenario-key-relay-vpn"></a>
 
-### 4. Key-relay QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.key-relay-vpn.yml`)
+### 2. Key-relay QKD-backed VPN — ETSI 004 and ETSI 014 (`docker/docker-compose.key-relay-vpn.yml`)
 
-This scenario keeps the complete trusted-node topology from scenario 2 and
-replaces only the synthetic H8/H9 ETSI 014 application nodes with native
-strongSwan endpoints. It is the testbed-specific combination of the key-relay
-extension and the point-to-point VPN integration; neither reference paper
-defines this complete topology:
+This scenario combines the distributed trusted-node QKD/KMS infrastructure
+with native strongSwan endpoints. It is the testbed-specific extension of the
+point-to-point VPN integration across a key-relay path; neither reference
+paper defines this complete topology:
 
 ![Trusted-node QKD-backed IPsec/IKEv2 VPN architecture](diagrams/key-relay-vpn.svg)
 
 The H1–H7 ns-3 nodes are extended unchanged from
 `docker-compose.key-relay.yml`. CORE creates the two strongSwan DockerNode
-endpoints and reuses the same interface-aware VPN consumer as scenario 3.
+endpoints and reuses the same interface-aware VPN consumer as scenario 1.
 `--qkd-interface 004` selects the stream-oriented flow and `014` selects the
 key-oriented flow without changing the topology or strongSwan parameters.
 
@@ -840,11 +844,9 @@ make Bob consume another key.
 
 #### Start and verify
 
-The synthetic and VPN key-relay projects use the same explicit subnets, so
-stop scenario 2 before starting scenario 4:
+Stop any previously running QKD infrastructure before starting this scenario:
 
 ```bash
-docker compose -f docker/docker-compose.key-relay.yml down
 docker build -t qkdnetsim-testbed:latest -f docker/Dockerfile .
 docker build -t qkdnetsim-vpn-endpoint:latest -f docker/vpn/Dockerfile.vpn .
 docker compose -f docker/docker-compose.key-relay-vpn.yml up -d
@@ -864,7 +866,7 @@ docker compose -f docker/docker-compose.core.yml exec core \
   --routers 0 --delay-ms 5 --bandwidth-mbps 100 --loss-percent 0
 ```
 
-As in scenario 3, the runner confirms multiple matching fingerprints and
+As in scenario 1, the runner confirms multiple matching fingerprints and
 either ETSI 004 KSID/index or ETSI 014 `key_ID`, validates the exact current
 IKE SA and retirement of its predecessor, and requires sustained traffic to
 produce ESP with no plaintext application payload. It also requires relay
@@ -887,8 +889,13 @@ the relay layer transports larger storage blocks internally.
 
 ## Testbed additions to QKDNetSim
 
-- **[`examples/point-to-point/`](examples/point-to-point/)** — six independent role-named ns-3 programs (`pp_alice.cc`, `pp_bob.cc`, `kms_alice.cc`, `kms_bob.cc`, `etsi014_alice.cc`, and `etsi014_bob.cc`). Compose runs the four persistent QKD/KMS roles and CORE runs the two transient application roles. Unlike the original module examples, which model both ends of every link in one process, these programs use the low-level QKDNetSim API and communicate over real networks through `EmuFdNetDevice`.
-- **[`examples/key-relay/`](examples/key-relay/)** — the same pattern applied to a three-site relay topology with nine role-named programs: seven persistent QKD/KMS roles plus the two application roles instantiated by CORE. See `examples/CMakeLists.txt` and the build targets in `docker/Dockerfile`.
+- **[`examples/point-to-point/`](examples/point-to-point/)** — four independent
+  role-named ns-3 programs (`pp_alice.cc`, `pp_bob.cc`, `kms_alice.cc`, and
+  `kms_bob.cc`) that provide the active point-to-point VPN's QKD/KMS
+  infrastructure through `EmuFdNetDevice`.
+- **[`examples/key-relay/`](examples/key-relay/)** — seven persistent
+  role-named ns-3 programs implementing the two post-processing links and
+  three KMS roles used by the active trusted-node VPN.
 - **[`docker/`](docker/)** — the shared images, Compose definitions for persistent QKD/KMS infrastructure, and interface-aware entrypoints. Application endpoint topology and verification live exclusively under `core/`.
 - **[`docker-compose.yml`](docker/docker-compose.yml)** — the four-service
   point-to-point QKD/KMS infrastructure. It deliberately contains neither
@@ -898,7 +905,9 @@ the relay layer transports larger storage blocks internally.
   normalizes veth devices, applies a fixed `NETWORK_SETTLE_MS`, and mirrors
   stdout to `/tmp/qkdnetsim.log` for health checks. It contains no watchdog or
   random jitter.
-- **Readiness traces** in KMS, post-processing, and ETSI 014 applications — emitted when their relevant listener sockets are active and consumed by Compose health checks.
+- **Readiness traces** in KMS and post-processing programs — emitted when
+  their relevant listener sockets are active and consumed by Compose health
+  checks.
 - **[`model/qkd-kms-queue-logic.h`](model/qkd-kms-queue-logic.h) fix** — initializes `m_numberOfQueues` to its documented default of 3. Previously, the uninitialized value could cause multi-gigabyte allocations while starting any KMS.
 - **[`model/qkd-key-manager-system-application.cc`](model/qkd-key-manager-system-application.cc)**
   — preserves the original direct ETSI 004 path and adds routed
@@ -908,7 +917,9 @@ the relay layer transports larger storage blocks internally.
 - **[`model/s-buffer.cc`](model/s-buffer.cc)** — maintains monotonically
   increasing ETSI 004 stream indices after a completely consumed stream is
   refilled.
-- **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for every scenario binary.
+- **[`examples/CMakeLists.txt`](examples/CMakeLists.txt)** — build entries for
+  the active QKD/KMS infrastructure binaries; retired synthetic consumers are
+  intentionally excluded.
 - **[`examples/qkd-link-budget.h`](examples/qkd-link-budget.h)** — shared,
   validated fiber-loss model used by the point-to-point, key-relay and
   topology-input post-processing applications. Compose passes the same
@@ -931,7 +942,7 @@ the relay layer transports larger storage blocks internally.
   supplies its two application endpoints and performs the end-to-end
   association, synchronized rotation and ESP verification.
 - **[`automation/run-regression.py`](automation/run-regression.py)** — the
-  host-side six-variant regression orchestrator. It owns image/Compose
+  host-side four-variant VPN regression orchestrator. It owns image/Compose
   lifecycle, repeated execution, expected negative testing, stale endpoint
   cleanup, and JSON/CSV/log evidence collection.
 

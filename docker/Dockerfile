@@ -60,17 +60,13 @@ RUN ./ns3 configure --enable-examples && \
         p2p_pp_bob \
         p2p_kms_alice \
         p2p_kms_bob \
-        p2p_etsi014_alice \
-        p2p_etsi014_bob \
         relay_pp_alice \
         relay_pp_relay_a \
         relay_pp_relay_b \
         relay_pp_bob \
         relay_kms_alice \
         relay_kms_trusted \
-        relay_kms_bob \
-        relay_etsi014_alice \
-        relay_etsi014_bob
+        relay_kms_bob
 
 # --- Entrypoint: sets each interface to promiscuous mode and clears its kernel IP ---
 COPY docker/entrypoint.sh /opt/entrypoint.sh
