@@ -1,4 +1,4 @@
-# Scenario 4: key-relay QKD/KMS infrastructure for the strongSwan consumer.
+# Active key-relay QKD/KMS infrastructure for the strongSwan consumer.
 # CORE always creates Alice and Bob and their classical network. The CORE
 # runner selects ETSI GS QKD 004 or 014.
 #

@@ -405,7 +405,7 @@ physical assumptions recorded in the container logs and allows a verifier or
 experiment harness to confirm that both ends used the same link profile.
 
 The original `examples_qkdnetsim_etsi_combined_input` scenario is not used by
-the four Docker scenario families described below. It was nevertheless updated
+the two active Docker QKD/KMS topologies described below. It was nevertheless updated
 because it is the generic topology-from-JSON entry point and already exposes
 `srcDstDistance`; leaving it unchanged would make distance affect the Docker
 links while being ignored by configurable JSON topologies. It now uses the
@@ -477,14 +477,70 @@ the current runners do not send endpoint traffic—or their embedded session—
 through that daemon. Application traffic traverses only the CORE-created veth,
 bridge/router and NetEm path shown in the data plane.
 
+The canonical editable diagram sources live in
+[`diagrams/src/`](diagrams/src/) as self-contained HTML documents created with
+the testbed's `diagram-design` profile, selected by
+[`.diagram-design`](.diagram-design). Each HTML file contains its CSS and the
+complete inline SVG, so it can be opened in a browser and edited or rendered
+without a separate drawing application. The adjacent SVG is the generated,
+diagram-only publication artifact: Markdown can embed it directly and LaTeX
+can convert it without including the HTML page wrapper. Keeping both therefore
+separates an editable source from a portable output; changes should be made in
+the HTML source and exported to the SVG rather than maintained independently.
+Their project-specific palette is intentionally
+independent of the visual styling of the reference papers. The figures retain
+the implementation-level information of the original drawings: every
+process boundary, `EmuFdNetDevice`, Linux veth/`AF_PACKET` boundary, Docker
+subnet and endpoint address, ETSI operation, CORE component and data-plane
+address is shown next to the component or connector to which it belongs.
+
+### Addressing contract
+
+Compose assigns a `.254` gateway to every persistent `/24` Docker network.
+The addresses below are the static interface values shared by Compose, the
+C++ defaults, `core/vpn-topology.py` and the active diagrams.
+
+| Point-to-point subnet | Endpoint A | Endpoint B |
+|---|---|---|
+| `192.168.11.0/24` | PP Alice `192.168.11.1` | PP Bob `192.168.11.2` |
+| `192.168.13.0/24` | PP Alice `192.168.13.1` | KMS Alice `192.168.13.3` |
+| `192.168.24.0/24` | PP Bob `192.168.24.2` | KMS Bob `192.168.24.4` |
+| `192.168.34.0/24` | KMS Alice `192.168.34.3` | KMS Bob `192.168.34.4` |
+| `192.168.35.0/24` | KMS Alice `192.168.35.3` | Alice VPN `192.168.35.5` |
+| `192.168.46.0/24` | KMS Bob `192.168.46.4` | Bob VPN `192.168.46.6` |
+
+| Key-relay subnet | Endpoint A | Endpoint B |
+|---|---|---|
+| `192.168.111.0/24` | PP Alice `192.168.111.1` | PP Relay-A `192.168.111.2` |
+| `192.168.112.0/24` | PP Alice `192.168.112.1` | KMS Alice `192.168.112.5` |
+| `192.168.113.0/24` | PP Relay-A `192.168.113.2` | KMS Trusted `192.168.113.6` |
+| `192.168.114.0/24` | PP Relay-B `192.168.114.3` | PP Bob `192.168.114.4` |
+| `192.168.115.0/24` | PP Relay-B `192.168.115.3` | KMS Trusted `192.168.115.6` |
+| `192.168.116.0/24` | PP Bob `192.168.116.4` | KMS Bob `192.168.116.7` |
+| `192.168.117.0/24` | KMS Alice `192.168.117.5` | KMS Trusted `192.168.117.6` |
+| `192.168.118.0/24` | KMS Trusted `192.168.118.6` | KMS Bob `192.168.118.7` |
+| `192.168.119.0/24` | KMS Alice `192.168.119.5` | Alice VPN `192.168.119.8` |
+| `192.168.120.0/24` | KMS Bob `192.168.120.7` | Bob VPN `192.168.120.9` |
+
+The CORE VPN path uses one `/30` per classical link. With `R` routers,
+`vpn-topology.py` creates `10.253.i.0/30` for `i = 0 ... R`. Alice is always
+`10.253.0.1/30`; Bob is `10.253.R.2/30`. Consequently the direct case
+(`R = 0`) uses `10.253.0.1/30` and `10.253.0.2/30`. Router interfaces occupy
+the `.2` address of the link on their Alice-facing side and the `.1` address
+of the following link. The notation `10.253.R.2` in the diagrams is therefore
+parameterized, not a literal IPv4 address.
+
 ## Scenarios
 
 All commands in this section are run from the repository root.
 
-The diagrams and tables use `H1`–`H9` as compact deployment identifiers. Each
-identifier represents a Docker container, but its architectural role may be
-an ns-3 post-processing node, a KMS node, or a native Linux VPN endpoint.
-Internal names are role-based as well: for example, Compose uses
+The active architecture diagrams use role names such as `PP Alice`,
+`KMS Trusted` and `Alice VPN endpoint`; they do not require the reader to map
+the design through opaque host numbers. Historical figures, source comments
+and some diagnostic tables may retain `H1`–`H9` as compact deployment
+identifiers. Each identifier represents a Docker container, but its role may
+be an ns-3 post-processing node, a KMS node, or a native Linux VPN endpoint.
+Current internal names are role-based as well: for example, Compose uses
 `kms_trusted`, the corresponding container is `qkd-relay-kms-trusted`, the
 binary is `relay_kms_trusted`, and its log marker is
 `[RELAY_KMS_TRUSTED]`.
@@ -498,6 +554,15 @@ QKDNetSim-native prototypes. They are no longer supported executions and do
 not appear in the build or regression matrix, but they established the
 distributed architecture and exposed library faults that also affected the
 QKD/KMS pipeline now used by the VPN scenarios.
+
+Their detailed figures remain available as
+[point-to-point](historical/toy-traffic/diagrams/point-to-point.svg) and
+[trusted-node key relay](historical/toy-traffic/diagrams/key-relay.svg)
+architectures. They use the same project palette and component grammar as the
+active figures, while retaining the historical H1-H9 identifiers, exact IP
+addresses and C++ `QKDApp014`/OTP data plane. Editable HTML sources are stored
+beside them under
+[`historical/toy-traffic/diagrams/src/`](historical/toy-traffic/diagrams/src/).
 
 #### Direct point-to-point prototype
 
@@ -663,9 +728,9 @@ them.
 
 This scenario applies the strongSwan integration pattern from the Czech QKD
 network paper to the distributed point-to-point QKD/KMS infrastructure.
-The H5 and H6 native Ubuntu containers run real strongSwan IPsec/IKEv2 VPN
-endpoints and periodically obtain
-real key material from the H3 and H4 KMS nodes and hand it to strongSwan as
+The Alice and Bob native Ubuntu endpoints run real strongSwan IPsec/IKEv2 VPN
+and periodically obtain
+real key material from KMS Alice and KMS Bob and hand it to strongSwan as
 the connection's pre-shared key. The reference architecture—a client/server
 pair of strongSwan encryptors fed by a periodic key-fetch script—is described
 in:
@@ -679,8 +744,9 @@ QKD 004 for session-based VPN key retrieval follows:
 
 > Buruaga, J.S., Brunner, H.H., Fung, F., Peev, M., Pastor, A., López, D.R., Ortiz, L., Martín, V. and Brito, J.P., 2023. *VPN Protection with QKD-Derived Keys Using Standard Interfaces*. In 2023 23rd International Conference on Transparent Optical Networks (ICTON). IEEE. https://doi.org/10.1109/ICTON59386.2023.10207212
 
-The H1–H4 ns-3 nodes and their networks are unchanged. The standalone Compose
-project starts only that QKD/KMS infrastructure in the normal workflow. CORE
+The two PP and two KMS ns-3 processes and their networks are unchanged. The
+standalone Compose project starts only that QKD/KMS infrastructure in the
+normal workflow. CORE
 creates role-named `qkd-core-vpn-alice-<PID>` and
 `qkd-core-vpn-bob-<PID>` transient DockerNode endpoints, connects their
 `eth0` interfaces to the KMS networks and manages their classical `eth1`
@@ -754,7 +820,7 @@ and zero plaintext ICMP or TCP payload. Its transient endpoints and temporary
 capture are deleted after each run, while the QKD/KMS infrastructure may
 remain active for comparisons.
 
-**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The H5/H6 VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. [`entrypoint.sh`](docker/entrypoint.sh) and [`entrypoint-vpn.sh`](docker/vpn/entrypoint-vpn.sh) now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
+**Real (non-ns-3) client ↔ ns-3 KMS interoperability fix.** The Alice/Bob VPN endpoints talk to their KMS nodes over ordinary kernel TCP/IP, not `EmuFdNetDevice` — this exposed a checksum-offload interoperability gap that never mattered for the rest of the testbed (the other ns-3 containers communicate with another ns-3/`EmuFdNetDevice` process, never with a native kernel network stack). A real client's outgoing TCP segments are marked for hardware checksum offload, which never gets filled in over a Docker veth pair; with `ChecksumEnabled=true`, ns-3 sees an invalid checksum on every segment and silently drops it (`TcpL4Protocol: Bad checksum, dropping packet!`), which looks like a hung TCP handshake from the outside even though ARP/ICMP work fine. [`entrypoint.sh`](docker/entrypoint.sh) and [`entrypoint-vpn.sh`](docker/vpn/entrypoint-vpn.sh) now both disable checksum/segmentation offload (`ethtool -K ... off`) on their managed interfaces — the Dockerfile had `ethtool` installed for exactly this purpose already, it just was never invoked.
 
 #### How the VPN endpoints are implemented
 
@@ -781,7 +847,7 @@ paper defines this complete topology:
 
 ![Trusted-node QKD-backed IPsec/IKEv2 VPN architecture](diagrams/key-relay-vpn.svg)
 
-The H1–H7 ns-3 nodes are extended unchanged from
+The four PP and three KMS ns-3 processes are extended unchanged from
 `docker-compose.key-relay.yml`. CORE creates the two strongSwan DockerNode
 endpoints and reuses the same interface-aware VPN consumer as scenario 1.
 `--qkd-interface 004` selects the stream-oriented flow and `014` selects the
@@ -790,32 +856,35 @@ key-oriented flow without changing the topology or strongSwan parameters.
 #### Relayed key acquisition
 
 The existing QKDNetSim relay mechanism first supplies matching end-to-end key
-objects to the `RELAY_SBUFFER`s at the H5 and H7 KMS nodes. H6 is a trusted KMS node:
+objects to the `RELAY_SBUFFER`s at KMS Alice and KMS Bob. KMS Trusted is the
+trusted node:
 it decrypts and re-encrypts the key material with independent hop keys while
-forwarding it from H5 to H7. The VPN can consume that common material
+forwarding it from KMS Alice to KMS Bob. The VPN can consume that common material
 through either application interface.
 
 In ETSI 004 mode:
 
-1. The H8 VPN endpoint calls `open_connect` on the H5 KMS node. H5 creates the master stream and
-   sends an internal `new_app` control request through the H6 trusted KMS node. H7 creates
-   the replica association with the same KSID. H8 receives the KSID only
+1. The Alice VPN endpoint calls `open_connect` on KMS Alice. KMS Alice creates
+   the master stream and sends an internal `new_app` control request through
+   KMS Trusted. KMS Bob creates the replica association with the same KSID.
+   Alice receives the KSID only
    after that operation succeeds end to end.
-2. H8 sends the KSID to the H9 VPN endpoint once. H9 calls `open_connect(KSID)` on
-   the H7 KMS node, which sends an internal `register` request back through H6.
-3. Once both SAEs are registered, H5 reserves complete key objects from
+2. Alice sends the KSID to the Bob VPN endpoint once. Bob calls
+   `open_connect(KSID)` on KMS Bob, which sends an internal `register` request
+   back through KMS Trusted.
+3. Once both SAEs are registered, KMS Alice reserves complete key objects from
    its end-to-end relay buffer and sends a `fill` request containing their
-   identifiers—not their secret values—to H7.
-4. H7 resolves those identifiers from its matching relay buffer and
+   identifiers—not their secret values—to KMS Bob.
+4. KMS Bob resolves those identifiers from its matching relay buffer and
    inserts the material into its replica stream. Its acknowledgement causes
-   H5 to commit the same objects to the master stream; rejected objects
+   KMS Alice to commit the same objects to the master stream; rejected objects
    are returned to the relay buffer.
 5. Each VPN generation uses the normal ETSI 004 `get_key(KSID)` endpoint.
    Alice and Bob compare the returned stream index and fingerprint before
    installing the PSK and performing the transactional IKE cutover.
 
 The `new_app`, `register` and `fill` messages use the private
-`/api/v1/associations/relay004/<request-id>` KMS endpoint. H6 is only a
+`/api/v1/associations/relay004/<request-id>` KMS endpoint. KMS Trusted is only a
 hop-by-hop control proxy and keeps no ETSI 004 association. Each request
 carries its origin, final KMS and previous hop, so responses follow the
 reverse path and duplicate fills cannot overlap. This endpoint is an
@@ -824,18 +893,18 @@ SAE-to-KMS operation.
 
 In ETSI 014 mode:
 
-1. Alice requests one 256-bit key from the H5 KMS node with
+1. Alice requests one 256-bit key from KMS Alice with
    `enc_keys/<Bob SAE>/number/1/size/256`.
 2. QKDNetSim creates and relays the end-to-end key through
-   H5 → H6 → H7 using the existing trusted-node `skey_create`
+   KMS Alice → KMS Trusted → KMS Bob using the existing trusted-node `skey_create`
    mechanism and hop-by-hop QKD protection.
 3. Alice sends only the returned `key_ID` to Bob's coordination API.
-4. Bob requests that exact identifier from the H7 KMS node with
+4. Bob requests that exact identifier from KMS Bob with
    `dec_keys/<Alice SAE>`.
 5. Both endpoints compare `key_ID` and key fingerprint, install the result as
    the strongSwan PSK, and perform the same transactional IKE cutover.
 
-Raw key material never travels between the H8 and H9 VPN endpoints. The recurring
+Raw key material never travels between the Alice and Bob VPN endpoints. The recurring
 `key_ID` coordination is necessary because ETSI 014 is key-oriented rather
 than stream-oriented; ETSI 004 only coordinates its KSID during association
 setup and thereafter identifies each chunk by its monotonically increasing
@@ -897,6 +966,12 @@ the relay layer transports larger storage blocks internally.
   role-named ns-3 programs implementing the two post-processing links and
   three KMS roles used by the active trusted-node VPN.
 - **[`docker/`](docker/)** — the shared images, Compose definitions for persistent QKD/KMS infrastructure, and interface-aware entrypoints. Application endpoint topology and verification live exclusively under `core/`.
+- **[`diagrams/`](diagrams/)** — accessible SVG architecture diagrams used by
+  the documentation, with their editable, self-contained HTML sources under
+  [`diagrams/src/`](diagrams/src/) and a project-specific visual profile
+  selected by [`.diagram-design`](.diagram-design). The retired toy-traffic
+  equivalents and their HTML sources are kept under
+  [`historical/toy-traffic/diagrams/`](historical/toy-traffic/diagrams/).
 - **[`docker-compose.yml`](docker/docker-compose.yml)** — the four-service
   point-to-point QKD/KMS infrastructure. It deliberately contains neither
   Alice/Bob application services nor a classical data network.

@@ -15,12 +15,12 @@
  *
  *   --devPP   / --myIpPP    link to RELAY_PP_ALICE (post-processing Alice)
  *   --devKms  / --myIpKms   link to RELAY_KMS_TRUSTED (KMS Relay)          [relay/transform_keys]
- *   --devEtsi / --myIpEtsi  link to RELAY_ETSI014_ALICE (ETSI014 Alice)      [GET_KEY]
+ *   --devEtsi / --myIpEtsi  link to the Alice VPN SAE (ETSI 004/014)         [port 80]
  *
  * Contract shared with the other VMs (must match exactly):
  *   ppAliceId   -> must match the "SetId" used by RELAY_PP_ALICE
- *   etsiAliceId -> must match the "appId" used by RELAY_ETSI014_ALICE
- *   etsiBobId   -> must match the "appId" used by RELAY_ETSI014_BOB
+ *   etsiAliceId -> must match the SAE ID used by the Alice VPN endpoint
+ *   etsiBobId   -> must match the SAE ID used by the Bob VPN endpoint
  */
 
 #include "ns3/core-module.h"
@@ -87,8 +87,8 @@ main(int argc, char* argv[])
 
     // ---- Identifier contract shared between VMs ----
     std::string ppAliceId   = "cccccccc-0000-0000-0000-000000000001"; // RELAY_PP_ALICE's module
-    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // RELAY_ETSI014_ALICE's app
-    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // RELAY_ETSI014_BOB's app
+    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // Alice VPN SAE
+    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // Bob VPN SAE
 
     // ---- Q-Buffer configuration ----
     uint32_t qbMin = 1024;
@@ -101,7 +101,7 @@ main(int argc, char* argv[])
     // 4096), the count is always 0 and the relay never starts up
     // ("insufficient amount of key material"). With 2048 the Relay() ceiling
     // (20*qbDefaultKeyBits bits/tick, 1 tick/s) works out to 40960 bps, with
-    // headroom over the ETSI014 side's GET_KEY demand (~6400 bps).
+    // headroom over the VPN consumer's key demand (~6400 bps).
     uint32_t qbDefaultKeyBits = 2048;
 
     // ---- Replenishment period for the relay buffer toward Bob ----
@@ -119,14 +119,14 @@ main(int argc, char* argv[])
     CommandLine cmd;
     cmd.AddValue("devPP", "Real NIC toward RELAY_PP_ALICE", devPP);
     cmd.AddValue("devKms", "Real NIC toward RELAY_KMS_TRUSTED", devKms);
-    cmd.AddValue("devEtsi", "Real NIC toward RELAY_ETSI014_ALICE", devEtsi);
+    cmd.AddValue("devEtsi", "Real NIC toward the Alice VPN SAE", devEtsi);
     cmd.AddValue("myIpPP", "Local IP on the link toward RELAY_PP_ALICE", myIpPP);
     cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_TRUSTED", myIpKms);
-    cmd.AddValue("myIpEtsi", "Local IP on the link toward RELAY_ETSI014_ALICE", myIpEtsi);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward the Alice VPN SAE", myIpEtsi);
     cmd.AddValue("peerKmsRelayIp", "Real IP of RELAY_KMS_TRUSTED (KMS Relay)", peerKmsRelayIp);
     cmd.AddValue("ppAliceId", "UUID of RELAY_PP_ALICE's post-processing module", ppAliceId);
-    cmd.AddValue("etsiAliceId", "UUID of RELAY_ETSI014_ALICE's ETSI014 app", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID of RELAY_ETSI014_BOB's ETSI014 app", etsiBobId);
+    cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
+    cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -219,7 +219,7 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &PeriodicRelayCheck, kms, bobId,
                          Seconds(relayCheckPeriodSec), Seconds(simulationTime));
 
-    // --- ETSI014 app pair (RELAY_ETSI014_ALICE <-> RELAY_ETSI014_BOB); from KMS Alice, RELAY_ETSI014_BOB is reached via the Relay ---
+    // --- VPN SAE pair (Alice <-> Bob); from KMS Alice, Bob is reached via KMS Trusted ---
     control->RegisterQKDApplicationPair(etsiAliceId, etsiBobId, bobHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();

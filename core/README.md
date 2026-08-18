@@ -131,6 +131,13 @@ checks connectivity and RTT, and removes the Docker endpoints on shutdown.
 Additional options are available through `--help`, including per-link packet
 loss and the ping sample count.
 
+The isolated `classical-topology.py` laboratory numbers those links as
+`10.252.i.0/30`. The supported VPN runner deliberately uses a separate block,
+`10.253.i.0/30`, where `i` is the zero-based link index. With `R` routers there
+are `R + 1` links: Alice is `10.253.0.1/30`, and Bob is
+`10.253.R.2/30`. Thus a direct run (`--routers 0`) assigns Bob
+`10.253.0.2/30`; with three routers Bob becomes `10.253.3.2/30`.
+
 ## Step 4: run a supported VPN scenario
 
 CORE is the classical Alice–Bob network in both supported scenarios. Compose
@@ -182,9 +189,11 @@ expected mismatched-key rejection once and writes JSON, CSV and per-run logs
 below `results/`. Use `--repetitions 1`, `--case NAME` or `--list` for
 shorter workflows.
 
-The commands are identical on native Linux, WSL and Windows PowerShell. On
-Windows they target Docker Desktop's Linux engine; on native Linux they target
-the local Docker Engine. Docker Desktop must use Linux containers and the
+The Docker Compose and in-container commands are identical on native Linux,
+WSL and Windows PowerShell. The host regression launcher uses
+`python3 automation/run-regression.py` on Linux/WSL and
+`py -3 automation/run-regression.py` on Windows. Docker Desktop must use Linux
+containers; on native Linux the commands target the local Docker Engine. The
 current CORE package targets x86-64 hosts.
 
 ## Files and responsibilities

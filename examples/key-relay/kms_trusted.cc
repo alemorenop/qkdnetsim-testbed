@@ -1,7 +1,7 @@
 /*
  * Key-relay TRUSTED KMS (intermediate node)
  *
- * Has no ETSI014 application of its own: its only job is to act as a bridge
+ * Has no local VPN SAE endpoint of its own: its only job is to act as a bridge
  * between KMS Alice and KMS Bob. It has TWO direct QKD links (one to each
  * side), each with its own LOCAL Q-Buffer/S-Buffer:
  *   - Alice side: fed by RELAY_PP_A, LOCAL_SBUFFER indexed by KMS Alice's ID

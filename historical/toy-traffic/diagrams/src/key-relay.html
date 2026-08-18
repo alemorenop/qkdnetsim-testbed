@@ -1,6 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1390" height="1020" viewBox="0 0 1390 1020" role="img" aria-labelledby="relay-vpn-title relay-vpn-desc">
-  <title id="relay-vpn-title">Trusted-node QKD-backed VPN architecture</title>
-  <desc id="relay-vpn-desc">Detailed trusted-node architecture showing two QKD links, seven ns-3 processes, every Docker subnet and address, ETSI 004 and 014 delivery, hop-by-hop relay control, CORE orchestration, and strongSwan VPN endpoints.</desc>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Historical trusted-node toy-traffic prototype</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #F4F1E8; }
+    body { display: flex; align-items: flex-start; justify-content: center; }
+    svg { display: block; width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="1390" height="1020" viewBox="0 0 1390 1020" role="img" aria-labelledby="historical-relay-title historical-relay-desc">
+  <title id="historical-relay-title">Historical trusted-node toy-traffic prototype</title>
+  <desc id="historical-relay-desc">Retired trusted-node prototype showing all nine ns-3 processes, exact Docker addresses, QKD links, hop-by-hop relay, ETSI 014 consumers, OTP data path, and CORE orchestration.</desc>
   <defs>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');
@@ -13,28 +27,30 @@
       .layer { font-family: 'Geist', Arial, sans-serif; font-size: 10px; font-weight: 500; fill: #173139; }
     </style>
     
-    <marker id="relay-vpn-ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#1F6F8B"></path></marker>
-    <marker id="relay-vpn-ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#1F6F8B"></path></marker>
-    <marker id="relay-vpn-ao" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#D08A28"></path></marker>
-    <marker id="relay-vpn-ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#A76212"></path></marker>
-    <marker id="relay-vpn-ac" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#49656C"></path></marker>
+    <marker id="historical-relay-ab" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#1F6F8B"></path></marker>
+    <marker id="historical-relay-ag" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#1F6F8B"></path></marker>
+    <marker id="historical-relay-ao" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#D08A28"></path></marker>
+    <marker id="historical-relay-ap" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto"><path d="M0 0L14 7L0 14Z" fill="#D08A28"></path></marker>
+    <marker id="historical-relay-ac" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#49656C"></path></marker>
   </defs>
   <rect width="1390" height="1020" fill="#F4F1E8"></rect>
   <text x="166" y="25" text-anchor="middle" class="site" fill="#1F6F8B">ALICE SITE</text>
   <text x="691" y="25" text-anchor="middle" class="site" fill="#1F6F8B">TRUSTED RELAY SITE</text>
   <text x="1216" y="25" text-anchor="middle" class="site" fill="#1F6F8B">BOB SITE</text>
+  <rect x="26" y="606" width="1338" height="234" rx="8" fill="#E5EAE6" stroke="#D08A28" stroke-width="1.2"></rect>
+  <text x="691" y="628" text-anchor="middle" class="group">CORE-managed classical data plane · DockerNode endpoints · optional routers</text>
 
-  <path d="M276 107H476" fill="none" stroke="#1F6F8B" stroke-width="2.4" marker-end="url(#relay-vpn-ab)"></path>
+  <path d="M276 107H476" fill="none" stroke="#1F6F8B" stroke-width="2.4" marker-end="url(#historical-relay-ab)"></path>
   <text x="376" y="93" text-anchor="middle" class="edge" fill="#1F6F8B">QKD link A</text>
-  <path d="M906 107H1106" fill="none" stroke="#1F6F8B" stroke-width="2.4" marker-end="url(#relay-vpn-ab)"></path>
+  <path d="M906 107H1106" fill="none" stroke="#1F6F8B" stroke-width="2.4" marker-end="url(#historical-relay-ab)"></path>
   <text x="1006" y="93" text-anchor="middle" class="edge" fill="#1F6F8B">QKD link B</text>
   <text x="376" y="122" text-anchor="middle" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.111.1 ↔ 192.168.111.2</text>
   <text x="1006" y="122" text-anchor="middle" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.114.3 ↔ 192.168.114.4</text>
 
-  <path d="M166 240V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
-  <path d="M576 240V280H594V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
-  <path d="M806 240V280H788V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
-  <path d="M1216 240V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
+  <path d="M166 240V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
+  <path d="M576 240V280H594V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
+  <path d="M806 240V280H788V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
+  <path d="M1216 240V330" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
   <text x="179" y="285" class="edge" fill="#1F6F8B">key delivery</text>
   <text x="1203" y="285" text-anchor="end" class="edge" fill="#1F6F8B">key delivery</text>
   <text x="184" y="253" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.112.1</text>
@@ -46,8 +62,8 @@
   <text x="823" y="253" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.115.3</text>
   <text x="817" y="316" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.115.6</text>
 
-  <path d="M286 380H576" fill="none" stroke="#D08A28" stroke-width="2.4" stroke-dasharray="10 6" marker-end="url(#relay-vpn-ao)"></path>
-  <path d="M806 380H1096" fill="none" stroke="#D08A28" stroke-width="2.4" stroke-dasharray="10 6" marker-end="url(#relay-vpn-ao)"></path>
+  <path d="M286 380H576" fill="none" stroke="#D08A28" stroke-width="2.4" stroke-dasharray="10 6" marker-end="url(#historical-relay-ao)"></path>
+  <path d="M806 380H1096" fill="none" stroke="#D08A28" stroke-width="2.4" stroke-dasharray="10 6" marker-end="url(#historical-relay-ao)"></path>
   <text x="431" y="366" text-anchor="middle" class="edge" fill="#D08A28">hop-by-hop relay</text>
   <text x="951" y="366" text-anchor="middle" class="edge" fill="#D08A28">hop-by-hop relay</text>
   <text x="300" y="396" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.117.5</text>
@@ -55,29 +71,22 @@
   <text x="820" y="396" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.118.6</text>
   <text x="1082" y="396" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.118.7</text>
 
-  <path d="M166 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
-  <path d="M1216 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
-  <text x="179" y="578" class="edge" fill="#1F6F8B">ETSI 004: open_connect / get_key</text>
-  <text x="179" y="593" class="edge" fill="#1F6F8B">ETSI 014: enc_keys</text>
-  <text x="1203" y="578" text-anchor="end" class="edge" fill="#1F6F8B">ETSI 004: open_connect / get_key</text>
-  <text x="1203" y="593" text-anchor="end" class="edge" fill="#1F6F8B">ETSI 014: dec_keys</text>
+  <path d="M166 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
+  <path d="M1216 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#historical-relay-ag)"></path>
+  <text x="179" y="598" class="edge" fill="#1F6F8B">ETSI 014 GET_KEY</text>
+  <text x="1203" y="598" text-anchor="end" class="edge" fill="#1F6F8B">ETSI 014 GET_KEY</text>
+  <path d="M288 707H1094" fill="none" stroke="#D08A28" stroke-width="2.4" marker-end="url(#historical-relay-ap)"></path>
+  <text x="691" y="685" text-anchor="middle" class="edge" fill="#D08A28">end-to-end OTP-protected traffic · direct or routed CORE path</text>
   <text x="184" y="553" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.119.5</text>
   <text x="184" y="638" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.119.8</text>
   <text x="1198" y="553" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.120.7</text>
   <text x="1198" y="638" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.120.9</text>
-
-  <rect x="26" y="606" width="1338" height="234" rx="8" fill="none" stroke="#A76212" stroke-width="1.2" stroke-dasharray="9 6"></rect>
-  <text x="691" y="628" text-anchor="middle" class="group">CORE-managed classical data plane · strongSwan DockerNodes · optional routers</text>
-  <rect x="288" y="690" width="806" height="35" rx="17" fill="#A76212"></rect>
-  <rect x="685" y="707" width="12" height="10" rx="2" fill="#FFFFFF"></rect>
-  <path d="M687 707v-4a4 4 0 0 1 8 0v4" stroke="#FFFFFF" stroke-width="1.2" fill="none"></path>
-  <text x="691" y="683" text-anchor="middle" class="edge" fill="#A76212">IPsec/IKEv2 tunnel · direct or routed CORE path</text>
-<text x="292" y="740" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">10.253.0.1/30</text>
-<text x="1090" y="740" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">10.253.R.2/30 · R=routers</text>
+  <text x="304" y="700" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">10.254.0.1</text>
+  <text x="1078" y="700" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">10.254.R.2</text>
 
   <g transform="translate(56 50)">
     <rect width="220" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">pp_alice · Docker container</text>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H1 · pp_alice</text>
     <rect x="14" y="32" width="192" height="38" rx="6" fill="#1F6F8B"></rect>
     <text x="110" y="57" text-anchor="middle" class="role">PP Alice</text>
     <rect x="14" y="76" width="192" height="32" rx="6" fill="#E5EAE6"></rect>
@@ -85,11 +94,11 @@
     <rect x="14" y="114" width="192" height="48" rx="6" fill="#E5EEEE"></rect>
     <text x="110" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
     <text x="110" y="149" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Relay-A · KMS Alice</text>
+    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H2, H5</text>
   </g>
   <g transform="translate(476 50)">
     <rect width="200" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="14" y="24" class="host" fill="#173139" font-weight="800">pp_relay_a · Docker container</text>
+    <text x="14" y="24" class="host" fill="#173139" font-weight="800">H2 · pp_relay_a</text>
     <rect x="12" y="32" width="176" height="38" rx="6" fill="#1F6F8B"></rect>
     <text x="100" y="57" text-anchor="middle" class="role">PP Relay-A</text>
     <rect x="12" y="76" width="176" height="32" rx="6" fill="#E5EAE6"></rect>
@@ -97,11 +106,11 @@
     <rect x="12" y="114" width="176" height="48" rx="6" fill="#E5EEEE"></rect>
     <text x="100" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
     <text x="100" y="149" text-anchor="middle" class="layer" font-size="8">AF_PACKET → Linux veth (ethX)</text>
-    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Alice · KMS Trusted</text>
+    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H1, H6</text>
   </g>
   <g transform="translate(706 50)">
     <rect width="200" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="14" y="24" class="host" fill="#173139" font-weight="800">pp_relay_b · Docker container</text>
+    <text x="14" y="24" class="host" fill="#173139" font-weight="800">H3 · pp_relay_b</text>
     <rect x="12" y="32" width="176" height="38" rx="6" fill="#1F6F8B"></rect>
     <text x="100" y="57" text-anchor="middle" class="role">PP Relay-B</text>
     <rect x="12" y="76" width="176" height="32" rx="6" fill="#E5EAE6"></rect>
@@ -109,11 +118,11 @@
     <rect x="12" y="114" width="176" height="48" rx="6" fill="#E5EEEE"></rect>
     <text x="100" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
     <text x="100" y="149" text-anchor="middle" class="layer" font-size="8">AF_PACKET → Linux veth (ethX)</text>
-    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Bob · KMS Trusted</text>
+    <text x="100" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H4, H6</text>
   </g>
   <g transform="translate(1106 50)">
     <rect width="220" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">pp_bob · Docker container</text>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H4 · pp_bob</text>
     <rect x="14" y="32" width="192" height="38" rx="6" fill="#1F6F8B"></rect>
     <text x="110" y="57" text-anchor="middle" class="role">PP Bob</text>
     <rect x="14" y="76" width="192" height="32" rx="6" fill="#E5EAE6"></rect>
@@ -121,12 +130,12 @@
     <rect x="14" y="114" width="192" height="48" rx="6" fill="#E5EEEE"></rect>
     <text x="110" y="131" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice</text>
     <text x="110" y="149" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Relay-B · KMS Bob</text>
+    <text x="110" y="180" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H3, H7</text>
   </g>
 
   <g transform="translate(46 330)">
     <rect width="240" height="210" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">kms_alice · Docker container</text>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H5 · kms_alice</text>
     <rect x="14" y="32" width="212" height="40" rx="6" fill="#1F6F8B"></rect>
     <text x="120" y="58" text-anchor="middle" class="role">KMS Alice</text>
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
@@ -134,12 +143,12 @@
     <rect x="14" y="118" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
     <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
     <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Alice · KMS Trusted · VPN Alice</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H1, H6, H8</text>
     <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
   <g transform="translate(576 330)">
     <rect width="230" height="230" rx="8" fill="#F8EBD6" stroke="#D08A28" stroke-width="3"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">kms_trusted · Docker container</text>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H6 · kms_trusted</text>
     <rect x="14" y="34" width="202" height="42" rx="6" fill="#D08A28"></rect>
     <text x="115" y="61" text-anchor="middle" class="role">Trusted KMS</text>
     <rect x="14" y="82" width="202" height="34" rx="6" fill="#E5EAE6"></rect>
@@ -147,13 +156,13 @@
     <rect x="14" y="122" width="202" height="50" rx="6" fill="#E5EEEE"></rect>
     <text x="115" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×4</text>
     <text x="115" y="159" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="115" y="184" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Relay-A/B · KMS Alice/Bob</text>
-    <text x="115" y="204" text-anchor="middle" class="detail">new_app / register / fill</text>
-    <text x="115" y="221" text-anchor="middle" class="detail">relay004 control proxy</text>
+    <text x="115" y="184" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H2, H3, H5, H7</text>
+    <text x="115" y="204" text-anchor="middle" class="detail">decrypts / re-encrypts keys</text>
+    <text x="115" y="221" text-anchor="middle" class="detail">independent hop keys A, B</text>
   </g>
   <g transform="translate(1096 330)">
     <rect width="240" height="210" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">kms_bob · Docker container</text>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H7 · kms_bob</text>
     <rect x="14" y="32" width="212" height="40" rx="6" fill="#1F6F8B"></rect>
     <text x="120" y="58" text-anchor="middle" class="role">KMS Bob</text>
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
@@ -161,41 +170,43 @@
     <rect x="14" y="118" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
     <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
     <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Bob · KMS Trusted · VPN Bob</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H4, H6, H9</text>
     <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
 
   <g transform="translate(46 650)">
-    <rect width="240" height="150" rx="8" fill="#FFFFFF" stroke="#A76212" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">Alice VPN endpoint · DockerNode</text>
-    <rect x="14" y="32" width="212" height="42" rx="6" fill="#A76212"></rect>
-    <text x="120" y="59" text-anchor="middle" class="role">strongSwan Client</text>
-    <rect x="14" y="82" width="212" height="34" rx="6" fill="#F2E3C8"></rect>
-    <text x="120" y="98" text-anchor="middle" class="layer">QKD VPN consumer</text>
-    <text x="120" y="112" text-anchor="middle" font-size="9.5" class="layer">ETSI 004 / ETSI 014</text>
-    <rect x="14" y="120" width="212" height="22" rx="5" fill="#E1EBEA"></rect>
-    <text x="120" y="135" text-anchor="middle" class="layer" font-size="8.5">eth0: KMS · eth1: CORE (Linux)</text>
+    <rect width="240" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H8 · ETSI 014 Alice DockerNode</text>
+    <rect x="14" y="32" width="212" height="42" rx="6" fill="#D08A28"></rect>
+    <text x="120" y="59" text-anchor="middle" class="role">ETSI 014 Alice</text>
+    <rect x="14" y="80" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
+    <text x="120" y="102" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="14" y="120" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
+    <text x="120" y="139" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
+    <text x="120" y="157" text-anchor="middle" class="layer" font-size="8.5">eth0: KMS · eth1: CORE (EmuFD)</text>
+    <text x="120" y="183" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H5, H9</text>
   </g>
   <g transform="translate(1096 650)">
-    <rect width="240" height="150" rx="8" fill="#FFFFFF" stroke="#A76212" stroke-width="1.2"></rect>
-    <text x="16" y="24" class="host" fill="#173139" font-weight="800">Bob VPN endpoint · DockerNode</text>
-    <rect x="14" y="32" width="212" height="42" rx="6" fill="#A76212"></rect>
-    <text x="120" y="59" text-anchor="middle" class="role">strongSwan Server</text>
-    <rect x="14" y="82" width="212" height="34" rx="6" fill="#F2E3C8"></rect>
-    <text x="120" y="98" text-anchor="middle" class="layer">QKD VPN consumer</text>
-    <text x="120" y="112" text-anchor="middle" font-size="9.5" class="layer">ETSI 004 / ETSI 014</text>
-    <rect x="14" y="120" width="212" height="22" rx="5" fill="#E1EBEA"></rect>
-    <text x="120" y="135" text-anchor="middle" class="layer" font-size="8.5">eth0: KMS · eth1: CORE (Linux)</text>
+    <rect width="240" height="190" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
+    <text x="16" y="24" class="host" fill="#173139" font-weight="800">H9 · ETSI 014 Bob DockerNode</text>
+    <rect x="14" y="32" width="212" height="42" rx="6" fill="#D08A28"></rect>
+    <text x="120" y="59" text-anchor="middle" class="role">ETSI 014 Bob</text>
+    <rect x="14" y="80" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
+    <text x="120" y="102" text-anchor="middle" class="layer">ns-3 node</text>
+    <rect x="14" y="120" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
+    <text x="120" y="139" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice · OTP</text>
+    <text x="120" y="157" text-anchor="middle" class="layer" font-size="8.5">eth0: KMS · eth1: CORE (EmuFD)</text>
+    <text x="120" y="183" text-anchor="middle" font-size="9.5" fill="#576F75">↔ H7, H8</text>
   </g>
 
   <rect x="26" y="855" width="1338" height="145" rx="8" fill="#E5EAE6" stroke="#49656C" stroke-width="1.2"></rect>
-  <text x="695" y="879" text-anchor="middle" font-size="14" font-weight="700" fill="#173139">CONTROL / ORCHESTRATION PLANE · IPsec traffic does not traverse this layer</text>
+  <text x="695" y="879" text-anchor="middle" font-size="14" font-weight="700" fill="#173139">CONTROL / ORCHESTRATION PLANE · application traffic does not traverse this layer</text>
   <rect x="50" y="890" width="850" height="92" rx="8" fill="#FFFFFF" stroke="#49656C" stroke-width="1.2"></rect>
   <text x="66" y="910" font-size="12" font-weight="700" fill="#173139">qkdnetsim-core container</text>
   <rect x="65" y="920" width="260" height="48" rx="8" fill="#E1EBEA" stroke="#49656C"></rect>
-  <text x="195" y="940" text-anchor="middle" font-size="12" font-weight="700" fill="#173139">vpn-topology.py</text>
+  <text x="195" y="940" text-anchor="middle" font-size="12" font-weight="700" fill="#173139">Scenario runner</text>
   <text x="195" y="957" text-anchor="middle" font-size="10.5" fill="#49656C">embedded CoreEmu session</text>
-  <path d="M325 944H345" fill="none" stroke="#49656C" stroke-width="1.2" marker-end="url(#relay-vpn-ac)"></path>
+  <path d="M325 944H345" fill="none" stroke="#49656C" stroke-width="1.2" marker-end="url(#historical-relay-ac)"></path>
   <rect x="345" y="920" width="260" height="48" rx="8" fill="#E8ECE8" stroke="#D08A28"></rect>
   <text x="475" y="940" text-anchor="middle" font-size="12" font-weight="700" fill="#173139">CORE runtime</text>
   <text x="475" y="957" text-anchor="middle" font-size="10.5" fill="#49656C">DockerNode · routers · per-link NetEm</text>
@@ -204,8 +215,10 @@
   <text x="755" y="957" text-anchor="middle" font-size="10.5" fill="#576F75">gRPC :50051 · external API</text>
   <rect x="1050" y="910" width="280" height="58" rx="8" fill="#F8EBD6" stroke="#D08A28" stroke-width="1.2"></rect>
   <text x="1190" y="934" text-anchor="middle" font-size="12" font-weight="700" fill="#A76212">Host Docker Engine</text>
-  <text x="1190" y="953" text-anchor="middle" font-size="10.5" fill="#576F75">creates sibling VPN containers</text>
-  <path d="M900 944H1050" fill="none" stroke="#49656C" stroke-width="1.2" stroke-dasharray="6 5" marker-end="url(#relay-vpn-ac)"></path>
+  <text x="1190" y="953" text-anchor="middle" font-size="10.5" fill="#576F75">creates sibling endpoint containers</text>
+  <path d="M900 944H1050" fill="none" stroke="#49656C" stroke-width="1.2" stroke-dasharray="6 5" marker-end="url(#historical-relay-ac)"></path>
   <text x="967" y="934" text-anchor="middle" font-size="9.5" fill="#49656C">/var/run/docker.sock</text>
-  <path d="M160 890V825" fill="none" stroke="#49656C" stroke-width="1.2" stroke-dasharray="7 5" marker-end="url(#relay-vpn-ac)"></path>
+  <path d="M160 890V825" fill="none" stroke="#49656C" stroke-width="1.2" stroke-dasharray="7 5" marker-end="url(#historical-relay-ac)"></path>
 </svg>
+</body>
+</html>

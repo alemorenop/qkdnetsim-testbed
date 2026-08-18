@@ -10,52 +10,52 @@
 name: qkdnetsim-key-relay
 
 networks:
-  net_qkd_alice_relay:   # H1 <-> H2  (sifting, Alice - Relay)
+  net_qkd_alice_relay:   # PP Alice <-> PP Relay-A (sifting)
     ipam:
       config:
         - subnet: 192.168.111.0/24
           gateway: 192.168.111.254
-  net_alice_pp_kms:   # H1 <-> H5  (post-processing Alice -> KMS Alice)
+  net_alice_pp_kms:   # PP Alice <-> KMS Alice
     ipam:
       config:
         - subnet: 192.168.112.0/24
           gateway: 192.168.112.254
-  net_relay_a_pp_kms:   # H2 <-> H6  (post-processing Relay-A -> KMS Relay, Alice side)
+  net_relay_a_pp_kms:   # PP Relay-A <-> KMS Trusted (Alice side)
     ipam:
       config:
         - subnet: 192.168.113.0/24
           gateway: 192.168.113.254
-  net_qkd_relay_bob:   # H3 <-> H4  (sifting, Relay - Bob)
+  net_qkd_relay_bob:   # PP Relay-B <-> PP Bob (sifting)
     ipam:
       config:
         - subnet: 192.168.114.0/24
           gateway: 192.168.114.254
-  net_relay_b_pp_kms:   # H3 <-> H6  (post-processing Relay-B -> KMS Relay, Bob side)
+  net_relay_b_pp_kms:   # PP Relay-B <-> KMS Trusted (Bob side)
     ipam:
       config:
         - subnet: 192.168.115.0/24
           gateway: 192.168.115.254
-  net_bob_pp_kms:   # H4 <-> H7  (post-processing Bob -> KMS Bob)
+  net_bob_pp_kms:   # PP Bob <-> KMS Bob
     ipam:
       config:
         - subnet: 192.168.116.0/24
           gateway: 192.168.116.254
-  net_kms_alice_trusted:   # H5 <-> H6  (KMS Alice <-> KMS Relay)
+  net_kms_alice_trusted:   # KMS Alice <-> KMS Trusted
     ipam:
       config:
         - subnet: 192.168.117.0/24
           gateway: 192.168.117.254
-  net_kms_trusted_bob:   # H6 <-> H7  (KMS Relay <-> KMS Bob)
+  net_kms_trusted_bob:   # KMS Trusted <-> KMS Bob
     ipam:
       config:
         - subnet: 192.168.118.0/24
           gateway: 192.168.118.254
-  net_alice_kms_app:   # H5 <-> H8  (KMS Alice -> ETSI014 Alice)
+  net_alice_kms_app:   # KMS Alice <-> Alice VPN endpoint (ETSI 004/014)
     ipam:
       config:
         - subnet: 192.168.119.0/24
           gateway: 192.168.119.254
-  net_bob_kms_app:   # H7 <-> H9  (KMS Bob -> ETSI014 Bob)
+  net_bob_kms_app:   # KMS Bob <-> Bob VPN endpoint (ETSI 004/014)
     ipam:
       config:
         - subnet: 192.168.120.0/24
@@ -78,7 +78,7 @@ services:
     networks:
       net_qkd_alice_relay: { ipv4_address: 192.168.111.1 }
       net_alice_pp_kms: { ipv4_address: 192.168.112.1 }
-    # Waits for H5 to confirm (via ListenReady/healthcheck) that its KMS is
+    # Waits for KMS Alice to confirm (via ListenReady/healthcheck) that it is
     # already in Listen() before starting. The model's own connection retry
     # also covers restarts or transient losses afterward.
     depends_on:

@@ -25,32 +25,32 @@ name: qkdnetsim-point-to-point
 # has already been assigned to one of the containers (that caused "Address
 # already in use").
 networks:
-  net_qkd:   # H1 <-> H2  (sifting, post-processing Alice-Bob)
+  net_qkd:   # PP Alice <-> PP Bob (sifting and post-processing)
     ipam:
       config:
         - subnet: 192.168.11.0/24
           gateway: 192.168.11.254
-  net_alice_pp_kms:   # H1 <-> H3  (post-processing Alice -> KMS Alice)
+  net_alice_pp_kms:   # PP Alice <-> KMS Alice
     ipam:
       config:
         - subnet: 192.168.13.0/24
           gateway: 192.168.13.254
-  net_bob_pp_kms:   # H2 <-> H4  (post-processing Bob -> KMS Bob)
+  net_bob_pp_kms:   # PP Bob <-> KMS Bob
     ipam:
       config:
         - subnet: 192.168.24.0/24
           gateway: 192.168.24.254
-  net_kms_peer:   # H3 <-> H4  (KMS Alice <-> KMS Bob, relay/transform_keys)
+  net_kms_peer:   # KMS Alice <-> KMS Bob (relay/transform_keys)
     ipam:
       config:
         - subnet: 192.168.34.0/24
           gateway: 192.168.34.254
-  net_alice_kms_app:   # H3 <-> H5  (KMS Alice -> ETSI014 Alice, GET_KEY)
+  net_alice_kms_app:   # KMS Alice <-> Alice VPN endpoint (ETSI 004/014)
     ipam:
       config:
         - subnet: 192.168.35.0/24
           gateway: 192.168.35.254
-  net_bob_kms_app:   # H4 <-> H6  (KMS Bob -> ETSI014 Bob, GET_KEY)
+  net_bob_kms_app:   # KMS Bob <-> Bob VPN endpoint (ETSI 004/014)
     ipam:
       config:
         - subnet: 192.168.46.0/24

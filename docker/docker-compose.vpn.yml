@@ -1,4 +1,4 @@
-# Scenario 3: point-to-point QKD/KMS infrastructure for the strongSwan
+# Active point-to-point QKD/KMS infrastructure for the strongSwan
 # consumer. CORE always creates Alice and Bob and their classical network.
 #
 # Usage:

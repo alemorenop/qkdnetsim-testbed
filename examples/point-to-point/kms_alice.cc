@@ -4,7 +4,7 @@
  * A single real node with three interfaces bridged to the real world:
  *   --devPP   / --myIpPP    link to P2P_PP_ALICE (post-processing Alice)
  *   --devKms  / --myIpKms   link to P2P_KMS_BOB (KMS Bob)          [relay/transform_keys, port 8080]
- *   --devEtsi / --myIpEtsi  link to P2P_ETSI014_ALICE (ETSI014 Alice)    [GET_KEY, port 80]
+ *   --devEtsi / --myIpEtsi  link to the Alice VPN SAE (ETSI 004/014)     [port 80]
  *
  * "KMS Bob" (P2P_KMS_BOB) is NOT instantiated here: only an empty local Node
  * (kmsBobHandle) is created, which serves as an internal identifier (GetId())
@@ -13,8 +13,8 @@
  *
  * Contract shared with the other VMs (must match exactly):
  *   ppAliceId   -> must match the "SetId" used by P2P_PP_ALICE
- *   etsiAliceId -> must match the "appId" used by P2P_ETSI014_ALICE
- *   etsiBobId   -> must match the "appId" used by P2P_ETSI014_BOB
+ *   etsiAliceId -> must match the SAE ID used by the Alice VPN endpoint
+ *   etsiBobId   -> must match the SAE ID used by the Bob VPN endpoint
  */
 
 #include "ns3/core-module.h"
@@ -72,8 +72,8 @@ main(int argc, char* argv[])
 
     // ---- Identifier contract shared between VMs ----
     std::string ppAliceId   = "aaaaaaaa-0000-0000-0000-000000000001"; // P2P_PP_ALICE's module
-    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // P2P_ETSI014_ALICE's app
-    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // P2P_ETSI014_BOB's app
+    std::string etsiAliceId = "bbbbbbbb-0000-0000-0000-000000000001"; // Alice VPN SAE
+    std::string etsiBobId   = "bbbbbbbb-0000-0000-0000-000000000002"; // Bob VPN SAE
 
     // ---- Q-Buffer configuration (same values as in the examples) ----
     uint32_t qbMin = 1024;
@@ -86,14 +86,14 @@ main(int argc, char* argv[])
     CommandLine cmd;
     cmd.AddValue("devPP", "Real NIC toward P2P_PP_ALICE", devPP);
     cmd.AddValue("devKms", "Real NIC toward P2P_KMS_BOB", devKms);
-    cmd.AddValue("devEtsi", "Real NIC toward P2P_ETSI014_ALICE", devEtsi);
+    cmd.AddValue("devEtsi", "Real NIC toward the Alice VPN SAE", devEtsi);
     cmd.AddValue("myIpPP", "Local IP on the link toward P2P_PP_ALICE", myIpPP);
     cmd.AddValue("myIpKms", "Local IP on the link toward P2P_KMS_BOB", myIpKms);
-    cmd.AddValue("myIpEtsi", "Local IP on the link toward P2P_ETSI014_ALICE", myIpEtsi);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward the Alice VPN SAE", myIpEtsi);
     cmd.AddValue("peerKmsBobIp", "Real IP of P2P_KMS_BOB (KMS Bob)", peerKmsBobIp);
     cmd.AddValue("ppAliceId", "UUID of P2P_PP_ALICE's post-processing module", ppAliceId);
-    cmd.AddValue("etsiAliceId", "UUID of P2P_ETSI014_ALICE's ETSI014 app", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID of P2P_ETSI014_BOB's ETSI014 app", etsiBobId);
+    cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
+    cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -128,10 +128,10 @@ main(int argc, char* argv[])
     Ptr<QKDControl> control = QLinkHelper.InstallQKDNController(node);
     QLinkHelper.ConfigureQBuffers({control}, qbMin, qbThr, qbMax, qbDefaultKeyBits);
 
-    // The KMS listens on port 80 on the interface facing P2P_KMS_BOB/P2P_ETSI014_ALICE (in this
+    // The KMS listens on port 80 on the interfaces facing KMS Bob and the Alice VPN endpoint (in this
     // point-to-point experiment, a single "public" address is enough for the
     // KMS; we use the interface toward P2P_KMS_BOB for relay requests and the one
-    // toward P2P_ETSI014_ALICE for GET_KEY, both served by the same KMS application).
+    // toward the Alice VPN endpoint for ETSI requests, both served by the same KMS application).
     QAHelper.InstallKeyManager(node, Ipv4Address(myIpKms.c_str()), 80, control);
     Ptr<QKDKeyManagerSystemApplication> kms = control->GetKeyManagerSystemApplication(node);
 
@@ -160,8 +160,8 @@ main(int argc, char* argv[])
     // P2P_PP_ALICE's post-processing module feeds the buffer used to reach KMS Bob
     kms->RegisterQKDModule(kmsBobId, ppAliceId);
 
-    // Register the ETSI014 app pair (P2P_ETSI014_ALICE <-> P2P_ETSI014_BOB); from KMS Alice's point
-    // of view, the remote app (P2P_ETSI014_BOB) is reached "via KMS Bob"
+    // Register the VPN SAE pair (Alice <-> Bob); from KMS Alice's point
+    // of view, the remote SAE is reached "via KMS Bob".
     control->RegisterQKDApplicationPair(etsiAliceId, etsiBobId, kmsBobHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();

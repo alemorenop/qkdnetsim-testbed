@@ -6,12 +6,12 @@
  *
  *   --devPP   / --myIpPP    link to RELAY_PP_BOB (post-processing Bob)
  *   --devKms  / --myIpKms   link to RELAY_KMS_TRUSTED (KMS Relay)          [relay/transform_keys]
- *   --devEtsi / --myIpEtsi  link to RELAY_ETSI014_BOB (ETSI014 Bob)        [GET_KEY]
+ *   --devEtsi / --myIpEtsi  link to the Bob VPN SAE (ETSI 004/014)         [port 80]
  *
  * Contract shared with the other VMs (must match exactly):
  *   ppBobId     -> must match the "SetId" used by RELAY_PP_BOB
- *   etsiBobId   -> must match the "appId" used by RELAY_ETSI014_BOB
- *   etsiAliceId -> must match the "appId" used by RELAY_ETSI014_ALICE
+ *   etsiBobId   -> must match the SAE ID used by the Bob VPN endpoint
+ *   etsiAliceId -> must match the SAE ID used by the Alice VPN endpoint
  */
 
 #include "ns3/core-module.h"
@@ -78,8 +78,8 @@ main(int argc, char* argv[])
 
     // ---- Identifier contract shared between VMs ----
     std::string ppBobId     = "dddddddd-0000-0000-0000-000000000002"; // RELAY_PP_BOB's module
-    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // RELAY_ETSI014_ALICE's app
-    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // RELAY_ETSI014_BOB's app
+    std::string etsiAliceId = "eeeeeeee-0000-0000-0000-000000000001"; // Alice VPN SAE
+    std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // Bob VPN SAE
 
     // ---- Q-Buffer configuration ----
     uint32_t qbMin = 1024;
@@ -101,14 +101,14 @@ main(int argc, char* argv[])
     CommandLine cmd;
     cmd.AddValue("devPP", "Real NIC toward RELAY_PP_BOB", devPP);
     cmd.AddValue("devKms", "Real NIC toward RELAY_KMS_TRUSTED", devKms);
-    cmd.AddValue("devEtsi", "Real NIC toward RELAY_ETSI014_BOB", devEtsi);
+    cmd.AddValue("devEtsi", "Real NIC toward the Bob VPN SAE", devEtsi);
     cmd.AddValue("myIpPP", "Local IP on the link toward RELAY_PP_BOB", myIpPP);
     cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_TRUSTED", myIpKms);
-    cmd.AddValue("myIpEtsi", "Local IP on the link toward RELAY_ETSI014_BOB", myIpEtsi);
+    cmd.AddValue("myIpEtsi", "Local IP on the link toward the Bob VPN SAE", myIpEtsi);
     cmd.AddValue("peerKmsRelayIp", "Real IP of RELAY_KMS_TRUSTED (KMS Relay)", peerKmsRelayIp);
     cmd.AddValue("ppBobId", "UUID of RELAY_PP_BOB's post-processing module", ppBobId);
-    cmd.AddValue("etsiAliceId", "UUID of RELAY_ETSI014_ALICE's ETSI014 app", etsiAliceId);
-    cmd.AddValue("etsiBobId", "UUID of RELAY_ETSI014_BOB's ETSI014 app", etsiBobId);
+    cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
+    cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -194,7 +194,7 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &PeriodicRelayCheck, kms, relayId,
                          Seconds(relayCheckPeriodSec), Seconds(simulationTime));
 
-    // --- ETSI014 app pair (RELAY_ETSI014_BOB <-> RELAY_ETSI014_ALICE); from KMS Bob, RELAY_ETSI014_ALICE is reached via the Relay ---
+    // --- VPN SAE pair (Bob <-> Alice); from KMS Bob, Alice is reached via KMS Trusted ---
     control->RegisterQKDApplicationPair(etsiBobId, etsiAliceId, aliceHandle);
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
