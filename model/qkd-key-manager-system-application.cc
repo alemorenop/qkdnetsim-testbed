@@ -21,6 +21,7 @@
 #include "json.h"
 #include <iostream>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <string>
 
@@ -1481,10 +1482,6 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
             targetSize -= candidateKey->GetSizeInBits();
         }
 
-        // The split loop below consumes mergedKey. Keep the exact material
-        // that must also be installed at the remote SAE before doing so.
-        const std::string relayKeyMaterial = mergedKey;
-
         NS_LOG_FUNCTION(this << "Now create supply keys!");
         std::vector<std::string> supplyKeyIds {};
         std::vector<Ptr<QKDKey>> supplyKeys {};
@@ -1539,113 +1536,46 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
         for(size_t i = 0; i < supplyKeyIds.size(); i++)
           jtransform["supply_key_ID"].push_back({{"key_ID", supplyKeyIds[i]}});
 
-        Ipv4Address nextHopKmsAddress;
-        bool canSendTransform {true};
+        // Relay() has already installed the same key IDs and material in the
+        // end-to-end RELAY_SBUFFER at both endpoint KMSs. SKEY_CREATE is thus
+        // a synchronization/control message: it transports identifiers, not
+        // a second encrypted copy of the key material.
+        for(const auto& candidateSetId : candidateSetIds)
+          jtransform["candidate_set_ID"].push_back({{"key_ID", candidateSetId}});
 
-        // Key-relay path: the destination is not a direct neighbor (2+ hops).
-        // The original format of this message only sends candidate_set_ID (an
-        // ID with no content), assuming the destination KM has a "mirror"
-        // buffer with exactly those same IDs -- only valid for direct
-        // point-to-point QKD (same quantum link seen by both sides). In
-        // relay, each end's RELAY_SBUFFER is fed by a *different* quantum
-        // link, so those IDs never match. Instead, we send the real content
-        // (mergedKey) encrypted with our own material toward the next hop
-        // (same hop-by-hop OTP pattern as Relay()/ProcessRelayRequest), so
-        // the final destination receives the exact content without depending
-        // on having the same ID locally.
-        //
-        // IMPORTANT: if this fails (e.g. no local key available at that
-        // moment), we must NOT abort the whole function -- the GET_KEY
-        // response to the local app (below) must always go out, regardless
-        // of whether the SKEY_CREATE notice to the peer KMS could be sent.
-        if(conn.GetNextHop() != conn.GetDestinationKmNodeId())
-        {
-          Ptr<SBuffer> hopEncBuffer = GetSBuffer(conn.GetNextHop(), "enc");
-          NS_ASSERT(hopEncBuffer);
+        Ipv4Address nextHopKmsAddress =
+          conn.GetNextHop() == conn.GetDestinationKmNodeId()
+            ? conn.GetDestinationKmsAddress()
+            : GetPeerKmAddress(conn.GetNextHop());
 
-          // The material to encrypt (mergedKey, e.g. 6400 bits = the app's
-          // OTP size) almost never matches the default size of local keys
-          // (2048 bits) -- several must be merged, same as the loop above
-          // does with sBuffer/candidateSetIds.
-          std::string hopKeyMaterial {};
-          std::vector<std::string> hopKeyIds {};
-          bool hopKeyOk = true;
-          uint32_t hopRemaining = uint32_t(relayKeyMaterial.size() * 8);
-          while(hopRemaining > 0)
-          {
-            uint32_t tempTarget {0};
-            if(hopRemaining <= hopEncBuffer->GetKeySize())
-              tempTarget = hopRemaining;
-            Ptr<QKDKey> candidateKey = hopEncBuffer->GetTransformCandidate(tempTarget);
-            if(!candidateKey)
-            {
-              hopKeyOk = false;
-              break;
-            }
-            hopKeyIds.push_back(candidateKey->GetId());
-            hopKeyMaterial += candidateKey->GetKeyString();
-            if(candidateKey->GetSizeInBits() >= hopRemaining)
-              break;
-            else
-              hopRemaining -= candidateKey->GetSizeInBits();
-          }
+        std::string msg1 = jtransform.dump();
+        NS_LOG_FUNCTION( this << "Transform payload" << msg1 ); //Testing @rm
+        CheckSocketsKMS(nextHopKmsAddress); //Check connection to peer KMS!
+        Ptr<Socket> sendSocket = GetSocketKMS(nextHopKmsAddress); //Get send socket to peer KMS
+        NS_ASSERT(sendSocket); //Check
 
-          if(relayKeyMaterial.empty() ||
-             relayKeyMaterial.size() != (keySize * keyNumber) / 8 ||
-             !hopKeyOk ||
-             hopKeyMaterial.size() < relayKeyMaterial.size())
-          {
-            NS_LOG_FUNCTION(this << "Not enough local key to encrypt the hop toward" << conn.GetNextHop() << "-- SKEY_CREATE abandoned (the response to the local app is still sent)");
-            canSendTransform = false;
-          }
-          else
-          {
-            hopKeyMaterial.resize(relayKeyMaterial.size()); //COTP requires an exact matching length; the last candidate may be longer than needed
-            Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>();
-            for(const auto& id : hopKeyIds)
-              jtransform["hop_key_ID"].push_back({{"key_ID", id}});
-            jtransform["ekey"] = encryptor->COTP(hopKeyMaterial, relayKeyMaterial);
+        //Create packet
+        std::string headerUri = "http://" + GetAddressString(nextHopKmsAddress);
+        headerUri += "/api/v1/sbuffers/skey_create";
 
-            nextHopKmsAddress = GetPeerKmAddress(conn.GetNextHop());
-          }
-        }
-        else
-        {
-          for(size_t i = 0; i < candidateSetIds.size(); i++)
-            jtransform["candidate_set_ID"].push_back({{"key_ID", candidateSetIds[i]}});
-          nextHopKmsAddress = conn.GetDestinationKmsAddress();
-        }
+        HTTPMessage httpMessage;
+        httpMessage.CreateRequest(headerUri, "POST", msg1);
+        std::string hMessage = httpMessage.ToString();
+        Ptr<Packet> packet = Create<Packet>(
+         (uint8_t*)(hMessage).c_str(),
+          hMessage.size()
+        );
+        NS_ASSERT(packet);
 
-        if(canSendTransform)
-        {
-          std::string msg1 = jtransform.dump();
-          NS_LOG_FUNCTION( this << "Transform payload" << msg1 ); //Testing @rm
-          CheckSocketsKMS(nextHopKmsAddress); //Check connection to peer KMS!
-          Ptr<Socket> sendSocket = GetSocketKMS(nextHopKmsAddress); //Get send socket to peer KMS
-          NS_ASSERT(sendSocket); //Check
+        HttpQuery httpRequest {};
+        httpRequest.method_type = RequestType::TRANSFORM_KEYS;
+        httpRequest.peerNodeId = conn.GetDestinationKmNodeId();
+        httpRequest.prev_hop_id = GetNode()->GetId();
+        httpRequest.surplus_key_ID = surplusKeyId;
+        HttpKMSAddQuery(nextHopKmsAddress, httpRequest); //Remember request to properly map response!
 
-          //Create packet
-          std::string headerUri = "http://" + GetAddressString(nextHopKmsAddress);
-          headerUri += "/api/v1/sbuffers/skey_create";
-
-          HTTPMessage httpMessage;
-          httpMessage.CreateRequest(headerUri, "POST", msg1);
-          std::string hMessage = httpMessage.ToString();
-          Ptr<Packet> packet = Create<Packet>(
-           (uint8_t*)(hMessage).c_str(),
-            hMessage.size()
-          );
-          NS_ASSERT(packet);
-
-          HttpQuery httpRequest;
-          httpRequest.method_type = RequestType::TRANSFORM_KEYS;
-          httpRequest.peerNodeId = conn.GetDestinationKmNodeId();
-          httpRequest.surplus_key_ID = surplusKeyId;
-          HttpKMSAddQuery(nextHopKmsAddress, httpRequest); //Remember request to properly map response!
-
-          sendSocket->Send(packet);
-          NS_LOG_FUNCTION(this << "SKEY_CREATE request sent to peer KM" << packet->GetUid() << packet->GetSize());
-        }
+        sendSocket->Send(packet);
+        NS_LOG_FUNCTION(this << "SKEY_CREATE request sent to peer KM" << packet->GetUid() << packet->GetSize());
       }
 
       if(sBuffer->GetType() == SBuffer::RELAY_SBUFFER || GetNode()->GetId() > conn.GetDestinationKmNodeId()){
@@ -1980,7 +1910,7 @@ QKDKeyManagerSystemApplication::ProcessOpenConnectRequest(HTTPMessage headerIn, 
     std::string ksid;
     std::string srcSaeId;
     std::string dstSaeId;
-    QKDKeyManagerSystemApplication::QoS inQos;
+    QKDKeyManagerSystemApplication::QoS inQos {};
     if(jOpenConnectRequest.contains("Destination"))
         dstSaeId = jOpenConnectRequest["Destination"];
     if(jOpenConnectRequest.contains("Source"))
@@ -2020,7 +1950,7 @@ QKDKeyManagerSystemApplication::ProcessOpenConnectRequest(HTTPMessage headerIn, 
               {"Source", srcSaeId},
               {"Destination", dstSaeId},
               {"QoS", {
-                {"Key_chunk_size", inQos.chunkSize}
+                {"Key_chunk_size", inQos.chunkSize / 8}
               }}
             };
             HttpQuery query {};
@@ -2696,7 +2626,7 @@ QKDKeyManagerSystemApplication::NewAppRequest(std::string ksid)
       {"Source",(it->second).srcSaeId},
       {"Destination",(it->second).dstSaeId},
       {"QoS", {
-        {"Key_chunk_size",(it->second).qos.chunkSize}
+        {"Key_chunk_size",(it->second).qos.chunkSize / 8}
       }},
       {"Key_stream_ID", ksid}
     };
@@ -3622,8 +3552,7 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
     //Read JSON parameters
     uint32_t keySize {0}, keyNumber {0};
     std::vector<std::string> candidateSetIds {}, supplyKeyIds {};
-    std::string surplusKeyId, targetSaeId, ekey;
-    std::vector<std::string> hopKeyIds;
+    std::string surplusKeyId, targetSaeId;
 
     uint32_t peerNodeId {0};
     if(jPayload.contains("source_node_id"))
@@ -3651,21 +3580,9 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
         )
           candidateSetIds.push_back((it.value())["key_ID"]);
     }
-    if(jPayload.contains("hop_key_ID")){
-        for(
-          nlohmann::json::iterator it = jPayload["hop_key_ID"].begin();
-          it != jPayload["hop_key_ID"].end();
-          ++it
-        )
-          hopKeyIds.push_back((it.value())["key_ID"]);
-    }
-    if(jPayload.contains("ekey"))
-      ekey = jPayload["ekey"];
-
-    // "destination_node_id"/"repeater_node_id" are only present in
-    // relay-aware messages (see the full comment on the sender side, above
-    // in the ETSI_QKD_014_GET_KEY handler). If missing, this is a direct P2P
-    // message (compatibility with scenario 1, no relay).
+    // destination_node_id routes multi-hop requests. repeater_node_id is
+    // added only by an intermediate KMS and identifies the previous hop for
+    // the reverse response path.
     uint32_t destinationNodeId = GetNode()->GetId();
     bool haveDestination = jPayload.contains("destination_node_id");
     if(haveDestination)
@@ -3677,82 +3594,21 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       repeaterNodeId = jPayload["repeater_node_id"];
 
     NS_ASSERT(keySize || keyNumber);
-    NS_ASSERT(!supplyKeyIds.empty() || !candidateSetIds.empty() || !targetSaeId.empty() || !hopKeyIds.empty());
+    NS_ASSERT(!supplyKeyIds.empty() || !candidateSetIds.empty() || !targetSaeId.empty());
 
-    // --- I am an intermediate relay hop (not the final destination): I
-    //     decrypt with my local link to whoever sent it to me, re-encrypt
-    //     with my local link to the real next hop, and forward -- same
-    //     hop-by-hop OTP pattern as Relay()/ProcessRelayRequest.
+    // Intermediate KMSs only forward the synchronization identifiers. The
+    // key material was already transported once by Relay() and is present,
+    // under the same IDs, in both endpoint RELAY_SBUFFERs.
     if(haveDestination && destinationNodeId != GetNode()->GetId())
     {
       NS_LOG_FUNCTION(this << "SKEY_CREATE: forwarding toward" << destinationNodeId);
 
       uint32_t previousNodeId = haveRepeater ? repeaterNodeId : peerNodeId;
-      Ptr<SBuffer> decBuffer = GetSBuffer(previousNodeId, "dec");
-      NS_ASSERT(decBuffer);
-
-      std::string hopKeyMaterial {};
-      bool hopOk = true;
-      for(const auto& id : hopKeyIds)
-      {
-        Ptr<QKDKey> decKey = decBuffer->GetKey(id, true);
-        if(!decKey) { hopOk = false; break; }
-        hopKeyMaterial += decKey->GetKeyString();
-      }
-      if(!hopOk || hopKeyMaterial.size() < ekey.size())
-      {
-        NS_LOG_FUNCTION(this << "SKEY_CREATE: hop key(s) not found -- forwarding abandoned");
-        return;
-      }
-      hopKeyMaterial.resize(ekey.size());
-      Ptr<QKDEncryptor> decryptor = CreateObject<QKDEncryptor>();
-      std::string mergedKey = decryptor->COTP(hopKeyMaterial, ekey);
-
       QKDLocationRegisterEntry conn = GetController()->GetRoute(destinationNodeId);
       uint32_t nextHop = conn.GetNextHop();
-      Ptr<SBuffer> encBuffer = GetSBuffer(nextHop, "enc");
-      NS_ASSERT(encBuffer);
+      jPayload["repeater_node_id"] = GetNode()->GetId();
 
-      std::string encKeyMaterial {};
-      std::vector<std::string> encKeyIds {};
-      bool encOk = true;
-      uint32_t encRemaining = uint32_t(mergedKey.size() * 8);
-      while(encRemaining > 0)
-      {
-        uint32_t tempTarget {0};
-        if(encRemaining <= encBuffer->GetKeySize())
-          tempTarget = encRemaining;
-        Ptr<QKDKey> candidateKey = encBuffer->GetTransformCandidate(tempTarget);
-        if(!candidateKey) { encOk = false; break; }
-        encKeyIds.push_back(candidateKey->GetId());
-        encKeyMaterial += candidateKey->GetKeyString();
-        if(candidateKey->GetSizeInBits() >= encRemaining)
-          break;
-        else
-          encRemaining -= candidateKey->GetSizeInBits();
-      }
-      if(!encOk || encKeyMaterial.size() < mergedKey.size())
-      {
-        NS_LOG_FUNCTION(this << "SKEY_CREATE: not enough local key toward" << nextHop << "-- forwarding abandoned");
-        return;
-      }
-      encKeyMaterial.resize(mergedKey.size());
-      Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>();
-
-      nlohmann::json jForward;
-      jForward["source_node_id"] = peerNodeId;
-      jForward["destination_node_id"] = destinationNodeId;
-      jForward["target_SAE_ID"] = targetSaeId;
-      jForward["key_size"] = keySize;
-      jForward["key_number"] = keyNumber;
-      for(const auto& id : supplyKeyIds)
-        jForward["supply_key_ID"].push_back({{"key_ID", id}});
-      for(const auto& id : encKeyIds)
-        jForward["hop_key_ID"].push_back({{"key_ID", id}});
-      jForward["ekey"] = encryptor->COTP(encKeyMaterial, mergedKey);
-      jForward["repeater_node_id"] = GetNode()->GetId();
-
-      std::string msgFwd = jForward.dump();
+      std::string msgFwd = jPayload.dump();
       Ipv4Address nextHopAddress = GetPeerKmAddress(nextHop);
       CheckSocketsKMS(nextHopAddress);
       Ptr<Socket> fwdSocket = GetSocketKMS(nextHopAddress);
@@ -3769,31 +3625,18 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       );
       NS_ASSERT(fwdPacket);
 
-      HttpQuery fwdQuery;
+      HttpQuery fwdQuery {};
       fwdQuery.method_type = TRANSFORM_KEYS;
       fwdQuery.peerNodeId = destinationNodeId;
-      HttpKMSAddQuery(nextHopAddress, fwdQuery); //Necessary: ProcessSKeyCreateResponse() always pops in HttpKMSCompleteQuery() when the next hop's response arrives
+      fwdQuery.prev_hop_id = previousNodeId;
+      fwdQuery.request_uri = headerIn.GetUri();
+      HttpKMSAddQuery(nextHopAddress, fwdQuery);
 
       fwdSocket->Send(fwdPacket);
       NS_LOG_FUNCTION(this << "SKEY_CREATE forwarded toward" << nextHop << fwdPacket->GetUid() << fwdPacket->GetSize());
 
-      //Immediate ACK to whoever sent it to me (we don't wait for the final destination to respond)
-      HTTPMessage httpAck;
-      httpAck.CreateResponse(HTTPMessage::HttpStatus::Ok, "", {
-        {"Content-Type", "application/json; charset=utf-8"},
-        {"Request URI", headerIn.GetUri() }
-      });
-      std::string hMessageAck = httpAck.ToString();
-      Ptr<Packet> ackPacket = Create<Packet>(
-       (uint8_t*)(hMessageAck).c_str(),
-        hMessageAck.size()
-      );
-      NS_ASSERT(ackPacket);
-      Ipv4Address prevHopAddress = GetPeerKmAddress(previousNodeId);
-      Ptr<Socket> ackSocket = GetSocketKMS(prevHopAddress);
-      NS_ASSERT(ackSocket);
-      ackSocket->Send(ackPacket);
-
+      // Do not acknowledge here. ProcessSKeyCreateResponse() proxies the
+      // final destination's response back hop by hop.
       return;
     }
 
@@ -3811,48 +3654,18 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(HTTPMessage headerIn, P
       uint32_t targetSize = keySize*keyNumber;
       std::string mergedKey {};
 
-      if(haveRepeater && !hopKeyIds.empty())
+      Ptr<QKDKey> tempKey;
+      for(size_t i = 0; i < candidateSetIds.size(); i++)
       {
-        // Arrived via relay: the real material travels encrypted hop-by-hop
-        // (see the sender side). I decrypt with my local link to whoever
-        // forwarded it to me (the last hop), instead of looking up
-        // candidate_set_ID in my own buffer -- that pattern is only valid in
-        // direct P2P (see the else branch).
-        Ptr<SBuffer> decBuffer = GetSBuffer(repeaterNodeId, "dec");
-        NS_ASSERT(decBuffer);
-
-        std::string hopKeyMaterial {};
-        bool hopOk = true;
-        for(const auto& id : hopKeyIds)
+        if(i != candidateSetIds.size()-1)
         {
-          Ptr<QKDKey> decKey = decBuffer->GetKey(id, true);
-          if(!decKey) { hopOk = false; break; }
-          hopKeyMaterial += decKey->GetKeyString();
-        }
-        if(!hopOk || hopKeyMaterial.size() < ekey.size())
-        {
-          NS_LOG_FUNCTION(this << "SKEY_CREATE: hop key(s) not found at final destination -- abandoned");
-          return;
-        }
-        hopKeyMaterial.resize(ekey.size());
-        Ptr<QKDEncryptor> decryptor = CreateObject<QKDEncryptor>();
-        mergedKey = decryptor->COTP(hopKeyMaterial, ekey);
-      }
-      else
-      {
-        Ptr<QKDKey> tempKey;
-        for(size_t i = 0; i < candidateSetIds.size(); i++)
-        {
-          if(i != candidateSetIds.size()-1)
-          {
-            tempKey = sBuffer->GetKey(candidateSetIds[i], true);
-            mergedKey += tempKey->GetKeyString(); //GetKey will also remove key from SBuffer
-            NS_LOG_FUNCTION(this << "em94" << targetSize << mergedKey);
-          }else{
-            uint32_t size = targetSize - mergedKey.size()*8;
-            NS_LOG_FUNCTION(this << "em95" << targetSize << mergedKey.size()*8 << size << "\n" << mergedKey);
-            mergedKey +=(sBuffer->GetHalfKey(candidateSetIds[i], size))->GetKeyString(); //This function should modify key
-          }
+          tempKey = sBuffer->GetKey(candidateSetIds[i], true);
+          mergedKey += tempKey->GetKeyString(); //GetKey will also remove key from SBuffer
+          NS_LOG_FUNCTION(this << "em94" << targetSize << mergedKey);
+        }else{
+          uint32_t size = targetSize - mergedKey.size()*8;
+          NS_LOG_FUNCTION(this << "em95" << targetSize << mergedKey.size()*8 << size << "\n" << mergedKey);
+          mergedKey +=(sBuffer->GetHalfKey(candidateSetIds[i], size))->GetKeyString(); //This function should modify key
         }
       }
 
@@ -3911,8 +3724,33 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateResponse(HTTPMessage headerIn, 
 
     Ipv4Address peerAddress = uriParams[0].c_str();
     auto it = m_httpRequestsQueryKMS.find(peerAddress);
-    if(it == m_httpRequestsQueryKMS.end()){
+    if(it == m_httpRequestsQueryKMS.end() || it->second.empty()){
       NS_LOG_ERROR(this);
+      return;
+    }
+
+    const HttpQuery query = it->second.front();
+    if(query.prev_hop_id != GetNode()->GetId())
+    {
+      HTTPMessage response;
+      response.CreateResponse(
+        headerIn.GetStatus(),
+        payload,
+        {
+          {"Content-Type", "application/json; charset=utf-8"},
+          {"Request URI", query.request_uri}
+        });
+      std::string hMessage = response.ToString();
+      Ptr<Packet> packet = Create<Packet>(
+        reinterpret_cast<const uint8_t*>(hMessage.c_str()),
+        hMessage.size());
+
+      Ipv4Address previousAddress = GetPeerKmAddress(query.prev_hop_id);
+      CheckSocketsKMS(previousAddress);
+      Ptr<Socket> sendSocket = GetSocketKMS(previousAddress);
+      NS_ASSERT(sendSocket);
+      sendSocket->Send(packet);
+      HttpKMSCompleteQuery(peerAddress);
       return;
     }
 
@@ -3921,16 +3759,16 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateResponse(HTTPMessage headerIn, 
 
       NS_LOG_FUNCTION(this << "We received HTTP OK(ack)!");
 
-      if(it->second[0].surplus_key_ID.empty())
+      if(query.surplus_key_ID.empty())
       { //There is nothing to perform on this ACK response
         NS_LOG_FUNCTION(this << "2895");
         HttpKMSCompleteQuery(peerAddress);
         return;
       }
 
-      Ptr<SBuffer> sBuffer = GetSBuffer(it->second[0].peerNodeId, "enc");
+      Ptr<SBuffer> sBuffer = GetSBuffer(query.peerNodeId, "enc");
       NS_ASSERT(sBuffer);
-      std::string surplusKeyId {(it->second[0]).surplus_key_ID};
+      std::string surplusKeyId {query.surplus_key_ID};
       sBuffer->MarkKey(surplusKeyId, QKDKey::READY);
 
     }else{
@@ -4574,10 +4412,20 @@ QKDKeyManagerSystemApplication::ReadJsonQos(
   if(jOpenConnectRequest.contains("QoS")) { //Only Key_chunk_size from the QoS perspective supported!
 
     if(jOpenConnectRequest["QoS"].contains("Key_chunk_size"))
-      inQos.chunkSize = jOpenConnectRequest["QoS"]["Key_chunk_size"];
+    {
+      const uint64_t chunkSizeBytes =
+        jOpenConnectRequest["QoS"]["Key_chunk_size"].get<uint64_t>();
+      NS_ABORT_MSG_IF(
+        chunkSizeBytes == 0 ||
+          chunkSizeBytes > std::numeric_limits<uint32_t>::max() / 8,
+        "Invalid ETSI 004 Key_chunk_size (expected a positive byte count)");
+
+      // ETSI GS QKD 004 defines Key_chunk_size in bytes. The existing
+      // QKDNetSim stream buffers and accounting use bits internally.
+      inQos.chunkSize = static_cast<uint32_t>(chunkSizeBytes * 8);
+    }
 
   }
-  NS_ASSERT(inQos.chunkSize >= 0);
 }
 
 std::vector<std::string>

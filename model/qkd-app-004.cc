@@ -1303,7 +1303,13 @@ QKDApp004::OpenConnect(std::string ksid, KeyStreamSession::Type sessionType)
   if(!m_master)
     msgBody["Key_stream_ID"] = ksid;
   else
-    msgBody["QoS"]["Key_chunk_size"] = keySize;
+  {
+    NS_ABORT_MSG_IF(keySize % 8 != 0,
+                    "ETSI 004 Key_chunk_size must contain a whole number of bytes");
+    // QKDApp004 stores key sizes in bits; ETSI GS QKD 004 carries this
+    // specific QoS field in bytes.
+    msgBody["QoS"]["Key_chunk_size"] = keySize / 8;
+  }
 
   //Create packet
   std::string reqUri {"http://"+IpToString(GetKmsIp())+"/api/v1/keys/"+GetPeerId()+"/open_connect"};

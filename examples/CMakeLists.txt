@@ -78,3 +78,11 @@ build_qkd_example(relay_pp_bob key-relay/pp_bob.cc)
 build_qkd_example(relay_kms_alice key-relay/kms_alice.cc)
 build_qkd_example(relay_kms_trusted key-relay/kms_trusted.cc)
 build_qkd_example(relay_kms_bob key-relay/kms_bob.cc)
+
+# --- Archived QKDNetSim synthetic-traffic consumers ---
+# These targets are kept runnable for reproducing the project's first
+# distributed prototypes, but they are not part of the active VPN regression.
+build_qkd_example(p2p_etsi014_alice ../old-examples/examples/point-to-point/etsi014_alice.cc)
+build_qkd_example(p2p_etsi014_bob ../old-examples/examples/point-to-point/etsi014_bob.cc)
+build_qkd_example(relay_etsi014_alice ../old-examples/examples/key-relay/etsi014_alice.cc)
+build_qkd_example(relay_etsi014_bob ../old-examples/examples/key-relay/etsi014_bob.cc)

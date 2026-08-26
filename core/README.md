@@ -145,7 +145,7 @@ starts the persistent QKD post-processing and KMS infrastructure;
 `vpn-topology.py` creates the two transient strongSwan DockerNodes, attaches
 `eth0` to their KMS networks and gives `eth1` to CORE. The former ns-3
 synthetic-traffic runner is preserved only under
-[`historical/toy-traffic/`](../historical/toy-traffic/).
+[`old-examples/`](../old-examples/).
 
 Start CORE and the selected VPN infrastructure:
 

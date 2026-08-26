@@ -30,6 +30,9 @@ OWN_APP_ID = os.environ["OWN_APP_ID"]
 PEER_APP_ID = os.environ["PEER_APP_ID"]
 CONTROL_PORT = int(os.getenv("CONTROL_PORT", "9090"))
 KEY_CHUNK_SIZE_BITS = int(os.getenv("KEY_CHUNK_SIZE_BITS", "256"))
+if KEY_CHUNK_SIZE_BITS <= 0 or KEY_CHUNK_SIZE_BITS % 8 != 0:
+    raise ValueError("KEY_CHUNK_SIZE_BITS must be a positive multiple of 8")
+KEY_CHUNK_SIZE_BYTES = KEY_CHUNK_SIZE_BITS // 8
 REKEY_INTERVAL_S = int(os.getenv("REKEY_INTERVAL_S", "60"))
 RETRY_INTERVAL_S = float(os.getenv("RETRY_INTERVAL_S", "2"))
 RETRY_LIMIT = int(os.getenv("RETRY_LIMIT", "60"))
@@ -233,7 +236,9 @@ def open_master_session() -> str:
         {
             "Source": OWN_APP_ID,
             "Destination": PEER_APP_ID,
-            "QoS": {"Key_chunk_size": KEY_CHUNK_SIZE_BITS},
+            # ETSI GS QKD 004 expresses Key_chunk_size in bytes. QKDNetSim
+            # keeps its buffer accounting in bits and converts at the API.
+            "QoS": {"Key_chunk_size": KEY_CHUNK_SIZE_BYTES},
         },
     )
     ksid = str(response.get("Key_stream_ID", ""))

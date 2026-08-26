@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import Any
 
 
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    # Docker/Compose output is UTF-8 and can contain characters outside the
+    # Windows console's default code page (e.g. cp1252); decoding/printing
+    # it with the platform default raises UnicodeDecodeError/EncodeError.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE_COMPOSE = ROOT / "docker" / "docker-compose.core.yml"
 COMPOSE_FILES = (
@@ -132,6 +139,8 @@ def run(
             command,
             cwd=ROOT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=timeout,
@@ -144,6 +153,8 @@ def run(
             command,
             cwd=ROOT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
