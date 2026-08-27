@@ -19,6 +19,9 @@ roles inside one conventional ns-3 simulation process.
   - [1. Point-to-point QKD-backed VPN](#scenario-point-to-point-vpn)
   - [2. Key-relay QKD-backed VPN](#scenario-key-relay-vpn)
 - [Testbed additions to QKDNetSim](#testbed-additions-to-qkdnetsim)
+  - [Contribution overview](#contribution-overview)
+  - [Upstream baseline and process separation](#upstream-baseline-and-process-separation)
+  - [Multi-hop key-delivery adaptations](#multi-hop-key-delivery-adaptations)
 - [External documentation](#external-documentation)
 
 ## Architecture and motivation
@@ -1004,6 +1007,144 @@ boundary this value is correctly represented as 32 bytes, as required by ETSI
 GS QKD 004; it is converted to 256 bits only for QKDNetSim's internal buffers.
 
 ## Testbed additions to QKDNetSim
+
+### Contribution overview
+
+The additions in this repository cover the complete path from the simulated
+QKD links to a native encrypted application, rather than one isolated change
+to the QKDNetSim model. Conventional QKDNetSim examples can place several
+logical components in one ns-3 process. The testbed instead executes every
+post-processing or KMS role in its own real-time ns-3 process and Docker
+network namespace, with the processes connected through `EmuFdNetDevice` and
+real Linux interfaces.
+
+The original synthetic `QKDApp004` and `QKDApp014` consumers have been
+replaced in the active scenarios by native strongSwan endpoints and a
+transactional Python consumer. This consumer obtains synchronized key material
+through the ETSI 004 or ETSI 014 abstractions exposed by QKDNetSim, verifies
+agreement between Alice and Bob, installs the result as an IKE pre-shared key
+and performs a coordinated cutover to each new key generation.
+
+For trusted-node operation, the testbed retains QKDNetSim's existing
+hop-by-hop OTP `Relay()` mechanism and adapts its initialization, routing and
+transport assumptions to independent KMS processes. On top of that inherited
+relay, it routes the ETSI 014 `skey_create` synchronization and its final
+acknowledgement through the trusted KMS. It also completes the previously
+unfinished ETSI 004 multi-hop association control so that `new_app`, `register`
+and `fill` can operate across the trusted-node path.
+
+The Alice--Bob application network has been separated from the QKD/KMS
+topology and placed under CORE. CORE creates the native Docker endpoints and
+supports either a direct classical connection or a path containing routers,
+with delay, bandwidth and packet loss configured independently from the
+optical QKD links.
+
+The testbed also adds a validated and configurable mapping from fiber distance
+and attenuation to QKDNetSim's average `KeyRate`. The same physical parameters
+are applied to both ends of each QKD link, while the classical-network
+conditions remain a separate experimental dimension.
+
+Operating across real processes exposed timing and transport assumptions that
+were largely hidden in an all-in-one simulation. The implementation therefore
+adds listener readiness, dependency-aware startup, TCP reconnection, stream
+framing, interface-offload normalization and safe handling of late external
+frames in the real-time simulator. End-to-end validation extends beyond
+simulator traces by checking endpoint key agreement, ETSI transaction
+progress, repeated PSK generations, IKE SA replacement and encrypted ESP
+traffic without a clear application payload.
+
+These are implementation and experimental-platform contributions. They do
+not constitute a new QKD protocol, a protocol-specific optical security proof,
+an independent ETSI implementation or a new key-relay algorithm. The precise
+standards and model limitations are stated in
+[Scope and standards terminology](#scope-and-standards-terminology) and
+[Model scope](#model-scope).
+
+### Upstream baseline and process separation
+
+The QKDNetSim model imported by this repository in its initial commit is
+traceable to upstream commit
+[`1cda34c`](https://github.com/QKDNetSim/qkdnetsim/commit/1cda34c).
+The original library already provided Q-buffers, local and relay S-buffers,
+ETSI 004 and ETSI 014 application-facing operations, routing information and
+the trusted-node `Relay()` procedure. Its SECOQC example used that procedure
+to supply an ETSI 014 application pair through several QKD links. The relay
+algorithm itself is therefore inherited from QKDNetSim, not introduced by
+this testbed.
+
+In the conventional examples, several logical nodes and applications coexist
+inside one ns-3 process. They consequently share one `NodeList`, one simulator
+clock and a globally consistent set of raw ns-3 node identifiers. Helpers can
+create the complete topology at once, register every route and construct the
+end-to-end relay buffers from objects that are all visible in the same
+process.
+
+This testbed preserves the logical roles but places each post-processing or
+KMS role in an independent ns-3 process and Docker network namespace. That
+conversion required more than replacing simulated links with
+`EmuFdNetDevice`:
+
+- the independent processes recreate a deterministic logical KMS numbering
+  scheme because relay messages contain raw ns-3 node IDs and each local
+  `NodeList` would otherwise start numbering independently;
+- every KMS installs its own `QKDLocationRegisterEntry` routes because no
+  process can inspect the complete remote topology;
+- Alice and Bob explicitly bootstrap their end-to-end `RELAY_SBUFFER`s,
+  replacing the automatic construction available when all KMS objects share
+  one simulation;
+- Docker subnets and `EmuFdNetDevice` interfaces carry the KMS and
+  post-processing TCP exchanges between real processes; and
+- readiness traces, health dependencies, persistent TCP reconnection,
+  stream framing and the real-time scheduler correction make those exchanges
+  tolerate real process and network timing. The individual defects are
+  documented with the historical prototypes above.
+
+The result does not replace QKDNetSim's relay algorithm. It adapts the
+algorithm's topology, identity, buffer-initialization and transport assumptions
+to a distributed execution environment.
+
+### Multi-hop key-delivery adaptations
+
+The trusted-node relay and the ETSI-facing interfaces belong to different
+layers. `Relay()` transports key material between endpoint KMSs; ETSI 004 or
+ETSI 014 subsequently determines how an SAE consumes that already shared
+material. QKDNetSim's internal KMS-to-KMS messages join those layers, but they
+are not operations standardized by ETSI.
+
+For **ETSI 014**, upstream QKDNetSim already implemented `enc_keys`,
+`dec_keys`, supply-key transformation through `skey_create`, and an ETSI 014
+consumer in its monolithic SECOQC relay example. The original `skey_create`
+path addressed the destination KMS directly and relied on the end-to-end
+connectivity and request state available in the single simulation. In the
+container topology, KMS Alice and KMS Bob are not direct KMS neighbors. The
+testbed therefore adapts `skey_create` so that its identifier and transformation
+metadata is forwarded through KMS Trusted and the destination response is
+proxied back over the reverse path. Only KMS Bob may produce the successful
+end-to-end acknowledgement. No second secret is transported: the inherited
+`Relay()` procedure has already placed identical candidate IDs and material in
+the endpoint `RELAY_SBUFFER`s, so Bob resolves the identifiers locally. The
+separate `/prepare` exchange belongs to the VPN coordination layer and verifies
+that Bob can retrieve the key before either endpoint activates the new PSK.
+
+For **ETSI 004**, upstream QKDNetSim implemented the direct session lifecycle
+and `STREAM_SBUFFER` delivery, but its multi-hop trusted-relay branches were
+left incomplete. In particular, the peer-KMS `new_app`, `register` and `fill`
+operations assumed a directly reachable destination and the source-side fill
+logic selected material from a direct-link buffer. This testbed completes that
+case with an internal routed control protocol. KMS Trusted proxies those three
+transactions without creating an SAE association of its own; Alice and Bob
+create matching sessions with one KSID, and `fill` transfers only key IDs from
+their already synchronized end-to-end `RELAY_SBUFFER`s into their corresponding
+`STREAM_SBUFFER`s. Requests carry origin, destination and previous-hop state so
+that responses are correlated end to end and overlapping fills are rejected.
+
+These changes leave the SAE-facing abstractions unchanged: the VPN consumer
+still uses the normal ETSI 014 key-by-ID flow or the normal ETSI 004
+`open_connect`/`get_key` session flow exposed by QKDNetSim. The routed
+`skey_create` handling and ETSI 004 relay-control endpoint are internal
+extensions required by the separated KMS topology, not new ETSI API methods.
+
+### Added and modified components
 
 - **[`examples/point-to-point/`](examples/point-to-point/)** — four independent
   role-named ns-3 programs (`pp_alice.cc`, `pp_bob.cc`, `kms_alice.cc`, and
