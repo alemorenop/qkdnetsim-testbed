@@ -63,7 +63,6 @@ build_qkd_example(examples_qkdnetsim_etsi_combined_input examples_qkdnetsim_etsi
 build_qkd_example(examples_qkdnetsim_secoqc examples_qkdnetsim_secoqc.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation_tap examples_qkdnetsim_etsi_014_emulation_tap.cc)
 build_qkd_example(examples_qkdnetsim_etsi_014_emulation examples_qkdnetsim_etsi_014_emulation.cc)
-
 # --- Point-to-point QKD/KMS infrastructure used by the VPN scenarios ---
 build_qkd_example(p2p_pp_alice point-to-point/pp_alice.cc)
 build_qkd_example(p2p_pp_bob point-to-point/pp_bob.cc)
@@ -86,3 +85,6 @@ build_qkd_example(p2p_etsi014_alice ../old-examples/examples/point-to-point/etsi
 build_qkd_example(p2p_etsi014_bob ../old-examples/examples/point-to-point/etsi014_bob.cc)
 build_qkd_example(relay_etsi014_alice ../old-examples/examples/key-relay/etsi014_alice.cc)
 build_qkd_example(relay_etsi014_bob ../old-examples/examples/key-relay/etsi014_bob.cc)
+
+# --- Official QKDNetSim QKD+PQC reference scenario ---
+build_qkd_example(examples_qkdnetsim_secoqc_qkd_and_pqc examples_qkdnetsim_secoqc_qkd_and_pqc.cc)

@@ -178,6 +178,12 @@ consumption; ETSI 004 also verifies `new_app`, `register` and `fill`.
 Every run emits a machine-readable `[CORE_RESULT]` JSON record and removes
 its endpoint containers and temporary capture.
 
+When the endpoint KMSs run with optional QKD+PQC mixing, add `--require-pqc`
+to the topology command. The run then also fails unless both endpoint KMS
+logs contain QKD and PQC contribution evidence. The trusted KMS remains a
+QKD-only relay; ML-KEM contributes once at the endpoint-facing ETSI delivery
+boundary.
+
 Run the complete supported matrix from the repository root:
 
 ```bash
@@ -187,7 +193,8 @@ python3 automation/run-regression.py --build
 It runs the four VPN variants three times by default, then executes the
 expected mismatched-key rejection once and writes JSON, CSV and per-run logs
 below `results/`. Use `--repetitions 1`, `--case NAME` or `--list` for
-shorter workflows.
+shorter workflows. `--pqc` enables forced hybrid delivery in Compose and
+automatically adds `--require-pqc` to every positive VPN case.
 
 The Docker Compose and in-container commands are identical on native Linux,
 WSL and Windows PowerShell. The host regression launcher uses

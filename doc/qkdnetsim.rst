@@ -285,7 +285,7 @@ QKDNetSim is tested on Ubuntu 22.04 and it is compatible with NS-3 version 3.46 
 
 ::
 
- git clone -b ns-3.46 https://gitlab.com/nsnam/ns-3-dev.git
+ git clone -b ns-3.48 https://gitlab.com/nsnam/ns-3-dev.git
 
 3. Download qkdnetsim in contrib directory
 

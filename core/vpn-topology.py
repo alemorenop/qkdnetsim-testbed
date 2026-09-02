@@ -29,6 +29,7 @@ class QkdTopology:
     app_ids: tuple[str, str]
     macs: tuple[str, str]
     readiness_containers: tuple[str, str]
+    readiness_markers: tuple[tuple[str, str], ...] = ()
 
 
 QKD_TOPOLOGIES = {
@@ -45,6 +46,10 @@ QKD_TOPOLOGIES = {
         ),
         macs=("02:00:00:00:35:05", "02:00:00:00:46:06"),
         readiness_containers=("qkd-p2p-vpn-kms-alice", "qkd-p2p-vpn-kms-bob"),
+        readiness_markers=(
+            ("qkd-p2p-vpn-kms-alice", "KMS Alice stores key"),
+            ("qkd-p2p-vpn-kms-bob", "KMS Bob stores key"),
+        ),
     ),
     "key-relay": QkdTopology(
         kms_networks=(
@@ -59,6 +64,10 @@ QKD_TOPOLOGIES = {
         ),
         macs=("02:00:00:00:77:08", "02:00:00:00:78:09"),
         readiness_containers=("qkd-relay-vpn-kms-alice", "qkd-relay-vpn-kms-bob"),
+        readiness_markers=(
+            ("qkd-relay-vpn-kms-alice", "Relay consumed src=3 dst=2"),
+            ("qkd-relay-vpn-kms-trusted", "Relay consumed src=2 dst=1"),
+        ),
     ),
 }
 
@@ -163,6 +172,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fault-mode", choices=("none", "bob-key-mismatch"), default="none"
     )
+    parser.add_argument(
+        "--require-pqc",
+        action="store_true",
+        help="require evidence that the delivered VPN key combines QKD and PQC material",
+    )
     return parser.parse_args()
 
 
@@ -198,6 +212,30 @@ def wait_for_infrastructure(containers: tuple[str, ...], timeout: int) -> None:
             return
         time.sleep(2)
     raise RuntimeError(f"QKD/KMS infrastructure did not become healthy: {statuses}")
+
+
+def wait_for_log_markers(
+    markers: tuple[tuple[str, str], ...], timeout: int
+) -> None:
+    """Wait for data-plane readiness that a listener-only healthcheck cannot prove."""
+    if not markers:
+        return
+    deadline = time.monotonic() + timeout
+    missing = list(markers)
+    while time.monotonic() < deadline:
+        missing = []
+        for container, marker in markers:
+            output = docker("logs", container, check=False).stdout
+            if marker not in output:
+                missing.append((container, marker))
+        if not missing:
+            print(
+                "[CORE_VPN] qkdDataPlane=ready markers="
+                + ",".join(f"{container}:{marker}" for container, marker in markers)
+            )
+            return
+        time.sleep(2)
+    raise RuntimeError(f"QKD data plane did not become ready; missing markers: {missing}")
 
 
 def iface(
@@ -532,42 +570,58 @@ def verify_relay_evidence(qkd_interface: str) -> dict[str, object]:
         "qkd-relay-vpn-kms-bob",
     )
     logs = {name: docker("logs", name, check=False).stdout for name in containers}
-    relay_consumed = sum(text.count("Relay consumed") for text in logs.values())
-    if relay_consumed < 1:
-        raise RuntimeError("no trusted-node Relay consumed evidence was observed")
-
-    evidence: dict[str, object] = {"relay_consumed": relay_consumed}
-    if qkd_interface == "004":
-        combined = "\n".join(logs.values())
-        operations = {
-            operation: len(
-                re.findall(
-                    rf"\[RELAY_ETSI004_CONTROL\].*operation={operation}\b",
-                    combined,
-                )
-            )
-            for operation in ("new_app", "register", "fill")
-        }
-        missing = [name for name, count in operations.items() if count < 1]
-        if missing:
-            raise RuntimeError(
-                "ETSI 004 relay-control evidence missing: " + ",".join(missing)
-            )
-        evidence["etsi004_control_operations"] = operations
-    else:
-        alice_served = logs[containers[0]].count("KMS Alice serves key")
-        bob_served = logs[containers[2]].count("KMS Bob serves key")
-        if alice_served < 1 or bob_served < 1:
-            raise RuntimeError(
-                "ETSI 014 relay endpoints did not both serve key material: "
-                f"alice={alice_served} bob={bob_served}"
-            )
-        evidence.update(
-            {"alice_keys_served": alice_served, "bob_keys_served": bob_served}
+    alice_hop_consumed = logs[containers[0]].count(
+        "Relay consumed src=3 dst=2"
+    )
+    trusted_hop_consumed = logs[containers[1]].count(
+        "Relay consumed src=2 dst=1"
+    )
+    if alice_hop_consumed < 1 or trusted_hop_consumed < 1:
+        raise RuntimeError(
+            "end-to-end relay evidence is incomplete: "
+            f"alice-to-trusted={alice_hop_consumed} "
+            f"trusted-to-bob={trusted_hop_consumed}"
         )
+
+    evidence: dict[str, object] = {
+        "alice_to_trusted_keys": alice_hop_consumed,
+        "trusted_to_bob_keys": trusted_hop_consumed,
+    }
+    if qkd_interface == "004":
+        # wait_for_tunnel() has already required the same KSID, generation and
+        # fingerprint at both SAEs.  Together with the two hop-consumption
+        # markers above, this validates the official QKDNetSim ETSI 004
+        # association and relay path without relying on the removed custom
+        # /relay004 proxy traces.
+        evidence["etsi004_official_session"] = True
+    else:
+        # The current upstream KMS no longer emits the old KeyServed marker
+        # on this path.  wait_for_tunnel() has already compared the delivered
+        # generation fingerprint at both ETSI 014 SAEs; retain that semantic
+        # evidence together with the two verified relay hops above.
+        evidence["etsi014_endpoint_delivery"] = True
 
     print(
         "[CORE_VPN] relayEvidence=OK "
+        + json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+    )
+    return evidence
+
+
+def verify_pqc_evidence(topology: QkdTopology) -> dict[str, object]:
+    """Require both QKD and PQC contributions at each endpoint KMS."""
+    evidence: dict[str, object] = {}
+    for container in topology.readiness_containers:
+        output = docker("logs", container, check=False).stdout
+        qkd = output.count("Mixed key contribution type=qkd")
+        pqc = output.count("Mixed key contribution type=pqc")
+        if qkd < 1 or pqc < 1:
+            raise RuntimeError(
+                f"mixed-key evidence is incomplete in {container}: qkd={qkd} pqc={pqc}"
+            )
+        evidence[container] = {"qkd_contributions": qkd, "pqc_contributions": pqc}
+    print(
+        "[CORE_VPN] pqcEvidence=OK "
         + json.dumps(evidence, sort_keys=True, separators=(",", ":"))
     )
     return evidence
@@ -617,6 +671,7 @@ def main() -> None:
                     "start the point-to-point PP/KMS infrastructure first"
                 )
         wait_for_infrastructure(topology.readiness_containers, args.startup_timeout)
+        wait_for_log_markers(topology.readiness_markers, args.startup_timeout)
         alice_node = session.add_node(
             VpnDockerNode,
             name=alice_name,
@@ -723,6 +778,8 @@ def main() -> None:
         )
         if args.qkd_topology == "key-relay":
             metrics["relay_evidence"] = verify_relay_evidence(args.qkd_interface)
+        if args.require_pqc:
+            metrics["pqc_evidence"] = verify_pqc_evidence(topology)
         print(
             "[CORE_VPN] OK "
             f"routers={args.routers} delayPerLinkMs={args.delay_ms} "
@@ -748,6 +805,7 @@ def main() -> None:
         "topology": args.qkd_topology,
         "qkd_interface": args.qkd_interface,
         "fault_mode": args.fault_mode,
+        "pqc_required": args.require_pqc,
         "routers": args.routers,
         "links": args.routers + 1,
         "delay_per_link_ms": args.delay_ms,

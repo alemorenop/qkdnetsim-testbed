@@ -47,8 +47,8 @@ SCENARIOS = {
             "bbbbbbbb-0000-0000-0000-000000000002",
         ),
         binaries=(
-            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_alice-default",
-            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_etsi014_bob-default",
+            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_etsi014_alice-default",
+            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_etsi014_bob-default",
         ),
         peer_flags=("peerBobIp", "peerAliceIp"),
         log_markers=("P2P_ETSI014_ALICE", "P2P_ETSI014_BOB"),
@@ -67,8 +67,8 @@ SCENARIOS = {
             "eeeeeeee-0000-0000-0000-000000000002",
         ),
         binaries=(
-            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_alice-default",
-            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_etsi014_bob-default",
+            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_etsi014_alice-default",
+            "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_etsi014_bob-default",
         ),
         peer_flags=("peerBobIp", "peerAliceIp"),
         log_markers=("RELAY_ETSI014_ALICE", "RELAY_ETSI014_BOB"),

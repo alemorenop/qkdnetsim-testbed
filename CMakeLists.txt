@@ -1,3 +1,48 @@
+# ============================================================
+# QKDNetSim CMake configuration
+# ============================================================
+
+# ---- Optional PQC support ----
+#
+# PQC is disabled by default because liboqs/liboqs-cpp
+# is not required for the standard QKDNetSim build.
+#
+# Enable with:
+#   ./ns3 configure --enable-mpi --enable-examples \
+#       -DQKDNETSIM_WITH_PQC=ON
+#
+option(QKDNETSIM_WITH_PQC
+  "Enable post-quantum cryptography support"
+  OFF
+)
+
+if(QKDNETSIM_WITH_PQC)
+  find_package(liboqs-cpp CONFIG REQUIRED)
+  find_path(OQS_INCLUDE_DIR
+    NAMES oqs/oqs.h
+    PATHS /usr/local/include /usr/include
+  )
+  find_path(OQS_CPP_INCLUDE_DIR
+    NAMES oqs_cpp.hpp
+    PATH_SUFFIXES liboqs-cpp
+    PATHS /usr/local/include /usr/include
+  )
+  find_library(OQS_LIBRARY
+    NAMES oqs
+    PATHS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu
+  )
+
+  if(NOT OQS_INCLUDE_DIR OR NOT OQS_CPP_INCLUDE_DIR OR NOT OQS_LIBRARY)
+    message(FATAL_ERROR
+      "QKDNETSIM_WITH_PQC requires liboqs and liboqs-cpp. "
+      "Install both projects or configure with -DQKDNETSIM_WITH_PQC=OFF.")
+  endif()
+
+  include_directories(${OQS_INCLUDE_DIR} ${OQS_CPP_INCLUDE_DIR})
+  set(OQS_CPP_TARGET liboqs-cpp)
+endif()
+
+
 # ---- Crypto++ ----
 set(NS3_WITH_CRYPTOPP "" CACHE PATH "Build with CRYPTOPP support")
 
@@ -15,6 +60,7 @@ endif()
 
 include_directories(${CRYPTOPP_INCLUDE_DIRS})
 
+
 # ---- UUID ----
 find_external_library(
   DEPENDENCY_NAME uuid
@@ -27,12 +73,14 @@ if(uuid_FOUND)
   include_directories(${uuid_INCLUDE_DIRS})
 endif()
 
+
 # ---- qkdnetsim internal includes ----
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/model
   ${CMAKE_CURRENT_SOURCE_DIR}/helper
   ${CMAKE_CURRENT_SOURCE_DIR}/utils
 )
+
 
 # ---- qkdnetsim module ----
 build_lib(
@@ -59,7 +107,7 @@ build_lib(
     model/qkd-app-014.cc
     model/qkd-app-header.cc
     helper/qkd-app-helper.cc
-    helper/qkd-link-helper.cc 
+    helper/qkd-link-helper.cc
     utils/uuid.cc
 
   HEADER_FILES
@@ -83,7 +131,7 @@ build_lib(
     model/qkd-app-014.h
     model/qkd-app-header.h
     helper/qkd-app-helper.h
-    helper/qkd-link-helper.h 
+    helper/qkd-link-helper.h
     utils/uuid.h
     utils/http.h
     utils/json.h
@@ -96,4 +144,32 @@ build_lib(
     ${libstats}
     ${CRYPTOPP_LIBRARIES}
     ${uuid_LIBRARIES}
+    ${OQS_LIBRARY}
+    ${OQS_CPP_TARGET}
 )
+
+
+# ---- Optional PQC compile definition ----
+#
+# The source code uses:
+#
+#   #ifdef QKDNETSIM_WITH_PQC
+#
+# around all liboqs/liboqs-cpp dependent code.
+#
+# When OFF (default), no PQC code is compiled and
+# liboqs/liboqs-cpp is not required.
+#
+if(QKDNETSIM_WITH_PQC)
+  message(STATUS "QKDNetSim: PQC support ENABLED")
+
+  target_compile_definitions(
+    qkdnetsim
+    PRIVATE
+      QKDNETSIM_WITH_PQC
+  )
+
+else()
+  message(STATUS "QKDNetSim: PQC support DISABLED")
+
+endif()

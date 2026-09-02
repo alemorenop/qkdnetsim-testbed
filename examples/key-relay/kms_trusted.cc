@@ -60,15 +60,11 @@ AddEmuInterface(Ptr<Node> node, std::string devName, std::string ip, std::string
     ipv4->SetUp(ifIndex);
 }
 
-// Structural bug (not a timing one): QKDKeyManagerSystemApplication::ProcessQKD014()
-// only auto-replenishes a link's LOCAL_SBUFFER on receiving STORE_KEY if
-// GetNode()->GetId() > dstNodeId ("isMaster"). With our ID scheme
-// (dummy=0, Bob=1, Relay=2, Alice=3) the Relay is ALWAYS "slave" toward Alice
-// (2 < 3), so its local S-Buffer toward Alice never auto-replenishes and the
-// first relay hop (Alice->Relay) always fails with 400 Bad Request
-// ("key_ID not found in 'dec' buffer"), no matter how long we wait. This is
-// compensated for with this manual periodic check (same pattern as
-// PeriodicRelayCheck in kms_alice.cc/kms_bob.cc).
+// Each KMS runs in an independent realtime simulator.  Explicitly checking
+// both local link buffers avoids relying on the monolithic example's shared
+// event ordering to trigger the first fill.  Relay()/ProcessRelayRequest()
+// remain the official QKDNetSim implementation; this helper only drives local
+// buffer maintenance in the distributed deployment.
 static void
 PeriodicLocalBufferCheck(Ptr<QKDKeyManagerSystemApplication> kms, uint32_t peerId, Time period, Time stopTime)
 {
@@ -89,10 +85,12 @@ main(int argc, char* argv[])
     std::string devPPB   = "eth1";
     std::string devKmsA  = "eth2";
     std::string devKmsB  = "eth3";
+    std::string devControl = "eth4";
     std::string myIpPPA  = "192.168.113.6";
     std::string myIpPPB  = "192.168.115.6";
     std::string myIpKmsA = "192.168.117.6";
     std::string myIpKmsB = "192.168.118.6";
+    std::string myIpControl = "192.168.121.6";
 
     // ---- Peers (real IPs of the other VMs) ----
     std::string peerKmsAliceIp = "192.168.117.5"; // RELAY_KMS_ALICE
@@ -103,8 +101,10 @@ main(int argc, char* argv[])
     std::string ppRelayBId = "dddddddd-0000-0000-0000-000000000001"; // RELAY_PP_B's module
 
     // ---- Q-Buffer configuration ----
-    uint32_t qbMin = 1024;
-    uint32_t qbThr = 51200;
+    // See the full note in kms_alice.cc: raised so the relay buffer leaves
+    // QSTATUS_READY often enough to exercise Fill()'s PQC-mixing branch.
+    uint32_t qbMin = 16384;
+    uint32_t qbThr = 50000000;
     uint32_t qbMax = 500000000;
     // MUST match qbDefaultKeyBits in kms_alice.cc and kms_bob.cc
     // (2048 = ppKeySize*8 on the post-processing side): the relay protocol
@@ -122,10 +122,12 @@ main(int argc, char* argv[])
     cmd.AddValue("devPPB", "Real NIC toward RELAY_PP_B", devPPB);
     cmd.AddValue("devKmsA", "Real NIC toward RELAY_KMS_ALICE", devKmsA);
     cmd.AddValue("devKmsB", "Real NIC toward RELAY_KMS_BOB", devKmsB);
+    cmd.AddValue("devControl", "Shared classical KMS control NIC", devControl);
     cmd.AddValue("myIpPPA", "Local IP on the link toward RELAY_PP_A", myIpPPA);
     cmd.AddValue("myIpPPB", "Local IP on the link toward RELAY_PP_B", myIpPPB);
     cmd.AddValue("myIpKmsA", "Local IP on the link toward RELAY_KMS_ALICE", myIpKmsA);
     cmd.AddValue("myIpKmsB", "Local IP on the link toward RELAY_KMS_BOB", myIpKmsB);
+    cmd.AddValue("myIpControl", "Local IP on the shared KMS control network", myIpControl);
     cmd.AddValue("peerKmsAliceIp", "Real IP of RELAY_KMS_ALICE (KMS Alice)", peerKmsAliceIp);
     cmd.AddValue("peerKmsBobIp", "Real IP of RELAY_KMS_BOB (KMS Bob)", peerKmsBobIp);
     cmd.AddValue("ppRelayAId", "UUID of RELAY_PP_A's post-processing module", ppRelayAId);
@@ -160,6 +162,7 @@ main(int argc, char* argv[])
     AddEmuInterface(node, devPPB, myIpPPB, "00:00:00:00:16:02");
     AddEmuInterface(node, devKmsA, myIpKmsA, "00:00:00:00:16:03");
     AddEmuInterface(node, devKmsB, myIpKmsB, "00:00:00:00:16:04");
+    AddEmuInterface(node, devControl, myIpControl, "00:00:00:00:16:05");
 
     QKDLinkHelper QLinkHelper;
     QKDAppHelper QAHelper;
@@ -205,11 +208,7 @@ main(int argc, char* argv[])
         bobId, Ipv4Address(peerKmsBobIp.c_str()), "kms-bob"
     ));
 
-    // Manual periodic check of both LOCAL S-Buffers (see the full comment
-    // next to PeriodicLocalBufferCheck): the Alice side NEVER auto-replenishes
-    // (the Relay is "slave" there, 2 < 3) and would stay empty forever
-    // without this. Also applied to the Bob side for symmetry/safety, even
-    // though that side does auto-replenish via "isMaster" on STORE_KEY.
+    // Periodically maintain both LOCAL S-Buffers; see the helper comment.
     Simulator::Schedule(Seconds(1.0), &PeriodicLocalBufferCheck, kms, aliceId, Seconds(1.0), Seconds(simulationTime));
     Simulator::Schedule(Seconds(1.0), &PeriodicLocalBufferCheck, kms, bobId, Seconds(1.0), Seconds(simulationTime));
 
@@ -226,10 +225,6 @@ main(int argc, char* argv[])
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/WasteRelay",
                      MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_TRUSTED] Relay WASTED src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
-                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/Etsi004RelayControl",
-                     MakeCallback(+[](std::string ctx, const std::string& phase, const std::string& operation, const std::string& requestId, const uint32_t& code) {
-                         std::cout << "[RELAY_ETSI004_CONTROL] kms=trusted phase=" << phase << " operation=" << operation << " requestId=" << requestId << " code=" << code << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {

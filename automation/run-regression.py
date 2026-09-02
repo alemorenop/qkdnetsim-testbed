@@ -104,6 +104,20 @@ def parse_args() -> argparse.Namespace:
         help="Rebuild QKD, VPN and CORE images before the campaign",
     )
     parser.add_argument(
+        "--pqc",
+        action="store_true",
+        help=(
+            "Enable forced QKD+PQC delivery in the endpoint KMSs and require "
+            "QKD/PQC contribution evidence from the VPN runner"
+        ),
+    )
+    parser.add_argument(
+        "--pqc-security-exponent",
+        type=positive_int,
+        default=10,
+        help="QKDNetSim experimental mixing-policy exponent (default: 10)",
+    )
+    parser.add_argument(
         "--skip-negative-tests",
         action="store_true",
         help="Skip the expected mismatched-key rejection case",
@@ -263,6 +277,7 @@ def matrix(args: argparse.Namespace) -> list[Case]:
         "--min-generations", str(args.min_generations),
         "--rekey-interval", str(args.rekey_interval),
         "--max-rekey-loss-percent", str(args.max_rekey_loss_percent),
+        *(("--require-pqc",) if args.pqc else ()),
     )
     return [
         Case(
@@ -442,6 +457,15 @@ def write_summary(
 
 def main() -> int:
     args = parse_args()
+    if args.pqc:
+        # Compose expands these values when each case recreates its KMS
+        # containers.  Forced mixing turns the optional/adaptive upstream
+        # policy into a deterministic functional test.
+        os.environ["QKD_PQC_ENABLED"] = "1"
+        os.environ["QKD_PQC_FORCE_MIXING"] = "1"
+        os.environ["QKD_PQC_SECURITY_EXPONENT"] = str(
+            args.pqc_security_exponent
+        )
     cases = matrix(args)
     if not args.skip_negative_tests:
         cases.append(negative_case(args))

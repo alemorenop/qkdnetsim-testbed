@@ -174,6 +174,15 @@ main(int argc, char* argv[])
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
                          std::cout << "[P2P_KMS_ALICE] KMS Alice serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServedMixed",
+                     MakeCallback(+[](std::string ctx, const std::string& ksid,
+                                      const std::string& srcSaeId, const std::string& dstSaeId,
+                                      const uint32_t& srcNodeId, const uint32_t& dstNodeId,
+                                      const std::string& keyId, const uint32_t& bits,
+                                      const std::string& type) {
+                         std::cout << "[P2P_KMS_ALICE] Mixed key contribution type=" << type
+                                   << " bits=" << bits << " keyId=" << keyId << std::endl;
+                     }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {
                          std::cout << "[P2P_KMS_ALICE] KMS Alice listening" << std::endl;

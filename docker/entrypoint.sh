@@ -30,6 +30,7 @@ declare -A ROLE_TO_FLAG=(
     [PPB]=devPPB
     [KMSA]=devKmsA
     [KMSB]=devKmsB
+    [CONTROL]=devControl
 )
 
 extra_args=()

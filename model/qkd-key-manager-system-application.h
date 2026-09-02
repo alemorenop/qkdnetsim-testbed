@@ -1,10 +1,12 @@
 /*
- * Copyright(c) 2025 University of Sarajevo, Faculty of Electrical Engineering, 
- * Department of Telecommunications, Zmaja od Bosne bb, 71000 Sarajevo, Bosnia and Herzegovina
- * www.tk.etf.unsa.ba
+ * Copyright(c) 2020 DOTFEESA www.tk.etf.unsa.ba
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ *
+ *
  *
  * Author:  Emir Dervisevic <emir.dervisevic@etf.unsa.ba>
- *          Miralem Mehic <miralem.mehic@etf.unsa.ba>
+ *          Miralem Mehic <miralem.mehic@ieee.org>
  */
 #ifndef QKD_KEY_MANAGER_SYSTEM_APPLICATION_H
 #define QKD_KEY_MANAGER_SYSTEM_APPLICATION_H
@@ -22,6 +24,8 @@
 #include "ns3/s-buffer.h"
 #include "ns3/qkd-control.h"
 #include "ns3/qkd-encryptor.h"
+#include "ns3/ipv4.h"
+#include "ns3/ipv4-interface-address.h"
 //#include "ns3/qcen-control.h"
 #include "ns3/qkd-location-register.h"
 #include "ns3/qkd-location-register-entry.h"
@@ -32,14 +36,22 @@
 #include <unordered_map>
 #include "ns3/uuid.h"
 
+#ifdef QKDNETSIM_WITH_PQC
+#include <liboqs-cpp/oqs_cpp.hpp>
+#endif
+
+#include <cmath>
 #include <iostream>
-#include <list>
+#include <iomanip>
 #include <sstream>
 #include <unistd.h>
 #include <sstream>
 #include <string>
 #include <regex>
-#include <set>
+#include <cmath>      // std::pow, std::ceil, std::floor, std::log, std::isfinite
+#include <algorithm>  // std::min, std::max
+#include <cstdint>
+#include <limits>
 
 
 namespace ns3 {
@@ -51,20 +63,13 @@ class QKDControl;
 class QCenController;
 
 /**
- * @ingroup applications 
- * @defgroup qkd QKDKeyManagerSystemApplication
- * 
- * QKDKeyManagerSystemApplication is a class used to
+ * @ingroup applications
+ * @class QKD QKDKeyManagerSystemApplication
+ * @brief QKD QKDKeyManagerSystemApplication is a class used to
  * serve requests for cryptographic keys from user's applications.
- */
-
-/**
- * @ingroup qkd
  *
- * @brief QKDNetSim implements Key Management System(KMS) as an
- * application that listens on TCP port 80. 
- * 
- * The KMS can be installed
+ * @note QKDNetSim implements Key Management System(KMS) as an
+ * application that listens on TCP port 80. The KMS can be installed
  * on any node but the QKD post-processing application expects the
  * existence of a local KMS application on the same nodes where the
  * post-processing application is implemented. The local KMS is
@@ -79,6 +84,12 @@ class QCenController;
  * for mapping of request-response values. More details available at
  * https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html
  */
+
+
+static inline uint32_t CeilToMultiple(uint32_t v, uint32_t m)  { return (v + m - 1u) / m * m; }
+static inline uint32_t FloorToMultiple(uint32_t v, uint32_t m) { return v / m * m; }
+
+
 class QKDKeyManagerSystemApplication : public Application
 {
 public:
@@ -102,7 +113,8 @@ public:
     TRANSFORM_KEYS = 10, //Transform(merge, split) QKD keys
     ETSI_QKD_004_KMS_CLOSE = 11,
     RELAY_KEYS = 12,
-    ETSI_QKD_004_RELAY_CONTROL = 13
+    PQC_PUBLIC_KEY = 13,
+    PQC_CIPHER = 14
   };
 
   /**
@@ -205,6 +217,8 @@ public:
     return m_local;
   }
 
+  std::vector<Ipv4Address> GetAddresses();
+
   /**
    * @brief Get address as string
    * @param address address
@@ -285,44 +299,24 @@ public:
    * @param moduleId local QKD module ID
    */
   void RegisterQKDModule(uint32_t dstId, std::string moduleId);
- 
 
+  /**
+   * Create the end-to-end RELAY S-buffer required by a distributed KMS
+   * process before an application request can trigger the normal relay path.
+   */
+  void BootstrapRelaySBuffer(uint32_t peerNodeId);
+
+  /** Force the normal local/relay S-buffer replenishment check. */
+  void CheckBufferReplenishment(uint32_t peerNodeId)
+  {
+    SBufferClientCheck(peerNodeId);
+  }
+ 
   /**
    * @brief Get all QBuffers created on the KMS. Function used for plotting QKD Graphs
    */
   std::vector<Ptr<QBuffer> >  GetQBuffersVector(){
     return m_qbuffersVector;
-  }
-
-  /**
-   * @brief Pre-creates (bootstraps) the RELAY-type S-Buffer toward a KM only
-   * reachable via relay (not a direct neighbor).
-   *
-   * In the normal flow, the KMS itself creates this buffer on demand while
-   * processing an incoming GET_STATUS request or the first incoming relay
-   * message. Since QKDApp014 never sends GET_STATUS, in a pure relay
-   * scenario (without that implicit bootstrap) SBufferClientCheck() would
-   * fail to find the entry. Calling this function during setup avoids that
-   * problem. It is idempotent: if the buffer already exists, it does
-   * nothing.
-   *
-   * @param peerNodeId ID of the remote KM node reachable via relay
-   */
-  void BootstrapRelaySBuffer(uint32_t peerNodeId);
-
-  /**
-   * @brief Forces the check/replenishment of an S-Buffer (local or relay).
-   *
-   * Public wrapper around SBufferClientCheck() (private). For a LOCAL
-   * S-Buffer this is only triggered automatically when new material arrives
-   * from the direct QKD link; for a RELAY S-Buffer there is no automatic
-   * trigger in the current flow (see BootstrapRelaySBuffer), so it must be
-   * invoked externally, e.g. with a periodic Simulator::Schedule.
-   *
-   * @param peerNodeId ID of the remote KM node (direct neighbor or reachable via relay)
-   */
-  void CheckBufferReplenishment(uint32_t peerNodeId){
-    SBufferClientCheck(peerNodeId);
   }
 
 protected:
@@ -468,7 +462,10 @@ private:
    * Data structure of key managment respond
    * is described in ETSI014 document.
    */
-  void ProcessRequest(HTTPMessage header, Ptr<Packet> packet, Ptr<Socket> socket);
+  void ProcessRequest(HTTPMessage header, Ptr<Packet> packet, Ptr<Socket> socket); 
+  void ProcessEtsi014GetStatus(std::string remoteAppId, HTTPMessage headerIn, Ptr<Socket> socket);
+  void ProcessEtsi014GetKey(std::string remoteAppId, HTTPMessage headerIn, Ptr<Socket> socket);
+  void ProcessEtsi014GetKeyWithIds(std::string remoteAppId, HTTPMessage headerIn, Ptr<Socket> socket);
 
   /**
    * @brief QKD key manager system application process the request
@@ -490,24 +487,11 @@ private:
   void ProcessPPRequest(HTTPMessage header, Ptr<Packet> packet, Ptr<Socket> socket);
 
   /**
-   * @brief Start key relay function
+   * @brief Relay moves keys from local enc Sbuffer to Relay SBuffer
    * @param dstKmNodeId destination KM node
    * @param amount amount of key material
    */
   void Relay(uint32_t dstKmNodeId, uint32_t amount);
-
-  /**
-   * @brief Mitigation: the KMS-KMS connection used by Relay()/ProcessRelayRequest
-   * sometimes silently stops transmitting (same class of failure confirmed
-   * via strace on app-KMS connections: the underlying ns-3 TCP socket stops
-   * writing without firing any error callback), leaving
-   * relayBuffer->IsRelayActive()==true forever and blocking every future
-   * relay attempt toward that destination. If the response doesn't arrive
-   * within a deadline after starting a relay, the state is force-reset so
-   * the next periodic check can retry.
-   * @param dstKmNodeId destination whose relay may have gotten stuck
-   */
-  void RelayTimeoutCheck(uint32_t dstKmNodeId, uint32_t generation);
 
   /**
    * @brief Process key relay request
@@ -527,7 +511,7 @@ private:
    * @param header received request
    * @param socket receiving socket
    */
-  void ProcessOpenConnectRequest(HTTPMessage header, Ptr<Socket> socket);
+  void ProcessEtsi004OpenConnect(HTTPMessage header, Ptr<Socket> socket);
 
   /*
    * @brief Process GET_KEY request - ETSI QKD GS 004
@@ -535,7 +519,7 @@ private:
    * @param header received request
    * @param socket receiving socket
    */
-  void ProcessGetKey004Request(std::string ksid, HTTPMessage header, Ptr<Socket> socket);
+  void ProcessEtsi004GetKey(std::string ksid, HTTPMessage header, Ptr<Socket> socket);
 
   /*
    * @brief Process CLOSE request - ETSI QKD GS 004
@@ -543,7 +527,15 @@ private:
    * @param header received request
    * @param socket receiving socket
    */
-  void ProcessCloseRequest(std::string ksid, HTTPMessage header, Ptr<Socket> socket);
+  void ProcessEtsi004Close(std::string ksid, HTTPMessage header, Ptr<Socket> socket);
+
+
+  /*
+   * @brief Store generated key
+   * @param header received request
+   * @param socket receiving socket
+   */
+  void ProcessStoreKey(HTTPMessage headerIn, Ptr<Socket> socket);
 
   /*
    * @brief Process NEW_APP request
@@ -612,11 +604,12 @@ private:
    * @param number number of requested keys
    * @param size requested keys size
    * @param buffer associated buffer
+   * @param number_of_allocated qkd_bits returned by reference
    * @return json error structure
    *
    * Funtion returns an empty json if the request is valid and can be fullfiled.
    */
-  nlohmann::json Check014GetKeyRequest(uint32_t number, uint32_t size, Ptr<SBuffer> buffer);
+  nlohmann::json ValidateEtsi014GetKeyRequest(uint32_t number, uint32_t size, Ptr<SBuffer> buffer, uint32_t& qkdBits);
 
   /**
    * @brief Create key container data structure described in ETSI014 document.
@@ -651,7 +644,9 @@ private:
 
   struct KMSNode{
     Ipv4Address address;
-    Ptr<Socket> socket;  
+    Ptr<Socket> socket; 
+    std::string PQCPublicKey;
+    uint32_t pqcStarted;
   };
 
   struct HttpQuery
@@ -664,8 +659,6 @@ private:
     Ipv4Address prev_hop_address;
     std::string request_uri;
     uint32_t next_hop_id;
-    uint32_t source_node_id;
-    std::string operation;
 
     //Specific to new FILL method
     uint32_t peerNodeId;
@@ -698,56 +691,33 @@ private:
     uint32_t dstNodeId; //Destination KM node ID
     Ipv4Address dstKmsAddr; //Address of the destination KMS. Important!
     QoS qos; //Quality of service
+    bool isMaster; //True at the KMS whose SAE created the KSID
     bool peerRegistered; //KMS must know the state of connection for association on peer KMS!
     Ptr<SBuffer> stre_buffer; //A pointer on a SBUFFER
   };
 
-  /**
-   * @brief Send an ETSI 004 control operation over the KMS route.
-   *
-   * Direct ETSI 004 associations use the original KMS-to-KMS methods. A
-   * multi-hop association cannot address the final KMS directly, therefore
-   * NEW_APP, REGISTER and FILL are wrapped in a relay-control envelope. Each
-   * intermediate KMS stores the previous hop and returns the final response
-   * over the reverse path.
-   */
-  void SendEtsi004RelayControl(
-    std::string operation,
-    std::string ksid,
-    nlohmann::json payload,
-    uint32_t destinationNodeId,
-    HttpQuery query);
 
-  /// Process or forward an ETSI 004 multi-hop control request.
-  void ProcessEtsi004RelayControlRequest(HTTPMessage header);
-
-  /// Return or forward an ETSI 004 multi-hop control response.
-  void ProcessEtsi004RelayControlResponse(HTTPMessage header);
-
-  /// Fill an ETSI 004 stream from an end-to-end RELAY_SBUFFER.
-  void FillEtsi004Relay(std::string ksid, uint32_t amount);
-
-  /// Commit or roll back the local half of a relayed ETSI 004 FILL.
-  void CompleteEtsi004RelayFill(HttpQuery query, HTTPMessage header);
-  
+  struct PqcPair {
+    std::string keyId;
+    std::string secret;       // binary
+    std::string cipher_b64;   // base64 for transport
+  };
   /**
    * @brief Help function to create relay SBuffers
    * @param srcNodeId source KM node ID
    * @param dstNodeId peer  KM node ID
    * @param descrition buffer description used for QKDGraph
+   * @param bufferType SBuffer buffer type
    *
    * It is called to create new SBuffers for relay on demand.
    */
-  Ptr<SBuffer> CreateRelaySBuffer(uint32_t srcNodeId, uint32_t dstNodeId, std::string description);
+  Ptr<SBuffer> CreateSBuffer(uint32_t srcNodeId, uint32_t dstNodeId, std::string description, std::string type);
 
   std::map<std::string, Association004> m_associations004; //Associations map
-  std::set<std::string> m_etsi004FillPending; //!< Multi-hop streams with an in-flight FILL transaction
 
   Ptr<Socket> m_sinkSocket;       // Associated socket
 
-  std::list<Ptr<Socket>> m_appAcceptedSockets; //!< Active APP-KMS accepted sockets
-
-  Ptr<Socket> m_sinkSocketKMS;       // Associated socket KMS
+  Ptr<Socket> m_sinkSocketKMS;       // Associated socket
 
   Ipv4Address m_local;        //!< Local address to bind to
 
@@ -772,10 +742,22 @@ private:
   std::map<uint32_t, Ptr<SBuffer> > m_keys_enc; //!< LOCAL S-buffers for the outbound point-to-point usage
 
   std::map<uint32_t, Ptr<SBuffer> > m_keys_dec; //!< LOCAL S-buffers for the inbound point-to-poit usage
+ 
+  std::map<uint32_t, Ptr<SBuffer> > m_keys_pqc; //!< PQC S-buffers for the point-to-poit usage
 
-  std::map<uint32_t, std::vector<std::string> > m_pendingRelayKeyIds; //!< IDs marked INIT by the last Relay() toward each destination, so they can be invalidated if RelayTimeoutCheck() fires (see comment in RelayTimeoutCheck)
-
-  std::map<uint32_t, uint32_t> m_relayGeneration; //!< Counter per destination: incremented on each real Relay(). Lets a RelayTimeoutCheck() detect that it is stale (the real response already arrived and started a new attempt before this one fired) and do nothing.
+  // Deliberately separate from m_keys_pqc: m_keys_pqc holds PQC secrets THIS
+  // KMS generated itself (offered to the peer via GeneratePQCKeys() and safe
+  // to reference again toward that same peer -- the peer has a matching
+  // copy). m_keys_pqc_recv holds secrets the PEER generated and sent here
+  // (decapsulated in ProcessPQCCipherRequest()), which this KMS must only
+  // ever resolve/consume on the peer's reference -- never re-offer. Both
+  // sides of a pair hold a copy of every established PQC secret regardless
+  // of who generated it, so without this split, Fill()'s candidate
+  // selection could pick an ID the peer generated (and might independently
+  // reference/consume from its own copy around the same time), racing two
+  // KMS processes over one shared secret and crashing with "Missing PQC
+  // key" when the loser's copy is already gone.
+  std::map<uint32_t, Ptr<SBuffer> > m_keys_pqc_recv; //!< PQC S-buffers received from the peer (consume-only, never offered back)
 
   std::map<std::string, uint32_t> m_qkdmodules;    //!< QKD modules and KM node ID they connect to
 
@@ -790,21 +772,17 @@ private:
   /// Traced Callback: received packets, source address.
   TracedCallback<Ptr<const Packet>, const Address &> m_rxTrace;
   TracedCallback<Ptr<const Packet> > m_txTrace;
-  TracedCallback<Ptr<const Packet>, const Address &> m_rxTraceKMSs;
+  TracedCallback<Ptr<const Packet>, const Ipv4Address &, const uint32_t&> m_rxTraceKMSs;
   TracedCallback<Ptr<const Packet>, const uint32_t& > m_txTraceKMSs;
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&> m_ksidGenerated;
 
   TracedCallback<const std::string&, const std::string&, const uint32_t&> m_qkdKeyGeneratedTrace;   //Generated key material!
   TracedCallback<const std::string&, const std::string&, const uint32_t&> m_keyServedTrace; //Total amount of key material served by KMS
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&, const uint32_t&, const std::string&, const uint32_t&, const std::string&> m_keyServedTraceMixed; //Total amount of key material served by KMS
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
-  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&>
-    m_etsi004RelayControlTrace; //!< Phase, operation, request ID and HTTP/status code for routed ETSI 004 control
-  // Fires once, when m_sinkSocket and m_sinkSocketKMS are already in
-  // Listen(). Meant for an external healthcheck (Docker depends_on) to know
-  // when this KMS can already accept incoming connections, instead of
-  // relying on timing alone.
-  TracedCallback<const uint32_t&> m_listenReadyTrace;
+  TracedCallback<const uint32_t&> m_listenReadyTrace; //!< APP/KMS and KMS/KMS listeners are ready.
 
   uint32_t m_maxKeyPerRequest; //Maximal number of keys per request QKDApp can ask for
   uint32_t m_minKeySize; //Minimal size of key QKDApp can request from KMS
@@ -815,12 +793,11 @@ private:
   uint32_t m_minSBufferSizeInBits; //Minimal size of LOCAL SBuffer in bits
   uint32_t m_thrSBufferSizeInBits; //Threshold value of LOCAL SBuffer in bits
 
-  std::unordered_map<Address, Ptr<Packet>, AddressHash> m_buffer; //!< Buffer for received packets(TCP segmentation)
-  std::unordered_map<Address, Ptr<Packet>, AddressHash> m_bufferKMS; //!< Buffer for received packets(TCP segmentation)
+  std::map<Ptr<Socket>, Ptr<Packet>> m_buffer; //!< HTTP stream buffer per accepted TCP connection
+  std::map<Ptr<Socket>, Ptr<Packet>> m_bufferKMS; //!< KMS HTTP stream buffer per TCP connection
 
   std::map<Ipv4Address, KMSNode > m_socketPairsKMS;
-
-
+  
   Ptr<Node> m_node; //<! node on which KMS is installed
   std::map<Ptr<Socket>, Ptr<Packet> > m_packetQueues; //!< Buffering unsend messages due to connection problems
   std::map<Ptr<Socket>, Ptr<Packet> > m_packetQueuesKMS; //!< Buffering unsend messages due to connection problems
@@ -899,9 +876,6 @@ private:
    */
   void RemoveProxyQuery(std::string reqId);
 
-
-  Ipv4Address GetDestinationKmsAddress(Ptr<Socket> socket);
-
   /**
    * @brief Prepare send socket to communicate with peer KMS Application
    * @param uint32_t destination SAE ID
@@ -942,7 +916,7 @@ private:
   std::vector<std::string> ReadUri(std::string s);
 
   /**
-   * @brief Create a new assocation
+   * @brief Create a new etsi 004 assocation
    * @param srcSaeId source secure application entity
    * @param dstSaeId destination secure application entity
    * @param inQos Quality of Service
@@ -953,7 +927,7 @@ private:
    * new ksid is generated for this new association and return from
    * the function.
    */
-  std::string CreateKeyStreamSession(
+  std::string CreateEtsi004KeyStreamSession(
       std::string srcSaeId, std::string dstSaeId,
       QKDKeyManagerSystemApplication::QoS inQos,
       std::string ksid );
@@ -1008,26 +982,70 @@ private:
   void StartSBufferClients(uint32_t dstKmNodeId);
 
   /**
-   * @brief Fill s-buffer
+   * @brief Fill s-buffer. In case of P2p links: take keys from QBuffer and move them to local enc/dec Sbuffers
+   * In case of long relayed links: take keys from enc local Sbuffers and move them to relay SBuffers identified with ksid
+   * Also, it can form mixed QKD+PQC keys
    * @param dstKmNodeId remote KM node ID
    * @param direction s-buffer type
    * @param amount key amount
    */
-  void Fill(uint32_t dstKmNodeId, std::string direction,  uint32_t amount);
+  void Fill(uint32_t dstKmNodeId, std::string direction,  uint32_t amount, Ptr<QBuffer> qbuffer);
 
   /**
-   * @brief check s-buffer levels
+   * @brief Check s-buffer levels and start Fill procedure if needed
    * @param dstKmNodeId remote KM node ID
    */
   void SBufferClientCheck(uint32_t dstKmNodeId);
 
   Ptr<SBuffer> GetSBuffer(uint32_t dstKmNodeId, std::string type);
 
-  Ipv4Address GetPeerKmAddress(uint32_t dstKmNodeId);
+  Ipv4Address GetPeerKmAddress(uint32_t dstKmNodeId); 
+
+  uint32_t GetPeerKmNodeId(Ipv4Address dstKmAddress);
+
+
+#ifdef QKDNETSIM_WITH_PQC
+  std::string m_PQCKem;
+  std::string m_PQCPublicKey;
+  std::shared_ptr<oqs::KeyEncapsulation> m_PQCkeyEncapsulation;
+#endif
 
   std::map<uint32_t, Ipv4Address> m_peerAddressTable; //!<IP address of peer KM nodes
 
   Ptr<QKDEncryptor> m_encryptor;
+
+private:
+
+  void SendPQCPublicKey(Ptr<Socket> socket);
+
+  void ProcessPQCPublicKeyRequest(HTTPMessage headerIn, Ptr<Socket> socket);
+
+  void ProcessPQCPublicKeyResponse(HTTPMessage headerIn, Ptr<Socket> socket);
+
+  void ProcessPQCCipherRequest(HTTPMessage headerIn, Ptr<Socket> socket);
+
+  void ProcessPQCCipherResponse(HTTPMessage headerIn, Ptr<Socket> socket);
+
+  void GeneratePQCKeys(Ipv4Address peerKMAddress, uint32_t dstNodeId, uint32_t numberOfKeysToGenerate);
+
+  void CheckPQCBuffer(Ipv4Address peerKMSAddress);
+
+  uint32_t ComputePqcMixing(uint32_t keySize, uint32_t sbits);
+  
+  std::vector<PqcPair> PQCCipherOutput(
+    const std::string& pqcKeyDecoded,  
+    uint32_t numberOfKeys
+  );
+
+  std::string PQCCipherInput(const std::string& input);
+
+  uint32_t m_pqc_enabled; 
+
+  uint32_t m_pqc_force_mixing;
+
+  double m_pqc_c; 
+
+  uint32_t m_pqc_default_number_of_keys;
 
 };
 

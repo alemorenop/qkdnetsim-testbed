@@ -69,12 +69,15 @@ main(int argc, char* argv[])
     std::string devPP    = "eth0";
     std::string devKms   = "eth1";
     std::string devEtsi  = "eth2";
+    std::string devControl = "eth3";
     std::string myIpPP   = "192.168.116.7";
     std::string myIpKms  = "192.168.118.7";
     std::string myIpEtsi = "192.168.120.7";
+    std::string myIpControl = "192.168.121.7";
 
     // ---- Peers (real IPs of the other VMs) ----
     std::string peerKmsRelayIp = "192.168.118.6"; // RELAY_KMS_TRUSTED, KMS Bob <-> KMS Relay link
+    std::string peerKmsAliceControlIp = "192.168.121.5";
 
     // ---- Identifier contract shared between VMs ----
     std::string ppBobId     = "dddddddd-0000-0000-0000-000000000002"; // RELAY_PP_BOB's module
@@ -82,8 +85,10 @@ main(int argc, char* argv[])
     std::string etsiBobId   = "eeeeeeee-0000-0000-0000-000000000002"; // Bob VPN SAE
 
     // ---- Q-Buffer configuration ----
-    uint32_t qbMin = 1024;
-    uint32_t qbThr = 51200;
+    // See the full note in kms_alice.cc: raised so the relay buffer leaves
+    // QSTATUS_READY often enough to exercise Fill()'s PQC-mixing branch.
+    uint32_t qbMin = 16384;
+    uint32_t qbThr = 50000000;
     uint32_t qbMax = 500000000;
     // See the full note in kms_alice.cc: MUST match ppKeySize*8 on the
     // post-processing side (pp_bob.cc), or GetDefaultKeyCount() will
@@ -102,10 +107,13 @@ main(int argc, char* argv[])
     cmd.AddValue("devPP", "Real NIC toward RELAY_PP_BOB", devPP);
     cmd.AddValue("devKms", "Real NIC toward RELAY_KMS_TRUSTED", devKms);
     cmd.AddValue("devEtsi", "Real NIC toward the Bob VPN SAE", devEtsi);
+    cmd.AddValue("devControl", "Shared classical KMS control NIC", devControl);
     cmd.AddValue("myIpPP", "Local IP on the link toward RELAY_PP_BOB", myIpPP);
     cmd.AddValue("myIpKms", "Local IP on the link toward RELAY_KMS_TRUSTED", myIpKms);
     cmd.AddValue("myIpEtsi", "Local IP on the link toward the Bob VPN SAE", myIpEtsi);
+    cmd.AddValue("myIpControl", "Local IP on the shared KMS control network", myIpControl);
     cmd.AddValue("peerKmsRelayIp", "Real IP of RELAY_KMS_TRUSTED (KMS Relay)", peerKmsRelayIp);
+    cmd.AddValue("peerKmsAliceControlIp", "Direct control-plane IP of KMS Alice", peerKmsAliceControlIp);
     cmd.AddValue("ppBobId", "UUID of RELAY_PP_BOB's post-processing module", ppBobId);
     cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
     cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
@@ -135,6 +143,7 @@ main(int argc, char* argv[])
     AddEmuInterface(node, devPP, myIpPP, "00:00:00:00:17:01");
     AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:17:02");
     AddEmuInterface(node, devEtsi, myIpEtsi, "00:00:00:00:17:03");
+    AddEmuInterface(node, devControl, myIpControl, "00:00:00:00:17:04");
 
     QKDLinkHelper QLinkHelper;
     QKDAppHelper QAHelper;
@@ -163,6 +172,7 @@ main(int argc, char* argv[])
     // Local identifier for "KMS Alice" (RELAY_KMS_ALICE) - only reachable via relay
     Ptr<Node> aliceHandle = CreateObject<Node>();  // ID 3 = Alice
     uint32_t aliceId = aliceHandle->GetId();
+    kms->SetPeerKmAddress(aliceId, Ipv4Address(peerKmsAliceControlIp.c_str()));
 
     // --- Direct LOCAL link toward the Relay (fed by RELAY_PP_BOB) ---
     kms->CreateQBuffer(relayId, control->GetQBufferConf(relayId));
@@ -176,7 +186,7 @@ main(int argc, char* argv[])
     ));
     control->AddRouteEntry(QKDLocationRegisterEntry(
         relayId, Ipv4Address(peerKmsRelayIp.c_str()), 2,   // nextHop = Relay, 2 hops
-        aliceId, Ipv4Address("0.0.0.0"), "kms-alice"        // dst = Alice (not directly reachable)
+        aliceId, Ipv4Address(peerKmsAliceControlIp.c_str()), "kms-alice"
     ));
 
     // --- RELAY buffer toward Alice (manual bootstrap) ---
@@ -184,13 +194,10 @@ main(int argc, char* argv[])
     Simulator::Schedule(Seconds(1.0), &PeriodicRelayCheck, kms, aliceId,
                          Seconds(relayCheckPeriodSec), Seconds(simulationTime));
 
-    // Structural bug (see the full comment in kms_trusted.cc,
-    // PeriodicLocalBufferCheck): the LOCAL_SBUFFER toward the Relay (relayId=2)
-    // only auto-replenishes on receiving STORE_KEY if GetNode()->GetId() >
-    // relayId. Since Bob(self)=1 < Relay=2, Bob is ALWAYS "slave" on that
-    // link and never auto-replenishes. We reuse PeriodicRelayCheck (generic:
-    // it just calls CheckBufferReplenishment, which dispatches by buffer
-    // type) to cover this.
+    // In the distributed deployment, explicitly drive the LOCAL S-Buffer as
+    // well as the end-to-end RELAY S-Buffer.  The official monolithic example
+    // can rely on shared in-process events; separate realtime simulators must
+    // not depend on which peer happens to trigger the first fill.
     Simulator::Schedule(Seconds(1.0), &PeriodicRelayCheck, kms, relayId,
                          Seconds(relayCheckPeriodSec), Seconds(simulationTime));
 
@@ -207,13 +214,18 @@ main(int argc, char* argv[])
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
                          std::cout << "[RELAY_KMS_BOB] KMS Bob serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServedMixed",
+                     MakeCallback(+[](std::string ctx, const std::string& ksid,
+                                      const std::string& srcSaeId, const std::string& dstSaeId,
+                                      const uint32_t& srcNodeId, const uint32_t& dstNodeId,
+                                      const std::string& keyId, const uint32_t& bits,
+                                      const std::string& type) {
+                         std::cout << "[RELAY_KMS_BOB] Mixed key contribution type=" << type
+                                   << " bits=" << bits << " keyId=" << keyId << std::endl;
+                     }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
                      MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_BOB] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
-                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/Etsi004RelayControl",
-                     MakeCallback(+[](std::string ctx, const std::string& phase, const std::string& operation, const std::string& requestId, const uint32_t& code) {
-                         std::cout << "[RELAY_ETSI004_CONTROL] kms=bob phase=" << phase << " operation=" << operation << " requestId=" << requestId << " code=" << code << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {

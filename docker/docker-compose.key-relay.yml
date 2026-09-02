@@ -50,6 +50,11 @@ networks:
       config:
         - subnet: 192.168.118.0/24
           gateway: 192.168.118.254
+  net_kms_control:   # Direct classical control plane used by official ETSI 004
+    ipam:
+      config:
+        - subnet: 192.168.121.0/24
+          gateway: 192.168.121.254
   net_alice_kms_app:   # KMS Alice <-> Alice VPN endpoint (ETSI 004/014)
     ipam:
       config:
@@ -86,7 +91,7 @@ services:
         condition: service_healthy
       kms_alice:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_alice-default"]
 
   pp_relay_a:
     image: qkdnetsim-testbed:latest
@@ -112,7 +117,7 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_a-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_relay_a-default"]
 
   pp_relay_b:
     image: qkdnetsim-testbed:latest
@@ -134,7 +139,7 @@ services:
         condition: service_healthy
       kms_trusted:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_relay_b-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_relay_b-default"]
 
   pp_bob:
     image: qkdnetsim-testbed:latest
@@ -160,7 +165,7 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_pp_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_bob-default"]
 
   kms_alice:
     image: qkdnetsim-testbed:latest
@@ -171,10 +176,12 @@ services:
       DEV_MAP_PP: "192.168.112"
       DEV_MAP_KMS: "192.168.117"
       DEV_MAP_ETSI: "192.168.119"
+      DEV_MAP_CONTROL: "192.168.121"
     networks:
       net_alice_pp_kms: { ipv4_address: 192.168.112.5 }
       net_kms_alice_trusted: { ipv4_address: 192.168.117.5 }
       net_alice_kms_app: { ipv4_address: 192.168.119.5 }
+      net_kms_control: { ipv4_address: 192.168.121.5 }
     depends_on:
       kms_trusted:
         condition: service_healthy
@@ -189,7 +196,12 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_alice-default"]
+    command:
+      - "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_kms_alice-default"
+      - "--ns3::TcpSocketBase::Timestamp=false"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"
 
   kms_trusted:
     image: qkdnetsim-testbed:latest
@@ -201,11 +213,13 @@ services:
       DEV_MAP_PPB: "192.168.115"
       DEV_MAP_KMSA: "192.168.117"
       DEV_MAP_KMSB: "192.168.118"
+      DEV_MAP_CONTROL: "192.168.121"
     networks:
       net_relay_a_pp_kms: { ipv4_address: 192.168.113.6 }
       net_relay_b_pp_kms: { ipv4_address: 192.168.115.6 }
       net_kms_alice_trusted: { ipv4_address: 192.168.117.6 }
       net_kms_trusted_bob: { ipv4_address: 192.168.118.6 }
+      net_kms_control: { ipv4_address: 192.168.121.6 }
     depends_on:
       kms_bob:
         condition: service_healthy
@@ -215,7 +229,11 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_trusted-default"]
+    command:
+      - "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_kms_trusted-default"
+      - "--ns3::TcpSocketBase::Timestamp=false"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=0"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=0"
 
   kms_bob:
     image: qkdnetsim-testbed:latest
@@ -226,10 +244,12 @@ services:
       DEV_MAP_PP: "192.168.116"
       DEV_MAP_KMS: "192.168.118"
       DEV_MAP_ETSI: "192.168.120"
+      DEV_MAP_CONTROL: "192.168.121"
     networks:
       net_bob_pp_kms: { ipv4_address: 192.168.116.7 }
       net_kms_trusted_bob: { ipv4_address: 192.168.118.7 }
       net_bob_kms_app: { ipv4_address: 192.168.120.7 }
+      net_kms_control: { ipv4_address: 192.168.121.7 }
     # Root of the depends_on chain (nobody else waits on anyone before
     # reaching here) -- no dependencies of its own.
     healthcheck:
@@ -238,4 +258,9 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-relay_kms_bob-default"]
+    command:
+      - "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_kms_bob-default"
+      - "--ns3::TcpSocketBase::Timestamp=false"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"

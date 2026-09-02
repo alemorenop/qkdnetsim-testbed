@@ -189,8 +189,22 @@ def tamper_key_for_negative_test(key: KeyVersion) -> KeyVersion:
 def parse_key_response(response: dict[str, Any], generation: int) -> KeyVersion:
     if "index" not in response or not response.get("Key_buffer"):
         raise ValueError("KMS response has no index or Key_buffer")
-    value = str(response["Key_buffer"])
-    actual_bits = len(value.encode()) * 8
+    encoded_value = str(response["Key_buffer"])
+    encoding = str(response.get("Key_encoding", "raw")).lower()
+    if encoding == "base64":
+        # QKDEncryptor::Base64Encode follows OpenSSL's line-oriented output
+        # and may append CR/LF.  Remove transport whitespace but retain strict
+        # alphabet/padding validation for the actual encoded value.
+        material = base64.b64decode("".join(encoded_value.split()), validate=True)
+        value = f"0x{material.hex()}"
+        actual_bits = len(material) * 8
+        digest = hashlib.sha256(material).hexdigest()
+    elif encoding == "raw":
+        value = encoded_value
+        actual_bits = len(value.encode()) * 8
+        digest = hashlib.sha256(value.encode()).hexdigest()
+    else:
+        raise ValueError(f"unsupported ETSI 004 Key_encoding={encoding}")
     if actual_bits != KEY_CHUNK_SIZE_BITS:
         raise ValueError(
             f"ETSI 004 returned {actual_bits} bits, "
@@ -201,7 +215,7 @@ def parse_key_response(response: dict[str, Any], generation: int) -> KeyVersion:
         index=int(response["index"]),
         key_id=None,
         value=value,
-        digest=hashlib.sha256(value.encode()).hexdigest(),
+        digest=digest,
     )
 
 

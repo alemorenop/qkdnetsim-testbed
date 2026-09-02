@@ -78,7 +78,7 @@ services:
         condition: service_healthy
       kms_alice:
         condition: service_healthy
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_alice-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_pp_alice-default"]
 
   pp_bob:
     image: qkdnetsim-testbed:latest
@@ -104,7 +104,7 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_pp_bob-default"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_pp_bob-default"]
 
   kms_alice:
     image: qkdnetsim-testbed:latest
@@ -128,7 +128,12 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_alice-default"]
+    command:
+      - "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_kms_alice-default"
+      - "--ns3::TcpSocketBase::Timestamp=false"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"
 
   kms_bob:
     image: qkdnetsim-testbed:latest
@@ -149,4 +154,9 @@ services:
       timeout: 2s
       retries: 20
       start_period: 3s
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.46-p2p_kms_bob-default"]
+    command:
+      - "/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_kms_bob-default"
+      - "--ns3::TcpSocketBase::Timestamp=false"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
+      - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"

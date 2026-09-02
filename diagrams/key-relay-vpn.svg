@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1390" height="1020" viewBox="0 0 1390 1020" role="img" aria-labelledby="relay-vpn-title relay-vpn-desc">
   <title id="relay-vpn-title">Trusted-node QKD-backed VPN architecture</title>
-  <desc id="relay-vpn-desc">Detailed trusted-node architecture showing two QKD links, seven ns-3 processes, every Docker subnet and address, ETSI 004 and 014 delivery, hop-by-hop relay control, CORE orchestration, and strongSwan VPN endpoints.</desc>
+  <desc id="relay-vpn-desc">Detailed trusted-node architecture showing two QKD links, seven ns-3 processes, every Docker subnet and address, ETSI 004 and 014 delivery, hop-by-hop secret-key relay, direct ETSI 004 control between endpoint KMSs, CORE orchestration, and strongSwan VPN endpoints.</desc>
   <defs>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');
@@ -54,6 +54,9 @@
   <text x="562" y="396" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.117.6</text>
   <text x="820" y="396" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.118.6</text>
   <text x="1082" y="396" text-anchor="end" font-size="10.5" fill="#576F75" font-family="Consolas, monospace">192.168.118.7</text>
+
+  <path d="M246 540V580Q246 588 254 588H1128Q1136 588 1136 580V540" fill="none" stroke="#1F6F8B" stroke-width="1.8" marker-start="url(#relay-vpn-ag)" marker-end="url(#relay-vpn-ag)"></path>
+  <text x="691" y="574" text-anchor="middle" class="edge" fill="#1F6F8B">ETSI 004 KMS control · new_app / register / fill · 192.168.121.5 ↔ 192.168.121.7</text>
 
   <path d="M166 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
   <path d="M1216 540V650" fill="none" stroke="#1F6F8B" stroke-width="1.2" marker-end="url(#relay-vpn-ag)"></path>
@@ -132,9 +135,9 @@
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
     <text x="120" y="100" text-anchor="middle" class="layer">ns-3 node</text>
     <rect x="14" y="118" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
-    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
+    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×4</text>
     <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Alice · KMS Trusted · VPN Alice</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">PP · Trusted · VPN · KMS-control peers</text>
     <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
   <g transform="translate(576 330)">
@@ -145,11 +148,11 @@
     <rect x="14" y="82" width="202" height="34" rx="6" fill="#E5EAE6"></rect>
     <text x="115" y="104" text-anchor="middle" class="layer">ns-3 node</text>
     <rect x="14" y="122" width="202" height="50" rx="6" fill="#E5EEEE"></rect>
-    <text x="115" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×4</text>
+    <text x="115" y="141" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×5</text>
     <text x="115" y="159" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="115" y="184" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Relay-A/B · KMS Alice/Bob</text>
-    <text x="115" y="204" text-anchor="middle" class="detail">new_app / register / fill</text>
-    <text x="115" y="221" text-anchor="middle" class="detail">relay004 control proxy</text>
+    <text x="115" y="184" text-anchor="middle" font-size="9.5" fill="#576F75">PP Relay-A/B · KMS Alice/Bob · control net</text>
+    <text x="115" y="204" text-anchor="middle" class="detail">Relay() / ProcessRelayRequest()</text>
+    <text x="115" y="221" text-anchor="middle" class="detail">hop-by-hop secret-key relay</text>
   </g>
   <g transform="translate(1096 330)">
     <rect width="240" height="210" rx="8" fill="#FFFFFF" stroke="#AAB7B5" stroke-width="1.2"></rect>
@@ -159,9 +162,9 @@
     <rect x="14" y="78" width="212" height="34" rx="6" fill="#E5EAE6"></rect>
     <text x="120" y="100" text-anchor="middle" class="layer">ns-3 node</text>
     <rect x="14" y="118" width="212" height="50" rx="6" fill="#E5EEEE"></rect>
-    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×3</text>
+    <text x="120" y="137" text-anchor="middle" class="layer" font-size="9.5">EmuFdNetDevice ×4</text>
     <text x="120" y="155" text-anchor="middle" class="layer" font-size="8.5">AF_PACKET → Linux veth (ethX)</text>
-    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">↔ PP Bob · KMS Trusted · VPN Bob</text>
+    <text x="120" y="181" text-anchor="middle" font-size="9.5" fill="#576F75">PP · Trusted · VPN · KMS-control peers</text>
     <text x="120" y="200" text-anchor="middle" class="detail">RELAY_SBUFFER endpoint</text>
   </g>
 
