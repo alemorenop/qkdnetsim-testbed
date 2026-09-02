@@ -1,0 +1,71 @@
+# Pristine, unmodified upstream QKDNetSim -- OLD baseline (pre-PQC, pre ns-3.48).
+#
+# This is NOT the qkdnetsim-testbed fork. It is vanilla QKDNetSim, built as a
+# plain ns-3 contrib module and run as a single monolithic process, exactly as
+# upstream intends (upstream ships no Docker/emulation infrastructure of its
+# own). Its only purpose here is to be the "before" comparison point for
+# qkdnetsim-testbed's non-monolithic adaptation (docker/Dockerfile from
+# testbed commit 99783ee).
+#
+# Pinned to commit 1cda34c ("KMS-KMS communication is bidirectional over a
+# single socket"), the last upstream commit before the PQC + ns-3.48 migration
+# (7a99fc1, 525e9bf).
+#
+# Build context must be the pristine QKDNetSim tree at that commit (build-all.sh
+# handles this via `git archive 1cda34c...`) -- NOT this directory. Supplying
+# the local archived object avoids depending on a moving remote branch:
+#   git archive 1cda34cbe75b5cb33e2ffa87081f724d6484199f | tar -x -C <tmpdir>
+#   docker build -t qkdnetsim:base-old -f Dockerfile.base-old <tmpdir>
+#
+# Run an example inside the container:
+#   docker run --rm -it qkdnetsim:base-old
+#   ./ns3 run examples_qkdnetsim_etsi_004
+#   ./ns3 run examples_qkdnetsim_etsi_014
+#   ./ns3 run examples_qkdnetsim_secoqc
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential ninja-build \
+    gcc g++ python3 python3-dev python3-pip mercurial bzr gdb valgrind gsl-bin doxygen graphviz imagemagick \
+    libboost-all-dev git flex bison tcpdump sqlite3 \
+    libsqlite3-dev libxml2 libxml2-dev libgtk2.0-0 libgtk2.0-dev uncrustify \
+    libcrypto++-dev libcrypto++-doc libcrypto++-utils unzip wget uuid-dev cmake \
+    ca-certificates libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir "cmake>=3.25,<4"
+
+WORKDIR /opt
+
+# --- ns-3.46, the version this pre-PQC QKDNetSim baseline targets ---
+RUN git clone -b ns-3.46 https://gitlab.com/nsnam/ns-3-dev.git
+
+# --- Pristine upstream QKDNetSim, pinned to the pre-migration commit 1cda34c
+# -- supplied via the build context (see header comment) ---
+COPY . /opt/ns-3-dev/contrib/qkdnetsim
+
+WORKDIR /opt/ns-3-dev
+
+# --- Official patches on src/stats/model/gnuplot.{cc,h}, shipped by upstream
+# itself in contrib/qkdnetsim/patches/ ---
+RUN sed -i 's/\r$//' \
+        contrib/qkdnetsim/patches/gnuplot_cc.patches \
+        contrib/qkdnetsim/patches/gnuplot_h.patches && \
+    git apply --check contrib/qkdnetsim/patches/gnuplot_cc.patches && \
+    git apply --check contrib/qkdnetsim/patches/gnuplot_h.patches && \
+    git apply contrib/qkdnetsim/patches/gnuplot_h.patches && \
+    git apply contrib/qkdnetsim/patches/gnuplot_cc.patches
+
+# --- Configure and build only the monolithic examples relevant to the
+# comparison (skip --enable-mpi: examples_qkdnetsim_etsi_combined_input is the
+# only target that needs it, and it's out of scope here) ---
+RUN ./ns3 configure --enable-examples && \
+    ./ns3 build \
+        examples_qkdnetsim_etsi_004 \
+        examples_qkdnetsim_etsi_014 \
+        examples_qkdnetsim_secoqc
+
+CMD ["/bin/bash"]
