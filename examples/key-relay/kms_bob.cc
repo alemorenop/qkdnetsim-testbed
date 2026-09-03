@@ -88,7 +88,7 @@ main(int argc, char* argv[])
     // See the full note in kms_alice.cc: raised so the relay buffer leaves
     // QSTATUS_READY often enough to exercise Fill()'s PQC-mixing branch.
     uint32_t qbMin = 16384;
-    uint32_t qbThr = 50000000;
+    uint32_t qbThr = 500000;
     uint32_t qbMax = 500000000;
     // See the full note in kms_alice.cc: MUST match ppKeySize*8 on the
     // post-processing side (pp_bob.cc), or GetDefaultKeyCount() will
@@ -117,8 +117,11 @@ main(int argc, char* argv[])
     cmd.AddValue("ppBobId", "UUID of RELAY_PP_BOB's post-processing module", ppBobId);
     cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
     cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
+    cmd.AddValue("qbThr", "QKD and application-facing S-buffer readiness threshold (bits)", qbThr);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(qbThr <= qbMin || qbThr > qbMax,
+                    "qbThr must satisfy qbMin < qbThr <= qbMax");
 
     // IMPORTANT (see the full note in kms_alice.cc): the relay protocol
     // embeds raw ns-3 node IDs in the JSON messages, so all 3 processes must
@@ -150,7 +153,7 @@ main(int argc, char* argv[])
 
     // Library bug (see the full comment in kms_alice.cc): without this
     // SetDefault, SBuffer::DoInitialize() overwrites any RELAY-type S-Buffer
-    // with a fixed Mmax=128000 and KeySize=512, ignoring ConfigureRSBuffers().
+    // with a fixed Mmax=204800 and KeySize=512, ignoring ConfigureRSBuffers().
     Config::SetDefault("ns3::SBuffer::SMinimal", UintegerValue(qbMin));
     Config::SetDefault("ns3::SBuffer::SThreshold", UintegerValue(qbThr));
     Config::SetDefault("ns3::SBuffer::SMaximal", UintegerValue(qbMax));

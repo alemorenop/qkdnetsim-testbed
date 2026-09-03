@@ -104,7 +104,7 @@ main(int argc, char* argv[])
     // See the full note in kms_alice.cc: raised so the relay buffer leaves
     // QSTATUS_READY often enough to exercise Fill()'s PQC-mixing branch.
     uint32_t qbMin = 16384;
-    uint32_t qbThr = 50000000;
+    uint32_t qbThr = 500000;
     uint32_t qbMax = 500000000;
     // MUST match qbDefaultKeyBits in kms_alice.cc and kms_bob.cc
     // (2048 = ppKeySize*8 on the post-processing side): the relay protocol
@@ -132,8 +132,11 @@ main(int argc, char* argv[])
     cmd.AddValue("peerKmsBobIp", "Real IP of RELAY_KMS_BOB (KMS Bob)", peerKmsBobIp);
     cmd.AddValue("ppRelayAId", "UUID of RELAY_PP_A's post-processing module", ppRelayAId);
     cmd.AddValue("ppRelayBId", "UUID of RELAY_PP_B's post-processing module", ppRelayBId);
+    cmd.AddValue("qbThr", "QKD and relay S-buffer readiness threshold (bits)", qbThr);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(qbThr <= qbMin || qbThr > qbMax,
+                    "qbThr must satisfy qbMin < qbThr <= qbMax");
 
     // IMPORTANT (see the full note in kms_alice.cc): the relay protocol
     // embeds raw ns-3 node IDs in the JSON messages, so all 3 processes must

@@ -134,6 +134,7 @@ services:
       - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
       - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
       - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"
+      - "--qbThr=${QKD_BUFFER_THRESHOLD_BITS:-51200}"
 
   kms_bob:
     image: qkdnetsim-testbed:latest
@@ -160,3 +161,4 @@ services:
       - "--ns3::QKDKeyManagerSystemApplication::pqc_enabled=${QKD_PQC_ENABLED:-0}"
       - "--ns3::QKDKeyManagerSystemApplication::pqc_force_mixing=${QKD_PQC_FORCE_MIXING:-0}"
       - "--ns3::QKDKeyManagerSystemApplication::pqc_c=${QKD_PQC_SECURITY_EXPONENT:-10}"
+      - "--qbThr=${QKD_BUFFER_THRESHOLD_BITS:-51200}"

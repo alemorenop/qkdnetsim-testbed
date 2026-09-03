@@ -89,8 +89,11 @@ main(int argc, char* argv[])
     cmd.AddValue("ppBobId", "UUID of P2P_PP_BOB's post-processing module", ppBobId);
     cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
     cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
+    cmd.AddValue("qbThr", "QKD and application-facing S-buffer readiness threshold (bits)", qbThr);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(qbThr <= qbMin || qbThr > qbMax,
+                    "qbThr must satisfy qbMin < qbThr <= qbMax");
 
     NodeContainer self;
     self.Create(1);
@@ -110,6 +113,13 @@ main(int argc, char* argv[])
     QKDLinkHelper QLinkHelper;
     QKDAppHelper QAHelper;
 
+    // See the full note in kms_alice.cc: all four ns3::SBuffer attributes
+    // must be set (DoInitialize() overwrites them as a group), or SMaximal
+    // silently falls back to the library default instead of qbMax.
+    Config::SetDefault("ns3::SBuffer::SMinimal", UintegerValue(qbMin));
+    Config::SetDefault("ns3::SBuffer::SThreshold", UintegerValue(qbThr));
+    Config::SetDefault("ns3::SBuffer::SMaximal", UintegerValue(qbMax));
+    Config::SetDefault("ns3::SBuffer::SDefaultKeySize", UintegerValue(qbDefaultKeyBits));
     Ptr<QKDControl> control = QLinkHelper.InstallQKDNController(node);
     QLinkHelper.ConfigureQBuffers({control}, qbMin, qbThr, qbMax, qbDefaultKeyBits);
 

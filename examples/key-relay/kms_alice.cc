@@ -96,13 +96,13 @@ main(int argc, char* argv[])
     // ---- Q-Buffer configuration ----
     // qbMin/qbThr raised (from 1024/51200) so the relay buffer spends real
     // time below QSTATUS_READY: at the ~40960 bps Relay() ceiling below, a
-    // full refill from empty now takes ~15s, comparable to the VPN's rekey
+    // refill to the threshold takes ~12s, comparable to the VPN's rekey
     // interval, instead of refilling almost instantly. This is what actually
     // exercises Fill()'s PQC-mixing branch (ComputePqcMixing()), which is
     // otherwise never reached while the buffer stays READY (see the paper's
     // own P2P setup, which uses a deliberately scarce 10 kbps QKD link).
     uint32_t qbMin = 16384;
-    uint32_t qbThr = 50000000;
+    uint32_t qbThr = 500000;
     uint32_t qbMax = 500000000;
     // MUST match ppKeySize*8 (256 bytes = 2048 bits) on the post-processing
     // side (see pp_alice.cc): GetDefaultKeyCount() in s-buffer.cc only
@@ -140,8 +140,11 @@ main(int argc, char* argv[])
     cmd.AddValue("ppAliceId", "UUID of RELAY_PP_ALICE's post-processing module", ppAliceId);
     cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
     cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
+    cmd.AddValue("qbThr", "QKD and application-facing S-buffer readiness threshold (bits)", qbThr);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(qbThr <= qbMin || qbThr > qbMax,
+                    "qbThr must satisfy qbMin < qbThr <= qbMax");
 
     // IMPORTANT: qkdnetsim's relay protocol embeds "raw" ns-3 node IDs inside
     // the JSON messages (source_node_id, destination_node_id), assuming all
@@ -188,9 +191,9 @@ main(int argc, char* argv[])
     // Library bug (see s-buffer.cc, SBuffer::DoInitialize()): when a new
     // S-Buffer is created, Object::Initialize() overwrites whatever
     // ConfigureRSBuffers() set (via Init()/Configure()) with its OWN ns-3
-    // attributes ("SMinimal"=10, "SMaximal"=128000, "SThreshold"=32000,
+    // attributes ("SMinimal"=10, "SMaximal"=204800, "SThreshold"=10240,
     // "SDefaultKeySize"=512), which nobody else touches. Without this
-    // SetDefault, every RELAY-type S-Buffer is created with Mmax=128000 and
+    // SetDefault, every RELAY-type S-Buffer is created with Mmax=204800 and
     // KeySize=512 regardless of ConfigureRSBuffers(), which caps the relay
     // supply at 20*512=10240 bits per tick.
     Config::SetDefault("ns3::SBuffer::SMinimal", UintegerValue(qbMin));

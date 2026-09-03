@@ -94,8 +94,11 @@ main(int argc, char* argv[])
     cmd.AddValue("ppAliceId", "UUID of P2P_PP_ALICE's post-processing module", ppAliceId);
     cmd.AddValue("etsiAliceId", "SAE ID of the Alice VPN endpoint", etsiAliceId);
     cmd.AddValue("etsiBobId", "SAE ID of the Bob VPN endpoint", etsiBobId);
+    cmd.AddValue("qbThr", "QKD and application-facing S-buffer readiness threshold (bits)", qbThr);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
+    NS_ABORT_MSG_IF(qbThr <= qbMin || qbThr > qbMax,
+                    "qbThr must satisfy qbMin < qbThr <= qbMax");
 
     // Created BEFORE the real node so that the latter ends up with a higher
     // Node::GetId(): QKDKeyManagerSystemApplication internally decides who is
@@ -125,6 +128,16 @@ main(int argc, char* argv[])
     QKDLinkHelper QLinkHelper;
     QKDAppHelper QAHelper;
 
+    // S-buffer state, rather than Q-buffer state, gates adaptive QKD+PQC
+    // delivery. Configure all four ns3::SBuffer attributes explicitly (same
+    // pattern as the key-relay examples): SBuffer::DoInitialize() overwrites
+    // whatever Configure()/Init() set with these attribute defaults, so
+    // setting only SThreshold would leave SMaximal at the library default
+    // (204800 bits) instead of qbMax, silently capping S-buffer capacity.
+    Config::SetDefault("ns3::SBuffer::SMinimal", UintegerValue(qbMin));
+    Config::SetDefault("ns3::SBuffer::SThreshold", UintegerValue(qbThr));
+    Config::SetDefault("ns3::SBuffer::SMaximal", UintegerValue(qbMax));
+    Config::SetDefault("ns3::SBuffer::SDefaultKeySize", UintegerValue(qbDefaultKeyBits));
     Ptr<QKDControl> control = QLinkHelper.InstallQKDNController(node);
     QLinkHelper.ConfigureQBuffers({control}, qbMin, qbThr, qbMax, qbDefaultKeyBits);
 
