@@ -336,7 +336,9 @@ def parse_monolithic_paper_validation(output: str, generation_window: int) -> di
         r"keyId=(\S+)\s+bits=(\d+)\s+type=(\S+)",
         output,
     ):
-        context, key_id, bits, material_type = match.groups()
+        context, key_id, bits, material_type = (
+            match.group(1), match.group(3), match.group(4), match.group(5)
+        )
         served_keys[key_id] = int(bits)
         material_by_key[key_id] = material_type
         node_match = re.search(r"/NodeList/(\d+)/", context)
@@ -851,6 +853,7 @@ def write_paper_style_tables(records: list[dict[str, Any]], output_dir: Path) ->
         "version", "topology", "repetition", "deployment", "kms",
         "material_type", "supply_events", "supplied_bits", "relay_events",
         "relayed_bits", "waste_events", "wasted_bits",
+        "relay_attempts", "relay_attempt_bits", "relay_successes", "relay_success_bits",
     )
     with (output_dir / "key-accounting.csv").open(
         "w", newline="", encoding="utf-8"

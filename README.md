@@ -378,15 +378,31 @@ Build the four pinned images once and run a small pilot:
 ```bash
 bash docker/comparison/build-all.sh
 python3 automation/compare-architecture.py \
-  --version new --topology p2p --duration 10 --repetitions 1
+  --version new --topology p2p --duration 10 --repetitions 1 \
+  --workload-profile transport
 ```
 
-Run the full initial campaign with:
+The complete architecture study consists of two independent campaigns. Run
+both profiles explicitly; omitting `--workload-profile` selects `transport`
+only and is not a complete two-profile campaign:
 
 ```bash
+# Process, container and emulated-network overhead without key consumption
 python3 automation/compare-architecture.py \
-  --version both --topology both --duration 60 --repetitions 5
+  --version both --topology both --duration 60 --repetitions 5 \
+  --workload-profile transport
+
+# The same comparison with OTP/VMAC key acquisition and consumption enabled
+python3 automation/compare-architecture.py \
+  --version both --topology both --duration 60 --repetitions 5 \
+  --workload-profile qkd
 ```
+
+Each invocation creates its own timestamped result directory. Keep the two
+summaries as separate experimental profiles: their measurements answer
+different questions and their rows must not be pooled into one statistical
+sample. Repeating one profile does not require rerunning the other when its
+configuration, images and instrumentation have not changed.
 
 Each run records application `Tx`/`Rx` delivery ratio, realization of the
 offered load, useful-payload goodput (excluding the QKD application header),
@@ -402,12 +418,12 @@ of Dervisevic *et al.*, *Large-Scale Quantum Key Distribution Network
 Simulator*. `application-settings.csv` records the interface, offered
 rate, packet size, cryptographic modes, key lifetime and configured timing.
 The default `transport` profile uses no key consumption and isolates the cost of
-processes, containers and emulated networking. The `qkd` profile selects OTP and
-VMAC key acquisition/consumption while retaining `useCrypto=0`, so cryptographic
+processes, containers and emulated networking. It is only one half of the full
+architecture study. The `qkd` profile selects OTP and VMAC key
+acquisition/consumption while retaining `useCrypto=0`, so cryptographic
 algorithm CPU time is not mistaken for deployment overhead. VPN encryption,
 matching key fingerprints and rotations remain the responsibility of the
-functional regression runner described above. Select the profiles with
-`--workload-profile transport` and `--workload-profile qkd`.
+functional regression runner described above.
 `qkd-link-statistics.csv` records configured rate, generation interval,
 generated key count, generated bits, average key size and observed generation
 rate per QKD link. Relay and service totals that cannot be associated with a
@@ -464,8 +480,8 @@ IPsec traffic would confound application and architecture effects.
 
 ### Padua reference workload
 
-The architecture campaign above deliberately uses a sustainable matched load
-to isolate the monolithic/distributed boundary. A separate
+The two architecture campaigns above deliberately use a sustainable matched
+load to isolate the monolithic/distributed boundary. A separate
 `padua-reference` profile reproduces the workload behind Tables 2--4 of
 Dervisevic *et al.* rather than incorrectly calling that topology SECOQC. Its
 manifest is [`examples/comparison/padua-reference.json`](examples/comparison/padua-reference.json):
