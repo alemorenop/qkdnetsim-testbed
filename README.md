@@ -12,6 +12,8 @@ roles inside one conventional ns-3 simulation process.
   - [Research basis and testbed extensions](#research-basis-and-testbed-extensions)
 - [Installation and execution](#installation-and-execution)
   - [Functional validation](#functional-validation)
+  - [Monolithic versus distributed comparison](#monolithic-versus-distributed-comparison)
+  - [Padua reference workload](#padua-reference-workload)
   - [Optional QKD and post-quantum mixing](#optional-qkd-and-post-quantum-mixing)
 - [Distance-aware QKD link budget](#distance-aware-qkd-link-budget)
 - [CORE classical-network integration](#core-classical-network-integration)
@@ -304,6 +306,234 @@ python3 automation/run-regression.py --pqc --repetitions 1 \
   --skip-negative-tests
 ```
 
+Use `--pqc-adaptive` instead when the purpose is specifically to exercise the
+`qBthr`-controlled policy without forced mixing. The functional fixture keeps
+the S-buffer below READY and uses exponent 1 so a 512-bit VPN key contains
+observable QKD and PQC contributions at both endpoints.
+
+### Monolithic versus distributed comparison
+
+[`automation/compare-architecture.py`](automation/compare-architecture.py)
+is a separate performance-oriented runner. It compares two immutable
+generations independently: old upstream QKDNetSim against the old distributed
+toy-traffic testbed, and current upstream QKDNetSim against the corresponding
+current testbed. The baseline remains a single ns-3 process; the testbed runs
+one process per role in Docker and sends the application flow through CORE.
+
+The comparison fixes the offered application load at 6.4 kbit/s with 800-byte
+packets (approximately one packet per second), the QKD generation input at 10
+kbit/s, three keys per ETSI 014 request and the post-processing key granularity
+at 256 bytes. The same explicit prefetch policy is installed in all four
+comparison images: an outbound application store requests the next batch when
+it reaches a low-water mark of one key, and a per-store in-flight flag prevents
+duplicate requests. This measures sustained delivery from a warmed key pipeline
+rather than repeatedly timing an empty store. Keeping demand below QKD supply
+prevents genuine buffer starvation from dominating the architecture comparison.
+The upstream direct example is reduced from two application flows to the same
+single Alice-to-Bob flow. The build instrumentation exposes the same workload
+controls and application-level `Tx`/`Rx` observations on both sides; it does not
+infer application packets from TCP segments, which may be fragmented or
+coalesced.
+
+Every workload starts with a five-second measurement warm-up after application
+traffic first becomes possible. Counters are reset or gated at the end of this
+period, so setup, the first key request and initially empty stores do not enter
+the reported window. QKD generation and resource use are observed for the full
+configured wall-clock interval. Application accounting treats that interval as
+half-open and retains only the configured number of send opportunities, so a
+packet scheduled exactly at the right boundary cannot produce an artificial
+extra packet in one deployment. In the distributed six-site SECOQC fixture, each logical
+KMS forwarding step also has a controlled 2 ms egress NetEm delay. The A--F
+route therefore accumulates four such delays (A--B--C--E--F). The KMS processes
+share a Docker control subnet, so this is a controlled per-forwarding-hop timing
+model rather than a claim that the classical control plane uses six physically
+separate links. The Alice--Bob application path remains a separate CORE path
+with one router, two 2 ms links and 50 Mbit/s per link.
+
+Both members of the current comparison pair also receive the same narrow
+correctness repairs. The key-lifetime test is restricted to AES, as it was in
+the old upstream revision; current upstream accidentally applies it to OTP and
+discards keys on their first use. In addition, the QKD/PQC component sizes of
+a batched request are consistently interpreted as bits per key, and
+`skey_create` selects and reconstructs `key_size * key_number` bits at its
+sender and receiver for both components. The original mixture of per-key and
+per-request units otherwise emits empty contributions or lets validation pass
+before aborting while constructing the complete batch. Applying the repairs to both
+deployments prevents known protocol regressions from being mistaken for an
+effect of process separation. Apart from these common repairs, QKDNetSim
+protocol/model code in each pinned generation is retained.
+The comparison builds also remove a diagnostic assertion from
+`SBuffer::GetTransformCandidate()`: `m_currentKeyBit` accounts for the whole
+S-buffer, including already-reserved stream/supply material, whereas a new
+transformation may select only READY keys from the transform pool. Equating
+those quantities caused intermittent aborts under concurrent relay traffic.
+The shared six-site fixture connects to the newer `RelaySuccess` confirmation
+trace with `Config::ConnectFailSafe`; archived revisions that expose only
+`RelayConsumption` therefore remain executable instead of aborting at startup.
+Key generation rate is therefore a controlled input, not an
+architecture-performance result.
+
+Build the four pinned images once and run a small pilot:
+
+```bash
+bash docker/comparison/build-all.sh
+python3 automation/compare-architecture.py \
+  --version new --topology p2p --duration 10 --repetitions 1
+```
+
+Run the full initial campaign with:
+
+```bash
+python3 automation/compare-architecture.py \
+  --version both --topology both --duration 60 --repetitions 5
+```
+
+Each run records application `Tx`/`Rx` delivery ratio, realization of the
+offered load, useful-payload goodput (excluding the QKD application header),
+on-wire frame bytes, exact `Mx` missed-send events,
+wall-clock/realtime behaviour and aggregate Docker CPU and peak memory. The
+output directory contains raw logs, one JSON record per execution,
+`summary.json`, `summary.csv` and an automatically generated
+`architecture-comparison.svg` with grouped means and standard-deviation error
+bars.
+
+The runner additionally exports a validation view modelled on Tables 2, 3 and 4
+of Dervisevic *et al.*, *Large-Scale Quantum Key Distribution Network
+Simulator*. `application-settings.csv` records the interface, offered
+rate, packet size, cryptographic modes, key lifetime and configured timing.
+The default `transport` profile uses no key consumption and isolates the cost of
+processes, containers and emulated networking. The `qkd` profile selects OTP and
+VMAC key acquisition/consumption while retaining `useCrypto=0`, so cryptographic
+algorithm CPU time is not mistaken for deployment overhead. VPN encryption,
+matching key fingerprints and rotations remain the responsibility of the
+functional regression runner described above. Select the profiles with
+`--workload-profile transport` and `--workload-profile qkd`.
+`qkd-link-statistics.csv` records configured rate, generation interval,
+generated key count, generated bits, average key size and observed generation
+rate per QKD link. Relay and service totals that cannot be associated with a
+physical-link UUID are written once as `aggregate_accounting`, rather than
+being falsely copied onto every link. `application-statistics.csv`
+records sent/received bytes and packets, exact missed sends, delivery,
+requested keys and deduplicated logical keys consumed, with QKD and PQC
+contributions separated where available. It also distinguishes keys delivered
+in a KMS prefetch batch from identifiers actually present in application packet
+headers: encryption/authentication operations, unique key IDs and OTP-protected
+payload bits are reported separately. `buffer-timeseries.csv` contains
+timestamped Q/S-buffer occupancy changes, and `key-accounting.csv` separates
+supplied QKD/PQC material, relay
+consumption and relay waste by KMS. Measurements in distributed runs are
+deltas between snapshots taken immediately before and after the traffic
+window, so infrastructure warm-up is excluded. A physical generated key logged
+by both endpoint KMSs is deduplicated by link ID and key ID, equivalent to the
+two-sided accounting correction used by the monolithic example. Empty cells
+mean that the pinned example does not expose that trace; they are deliberately
+not written as zero, which would incorrectly claim that the quantity was
+observed and absent. In current mixed-key traces, only deliveries carrying a
+non-empty KSID count as application consumption in Table 4. Empty-KSID events
+are internal KMS-to-KMS material movements: they remain available in
+`key-accounting.csv`, but are not attributed to the VPN application.
+
+`qkd-validation.svg` compares observed per-link generation rate and
+application goodput. These values test different properties: the former checks
+that the configured QKD supply is reproduced, while the latter exposes the
+effect of process boundaries, real-time scheduling and external networking.
+Raw link or relay totals must not be compared between topologically different
+fixtures. The three-KMS `relay` case remains `reference_only`, whereas `secoqc`
+is a paired comparison with the same six sites and six QKD links. The
+instrumentation attaches to `QBuffer::CurrentChange` and
+`SBuffer::CurrentChange`; it never reconstructs buffer histories from final
+totals.
+
+Both SVGs can also be regenerated without rerunning Docker:
+
+The runner freezes the transmission window and allows a bounded two-second
+receive drain so that a final in-flight TCP frame is not reported as loss. A
+run fails if delivery is incomplete or any KMS trace reports a zero-bit key
+contribution.
+
+```bash
+python3 automation/plot_architecture_comparison.py results/<campaign>/summary.json
+```
+
+Point-to-point and SECOQC are strict paired architecture comparisons. The
+additional three-KMS Alice--trusted--Bob fixture is labelled `reference_only`
+because no topologically identical upstream monolithic workload is used for
+it. VPN correctness and rekey behaviour remain covered separately by the
+functional runner above because comparing upstream toy traffic directly with
+IPsec traffic would confound application and architecture effects.
+
+### Padua reference workload
+
+The architecture campaign above deliberately uses a sustainable matched load
+to isolate the monolithic/distributed boundary. A separate
+`padua-reference` profile reproduces the workload behind Tables 2--4 of
+Dervisevic *et al.* rather than incorrectly calling that topology SECOQC. Its
+manifest is [`examples/comparison/padua-reference.json`](examples/comparison/padua-reference.json):
+six QKD links generate for 100 seconds at 15 or 100 kbit/s with the reported
+10, 30 or 50 kbit key sizes, while three ETSI 014 flows run from site 1 to 5,
+5 to 1 and 1 to 6. Classical links use 100 Mbit/s and 2 ms. The first two
+flows use OTP; 1--6 uses AES-256 with a 300,000-byte key lifetime.
+
+Run a time-scaled pilot first, then the full 130-second workload:
+
+```bash
+./docker/comparison/build-all.sh base-new-reference
+
+python3 automation/run-padua-reference.py \
+  --version working --deployment distributed --time-scale 0.1 --repetitions 3
+
+python3 automation/run-padua-reference.py \
+  --version working --deployment both --time-scale 1 --repetitions 5
+```
+
+The runner executes the JSON-driven upstream example as the monolithic control
+and six independent real-time KMS/ns-3 processes plus six CORE application
+endpoints as the distributed counterpart. The image
+`qkdnetsim:base-new-reference` uses ns-3's discrete-event simulator, matching
+the purpose of the published monolithic experiment. The distributed processes
+must use `RealtimeSimulatorImpl` because their TCP traffic crosses Docker veth
+and CORE. Consequently, simulated protocol statistics are comparable, whereas
+their wall-clock times are not an architecture-overhead result; use
+`automation/compare-architecture.py` for that separate experiment. A full
+unoptimised monolithic run can take several minutes, so its timeout is a
+900-second hang guard rather than the measurement window.
+
+The runner writes `summary.json`,
+`application-statistics.csv`, `qkd-link-statistics.csv`, raw logs and the
+per-run distributed JSON. `qkd-link-statistics.csv` reports generated keys,
+application-served material and only relay blocks whose end-to-end ACK was
+received, which makes its `relayed_keys` column comparable in meaning with the
+article. `key-accounting.csv` deliberately preserves both relay attempts and
+confirmed relay blocks; their difference measures retry/rollback overhead in
+the distributed control plane. Physical Q/S-buffer granularity is 512 bits,
+as in the upstream SECOQC/reference setup. Application key-use events and
+buffer time series are additional testbed measurements.
+
+The current QKDNetSim baseline and the figures published with an earlier model
+revision need not be numerically identical. The runner therefore keeps the
+published table, the current monolithic control and the distributed testbed as
+three distinct evidence sources. It does not silently use the paper values as
+the current baseline.
+
+Making the ETSI 014 application reliable across independent processes also
+required transport adaptations that are irrelevant in a single ns-3 process:
+listener sockets remain separate from accepted sockets; HTTP fragments are
+reassembled per TCP socket; partial writes are queued; responses arriving on a
+superseded socket are discarded instead of consuming a newer request's
+correlation entry; and key-ID proposals are serialized until Bob acknowledges
+them. A destination relay batch that races with a full buffer is rejected and
+rolled back rather than aborting the KMS. OTP keys are removed after one use.
+The test runner waits for receiver listeners and sender simulation completion;
+these are bounded protocol/recovery checks, not watchdogs that restart a
+container or hide a failed run.
+
+The article labels authentication as SHA2, but QKDNetSim currently implements
+VMAC, MD5 and SHA1 only. The profile therefore enables real OTP/AES execution
+and disables authentication in both deployments. This makes the unsupported
+field explicit instead of silently substituting a different algorithm; the
+published SHA2 figures are reference values, not an exact authentication
+reproduction claim.
+
 ### Optional QKD and post-quantum mixing
 
 The common KMS image is built with liboqs 0.12.0 and the matching
@@ -337,11 +567,16 @@ the runner require trace evidence of both QKD and PQC contributions at both
 endpoint KMSs in addition to its normal synchronized-key, IKE-rekey, ESP and
 plaintext-leakage checks.
 
-`QKD_PQC_FORCE_MIXING=0` retains QKDNetSim's adaptive policy: PQC contributes
-when the QKD buffer is below its readiness threshold. Setting it to `1` is the
-deterministic validation mode used to prove that the hybrid path is active.
-`QKD_PQC_SECURITY_EXPONENT` controls the experimental allocation policy; it
-does not select the ML-KEM security category.
+`QKD_PQC_FORCE_MIXING=0` retains QKDNetSim's adaptive policy. Falling below
+`qBthr` selects the allocation calculation; it does not by itself guarantee a
+non-zero PQC contribution. The requested size, available QKD material and
+`QKD_PQC_SECURITY_EXPONENT` determine the final split. With the normal
+512-bit VPN request and exponent 10 the calculation can legitimately choose
+an all-QKD result. Setting force mixing to `1` is the deterministic validation
+mode; `automation/run-regression.py --pqc-adaptive` provides a deterministic
+test of the threshold-driven branch itself. The exponent controls the
+experimental allocation policy and does not select the ML-KEM security
+category.
 
 Each endpoint KMS owns two directional PQC pools. The local pool contains
 ML-KEM secrets generated for and offered to its peer, while the receive pool
@@ -742,6 +977,14 @@ does not execute those paths.
   longer represented current depletion. `SBufferClientCheck` now also uses
   `GetSBitCount()`, which reports the present content rather than historical
   accumulated state.
+- **Transform-pool assertion under concurrency.** `m_currentKeyBit` is global
+  S-buffer accounting and may include keys already reserved in ETSI 004 stream
+  or application supply pools. `GetTransformCandidate()` can select only READY
+  material from `m_keys`; asserting equality between that selectable pool and
+  the global counter intermittently terminated a KMS when concurrent relay
+  flows accumulated reserved keys. Availability now uses
+  `GetTransformBitCount()`, and the selector no longer treats the diagnostic
+  accounting comparison as a fatal invariant.
 - **`skey_create` response semantics.** A forwarded multi-hop request was once
   acknowledged immediately by the trusted KMS and was not fully represented
   in `m_httpRequestsQueryKMS`. KMS Alice could therefore consider the internal
@@ -1328,6 +1571,13 @@ internal QKDNetSim mechanisms, not new ETSI API methods.
   host-side four-variant VPN regression orchestrator. It owns image/Compose
   lifecycle, repeated execution, expected negative testing, stale endpoint
   cleanup, and JSON/CSV/log evidence collection.
+- **[`automation/compare-architecture.py`](automation/compare-architecture.py)**
+  and **[`docker/comparison/`](docker/comparison/)** — build and execute the
+  pinned old/new monolithic-versus-distributed comparison pairs with matched
+  workload instrumentation.
+- **[`automation/plot_architecture_comparison.py`](automation/plot_architecture_comparison.py)**
+  — converts a comparison `summary.json` into the dependency-free SVG used to
+  inspect delivery, goodput and resource cost.
 
 ---
 

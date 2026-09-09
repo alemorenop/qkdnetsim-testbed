@@ -31,6 +31,10 @@ declare -A ROLE_TO_FLAG=(
     [KMSA]=devKmsA
     [KMSB]=devKmsB
     [CONTROL]=devControl
+    [APP]=devApp
+    [EDGE0]=dev0
+    [EDGE1]=dev1
+    [EDGE2]=dev2
 )
 
 extra_args=()
@@ -44,6 +48,10 @@ for iface in $(ls /sys/class/net | grep -v '^lo$'); do
             if [ "${!var}" = "$prefix" ] && [ -n "${ROLE_TO_FLAG[$role]:-}" ]; then
                 extra_args+=("--${ROLE_TO_FLAG[$role]}=${iface}")
                 echo "[entrypoint] $iface ($ip4) -> --${ROLE_TO_FLAG[$role]}=${iface}"
+                if [ "$role" = "CONTROL" ] && [ -n "${KMS_HOP_DELAY_MS:-}" ]; then
+                    tc qdisc replace dev "$iface" root netem delay "${KMS_HOP_DELAY_MS}ms"
+                    echo "[entrypoint] $iface KMS egress delay=${KMS_HOP_DELAY_MS}ms"
+                fi
             fi
         done
     fi

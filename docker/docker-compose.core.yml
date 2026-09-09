@@ -24,6 +24,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../core:/workspace/core:ro
       - ../old-examples/core:/workspace/old-examples/core:ro
+      - ../examples/comparison:/workspace/examples/comparison:ro
+      - ../results:/workspace/results
     ports:
       # CORE is still restricted to host loopback by this publication rule.
       - "127.0.0.1:${CORE_GRPC_PORT:-50051}:50051"

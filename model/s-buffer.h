@@ -127,6 +127,13 @@ namespace ns3 {
       uint32_t GetSBitCount();
 
       /**
+       * Return READY material from the transform pool only. Supply/stream
+       * keys are already reserved for a peer application or ETSI 004 stream
+       * and must not satisfy a new enc_keys request.
+       */
+      uint32_t GetTransformBitCount() const;
+
+      /**
        * @brief Get number of keys that are in default size
        * @param uint32_t a target number of required keys
        * @return uint32_t number of key in default size

@@ -211,6 +211,18 @@ namespace ns3 {
         return GetBitCount();
     }
 
+    uint32_t
+    SBuffer::GetTransformBitCount() const
+    {
+        uint32_t readyBits = 0;
+        for(const auto& [id, key] : m_keys)
+        {
+            if(key->GetState() == QKDKey::READY)
+                readyBits += key->GetSizeInBits();
+        }
+        return readyBits;
+    }
+
 
     bool
     SBuffer::StoreKey(Ptr<QKDKey> key, bool fireTraces)
@@ -393,10 +405,11 @@ namespace ns3 {
                 }else
                     NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits() );
             }
-
-            NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount);
-            NS_LOG_FUNCTION(this << "m_currentKeyBit: " << m_currentKeyBit);
-            NS_ASSERT(totalReadyKeyCount == m_currentKeyBit);
+            // Only m_keys is eligible for a new transformation.  The global
+            // accounting counter may also include material already reserved
+            // in stream/supply pools, so it is not an invariant of this
+            // selector and must not be used as an assertion here.
+            NS_LOG_FUNCTION(this << "transformReadyBits: " << totalReadyKeyCount);
 
 
             if (readyKeys.empty()) {
@@ -426,9 +439,9 @@ namespace ns3 {
                     NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits());
                 }
             }
-            NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount);
-            NS_LOG_FUNCTION(this << "m_currentKeyBit: " << m_currentKeyBit);
-            NS_ASSERT(totalReadyKeyCount == m_currentKeyBit);
+            // Stream and supply keys have already been reserved and are not
+            // candidates for a new transformation request.
+            NS_LOG_FUNCTION(this << "transformReadyBits: " << totalReadyKeyCount);
 
 
             for (const auto& [id, key] : m_keys) 
@@ -516,7 +529,7 @@ namespace ns3 {
                     NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits() << "\t READY");
                 }else
                     NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits() );
-            } 
+            }
             NS_LOG_FUNCTION(this << "m_notReadyBitCount: " << m_notReadyBitCount);
             NS_LOG_FUNCTION(this << "m_currentKeyBit: " << m_currentKeyBit);
             NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount); 

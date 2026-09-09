@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import queue
+import shutil
 import shlex
 import subprocess
 import sys
@@ -28,6 +29,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parents[1]
+DOCKER = shutil.which("docker") or str(
+    Path.home() / "AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe"
+)
 CORE_COMPOSE = ROOT / "docker" / "docker-compose.core.yml"
 COMPOSE_FILES = (
     ROOT / "docker" / "docker-compose.vpn.yml",
@@ -103,12 +107,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Rebuild QKD, VPN and CORE images before the campaign",
     )
-    parser.add_argument(
+    pqc_mode = parser.add_mutually_exclusive_group()
+    pqc_mode.add_argument(
         "--pqc",
         action="store_true",
         help=(
             "Enable forced QKD+PQC delivery in the endpoint KMSs and require "
             "QKD/PQC contribution evidence from the VPN runner"
+        ),
+    )
+    pqc_mode.add_argument(
+        "--pqc-adaptive",
+        action="store_true",
+        help=(
+            "Exercise qBthr-driven QKD+PQC mixing without forceMixing; uses "
+            "a high readiness threshold and exponent 1 so the VPN-sized key "
+            "contains measurable contributions from both sources"
         ),
     )
     parser.add_argument(
@@ -136,7 +150,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def compose(file: Path, *args: str) -> list[str]:
-    return ["docker", "compose", "-f", str(file), *args]
+    return [DOCKER, "compose", "-f", str(file), *args]
 
 
 def run(
@@ -226,7 +240,7 @@ def remove_stale_endpoints() -> None:
     identifiers: list[str] = []
     for prefix in ("qkd-core-vpn-",):
         result = run(
-            ["docker", "ps", "-aq", "--filter", f"name={prefix}"],
+            [DOCKER, "ps", "-aq", "--filter", f"name={prefix}"],
             check=False,
             echo_output=False,
         )
@@ -237,19 +251,19 @@ def remove_stale_endpoints() -> None:
             "[REGRESSION] removing stale CORE endpoints=" + ",".join(unique),
             flush=True,
         )
-        run(["docker", "rm", "-f", *unique], echo_output=False)
+        run([DOCKER, "rm", "-f", *unique], echo_output=False)
 
 
 def build_images() -> None:
     run(
         [
-            "docker", "build", "-t", "qkdnetsim-testbed:latest",
+            DOCKER, "build", "-t", "qkdnetsim-testbed:latest",
             "-f", "docker/Dockerfile", ".",
         ]
     )
     run(
         [
-            "docker", "build", "-t", "qkdnetsim-vpn-endpoint:latest",
+            DOCKER, "build", "-t", "qkdnetsim-vpn-endpoint:latest",
             "-f", "docker/vpn/Dockerfile.vpn", ".",
         ]
     )
@@ -277,7 +291,7 @@ def matrix(args: argparse.Namespace) -> list[Case]:
         "--min-generations", str(args.min_generations),
         "--rekey-interval", str(args.rekey_interval),
         "--max-rekey-loss-percent", str(args.max_rekey_loss_percent),
-        *(("--require-pqc",) if args.pqc else ()),
+        *(("--require-pqc",) if (args.pqc or args.pqc_adaptive) else ()),
     )
     return [
         Case(
@@ -457,15 +471,20 @@ def write_summary(
 
 def main() -> int:
     args = parse_args()
-    if args.pqc:
+    if args.pqc or args.pqc_adaptive:
         # Compose expands these values when each case recreates its KMS
-        # containers.  Forced mixing turns the optional/adaptive upstream
-        # policy into a deterministic functional test.
+        # containers.  Both modes require trace evidence at the endpoints;
+        # adaptive mode chooses parameters that deterministically enter the
+        # threshold-controlled allocation branch for a VPN-sized key.
         os.environ["QKD_PQC_ENABLED"] = "1"
-        os.environ["QKD_PQC_FORCE_MIXING"] = "1"
+        os.environ["QKD_PQC_FORCE_MIXING"] = "0" if args.pqc_adaptive else "1"
         os.environ["QKD_PQC_SECURITY_EXPONENT"] = str(
-            args.pqc_security_exponent
+            1 if args.pqc_adaptive else args.pqc_security_exponent
         )
+        if args.pqc_adaptive:
+            # Keep the S-buffer below READY for this functional test.  This is
+            # intentionally a test setting, not the production default.
+            os.environ["QKD_BUFFER_THRESHOLD_BITS"] = "400000000"
     cases = matrix(args)
     if not args.skip_negative_tests:
         cases.append(negative_case(args))

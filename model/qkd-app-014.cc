@@ -46,6 +46,11 @@ QKDApp014::GetTypeId()
                    UintegerValue(3),
                    MakeUintegerAccessor(&QKDApp014::m_numberOfKeysKMS),
                    MakeUintegerChecker<uint32_t>())
+    .AddAttribute("KeyBufferLowWatermark",
+                   "Refill an outbound key store at or below this number of keys",
+                   UintegerValue(1),
+                   MakeUintegerAccessor(&QKDApp014::m_keyBufferLowWatermark),
+                   MakeUintegerChecker<uint32_t>())
     .AddAttribute("LengthOfAuthenticationTag",
                    "The default length of the authentication tag",
                    UintegerValue(256), //32 bytes
@@ -137,7 +142,9 @@ uint32_t QKDApp014::m_applicationCounts = 0;
  */
 
 QKDApp014::QKDApp014()
-  : m_signalingSocketApp(nullptr),
+  : m_signalingListenSocketApp(nullptr),
+    m_dataListenSocketApp(nullptr),
+    m_signalingSocketApp(nullptr),
     m_dataSocketApp(nullptr),
     m_socketToKMS(nullptr),
     m_state(NOT_STARTED),
@@ -178,8 +185,10 @@ QKDApp014::DoDispose()
 
     //Data sockets
     m_dataSocketApp = nullptr;
+    m_dataListenSocketApp = nullptr;
     //Signaling sockets
     m_signalingSocketApp = nullptr;
+    m_signalingListenSocketApp = nullptr;
     //KMS sockets
     m_socketToKMS = nullptr;
 
@@ -223,6 +232,7 @@ QKDApp014::Setup(
 )
 {
   NS_LOG_FUNCTION(this);
+
   if(type == "alice")
     m_master = 1;
   else
@@ -339,25 +349,28 @@ void
 QKDApp014::PrepareSocketToApp()
 {
   NS_LOG_FUNCTION(this);
+  if(GetState() == STOPPED)
+    return;
+
+  const InetSocketAddress peerSignaling(
+    InetSocketAddress::ConvertFrom(m_peer).GetIpv4(), m_portSignaling);
+  const InetSocketAddress localSignaling(
+    InetSocketAddress::ConvertFrom(m_local).GetIpv4(), m_portSignaling);
+  const InetSocketAddress peerData(
+    InetSocketAddress::ConvertFrom(m_peer).GetIpv4(),
+    InetSocketAddress::ConvertFrom(m_peer).GetPort());
+  const InetSocketAddress localData(
+    InetSocketAddress::ConvertFrom(m_local).GetIpv4(),
+    InetSocketAddress::ConvertFrom(m_local).GetPort());
 
   ////////////////
   // SIGNALING SOCKET
   ////////////////
 
-  if(!m_signalingSocketApp  || !m_isSignalingConnectedToApp)
+  if(m_master && (!m_signalingSocketApp || !m_isSignalingConnectedToApp))
   {
 
-    InetSocketAddress m_peerSignaling = InetSocketAddress(
-      InetSocketAddress::ConvertFrom(m_peer).GetIpv4(),
-      m_portSignaling
-    );
-
-    InetSocketAddress m_localSignaling = InetSocketAddress(
-      InetSocketAddress::ConvertFrom(m_local).GetIpv4(),
-      m_portSignaling
-    );
-
-    NS_LOG_FUNCTION(this << m_peerSignaling << m_localSignaling);
+    NS_LOG_FUNCTION(this << peerSignaling << localSignaling);
 
     if(!m_signalingSocketApp)
     {
@@ -368,57 +381,44 @@ QKDApp014::PrepareSocketToApp()
         MakeCallback(&QKDApp014::ConnectionSignalingToAppSucceeded, this),
         MakeCallback(&QKDApp014::ConnectionSignalingToAppFailed, this)
       );
+      m_signalingSocketApp->SetSendCallback(
+        MakeCallback(&QKDApp014::FlushSignalingQueue, this));
       m_signalingSocketApp->SetRecvCallback(MakeCallback(&QKDApp014::HandleReadSignalingFromApp, this));
-      m_signalingSocketApp->SetAcceptCallback(
-        MakeCallback(&QKDApp014::ConnectionRequestedSignalingFromApp, this),
-        MakeCallback(&QKDApp014::HandleAcceptSignalingFromApp, this)
-      );
       m_signalingSocketApp->SetCloseCallbacks(
         MakeCallback(&QKDApp014::HandlePeerCloseSignalingFromApp, this),
         MakeCallback(&QKDApp014::HandlePeerErrorSignalingFromApp, this)
       );
-      if(m_master)
-        m_signalingSocketApp->Bind();
+      m_signalingSocketApp->Bind();
     }
 
     if(!m_isSignalingConnectedToApp)
     {
-      if(m_master)
-      {
-        NS_LOG_FUNCTION(this << "Let's connect to peer!");
+      NS_LOG_FUNCTION(this << "Let's connect to peer!");
 
-        const auto ret [[maybe_unused]] = m_signalingSocketApp->Connect(m_peerSignaling);
-        NS_LOG_DEBUG(this << " Connect() return value= " << ret << " GetErrNo= " << m_signalingSocketApp->GetErrno()
-                          << ".");
-        NS_ASSERT_MSG(m_signalingSocketApp, "Failed creating socket.");
-
-      }else{
-        if(m_signalingSocketApp->Bind(m_localSignaling) == -1)
-        {
-            NS_FATAL_ERROR("Failed to bind socket");
-        }
-        NS_LOG_FUNCTION(this << "PEER Listen");
-        m_signalingSocketApp->Listen();
-      }
+      const auto ret [[maybe_unused]] = m_signalingSocketApp->Connect(peerSignaling);
+      NS_LOG_DEBUG(this << " Connect() return value= " << ret << " GetErrNo= " << m_signalingSocketApp->GetErrno()
+                        << ".");
+      NS_ASSERT_MSG(m_signalingSocketApp, "Failed creating socket.");
     }
+  }
+  else if(!m_master && !m_signalingListenSocketApp)
+  {
+    m_signalingListenSocketApp = Socket::CreateSocket(GetNode(), TcpSocketFactory::GetTypeId());
+    m_signalingListenSocketApp->SetAcceptCallback(
+      MakeCallback(&QKDApp014::ConnectionRequestedSignalingFromApp, this),
+      MakeCallback(&QKDApp014::HandleAcceptSignalingFromApp, this));
+    if(m_signalingListenSocketApp->Bind(localSignaling) == -1)
+      NS_FATAL_ERROR("Failed to bind signaling listener");
+    m_signalingListenSocketApp->Listen();
+    NS_LOG_FUNCTION(this << "PEER signaling listener ready" << m_signalingListenSocketApp);
   }
 
     ////////////////
     // DATA SOCKET
     ////////////////
 
-  if(!m_dataSocketApp  || !m_isDataConnectedToApp)
+  if(m_master && (!m_dataSocketApp || !m_isDataConnectedToApp))
   {
-
-    InetSocketAddress m_peerData = InetSocketAddress(
-      InetSocketAddress::ConvertFrom(m_peer).GetIpv4(),
-      InetSocketAddress::ConvertFrom(m_peer).GetPort()
-    );
-
-    InetSocketAddress m_localData = InetSocketAddress(
-      InetSocketAddress::ConvertFrom(m_local).GetIpv4(),
-      InetSocketAddress::ConvertFrom(m_local).GetPort()
-    );
 
     if(!m_dataSocketApp)
     {
@@ -434,41 +434,37 @@ QKDApp014::PrepareSocketToApp()
         MakeCallback(&QKDApp014::ConnectionToAppFailed, this)
       );
       m_dataSocketApp->SetRecvCallback(MakeCallback(&QKDApp014::HandleReadFromApp, this));
-      m_dataSocketApp->SetAcceptCallback(
-        MakeCallback(&QKDApp014::ConnectionRequestedFromApp, this),
-        MakeCallback(&QKDApp014::HandleAcceptFromApp, this)
-      );
       m_dataSocketApp->SetCloseCallbacks(
         MakeCallback(&QKDApp014::HandlePeerCloseFromApp, this),
         MakeCallback(&QKDApp014::HandlePeerErrorFromApp, this)
       );
-      if(m_master)
-        m_dataSocketApp->Bind();
+      m_dataSocketApp->Bind();
     }
 
     if(!m_isDataConnectedToApp)
     {
-      if(m_master)
-      {
-        NS_LOG_FUNCTION(this << "Let's connect to DATA peer!");
+      NS_LOG_FUNCTION(this << "Let's connect to DATA peer!");
 
-        const auto ret [[maybe_unused]] = m_dataSocketApp->Connect(m_peerData);
-        NS_LOG_DEBUG(this << " Connect() return value= " << ret << " GetErrNo= " << m_dataSocketApp->GetErrno()
-                          << ".");
-        NS_ASSERT_MSG(m_dataSocketApp, "Failed creating DATA socket.");
-
-      }else{
-        if(m_dataSocketApp->Bind(m_localData) == -1)
-        {
-            NS_FATAL_ERROR("Failed to bind DATA socket");
-        }
-        NS_LOG_FUNCTION(this << "PEER DATA Listen");
-        m_dataSocketApp->Listen();
-        m_appListenReadyTrace(GetNode()->GetId());
-      }
+      const auto ret [[maybe_unused]] = m_dataSocketApp->Connect(peerData);
+      NS_LOG_DEBUG(this << " Connect() return value= " << ret << " GetErrNo= " << m_dataSocketApp->GetErrno()
+                        << ".");
+      NS_ASSERT_MSG(m_dataSocketApp, "Failed creating DATA socket.");
     }
-
-  }else
+  }
+  else if(!m_master && !m_dataListenSocketApp)
+  {
+    m_dataListenSocketApp = Socket::CreateSocket(
+      GetNode(), m_socketType == "tcp" ? TcpSocketFactory::GetTypeId() : UdpSocketFactory::GetTypeId());
+    m_dataListenSocketApp->SetAcceptCallback(
+      MakeCallback(&QKDApp014::ConnectionRequestedFromApp, this),
+      MakeCallback(&QKDApp014::HandleAcceptFromApp, this));
+    if(m_dataListenSocketApp->Bind(localData) == -1)
+      NS_FATAL_ERROR("Failed to bind DATA listener");
+    m_dataListenSocketApp->Listen();
+    m_appListenReadyTrace(GetNode()->GetId());
+    NS_LOG_FUNCTION(this << "PEER DATA listener ready" << m_dataListenSocketApp);
+  }
+  else
     NS_LOG_FUNCTION(this << "sockets exists" << m_signalingSocketApp << m_dataSocketApp);
 
 }
@@ -482,8 +478,6 @@ QKDApp014::ConnectionRequestedSignalingFromApp(Ptr<Socket> socket, const Address
     << InetSocketAddress::ConvertFrom(from).GetPort()
   );
   NS_LOG_FUNCTION(this << "requested on socket " << socket);
-  m_isSignalingConnectedToApp = true;
-
   return true;
 }
 
@@ -495,8 +489,6 @@ QKDApp014::ConnectionRequestedFromApp(Ptr<Socket> socket, const Address &from)
     << InetSocketAddress::ConvertFrom(from).GetPort()
   );
   NS_LOG_FUNCTION(this << "requested on socket " << socket);
-  m_isDataConnectedToApp = true;
-
   return true;
 }
 
@@ -531,9 +523,15 @@ QKDApp014::HandleAcceptFromApp(Ptr<Socket> s, const Address& from)
     << InetSocketAddress::ConvertFrom(from).GetIpv4()
     << InetSocketAddress::ConvertFrom(from).GetPort()
   );
+  if(m_dataSocketApp && m_dataSocketApp != s)
+    m_dataSocketApp->Close();
   m_dataSocketApp = s;
+  m_isDataConnectedToApp = true;
   NS_LOG_FUNCTION(this << "accepted on socket " << s);
   s->SetRecvCallback(MakeCallback(&QKDApp014::HandleReadFromApp, this));
+  s->SetCloseCallbacks(
+    MakeCallback(&QKDApp014::HandlePeerCloseFromApp, this),
+    MakeCallback(&QKDApp014::HandlePeerErrorFromApp, this));
 
 }
 
@@ -544,9 +542,17 @@ QKDApp014::HandleAcceptSignalingFromApp(Ptr<Socket> s, const Address& from)
     << InetSocketAddress::ConvertFrom(from).GetIpv4()
     << InetSocketAddress::ConvertFrom(from).GetPort()
   );
+  if(m_signalingSocketApp && m_signalingSocketApp != s)
+    m_signalingSocketApp->Close();
   m_signalingSocketApp = s;
+  m_isSignalingConnectedToApp = true;
   NS_LOG_FUNCTION(this << "accepted on socket " << s);
   s->SetRecvCallback(MakeCallback(&QKDApp014::HandleReadSignalingFromApp, this));
+  s->SetSendCallback(MakeCallback(&QKDApp014::FlushSignalingQueue, this));
+  s->SetCloseCallbacks(
+    MakeCallback(&QKDApp014::HandlePeerCloseSignalingFromApp, this),
+    MakeCallback(&QKDApp014::HandlePeerErrorSignalingFromApp, this));
+  FlushSignalingQueue(s);
 
 }
 
@@ -565,6 +571,14 @@ void
 QKDApp014::ConnectionToAppFailed(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << "failed via socket " << socket);
+  if(socket == m_dataSocketApp)
+  {
+    m_dataSocketApp = nullptr;
+    m_isDataConnectedToApp = false;
+    socket->Close();
+    if(m_master && GetState() != STOPPED)
+      Simulator::Schedule(MilliSeconds(100), &QKDApp014::PrepareSocketToApp, this);
+  }
 }
 
 void
@@ -572,6 +586,80 @@ QKDApp014::ConnectionSignalingToAppSucceeded(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << "succeeded via socket " << socket);
   m_isSignalingConnectedToApp = true;
+  FlushSignalingQueue(socket);
+}
+
+void
+QKDApp014::SendSignalingMessage(Ptr<Packet> packet)
+{
+  NS_LOG_FUNCTION(this << packet);
+  m_signalingTxQueue.push_back(packet->Copy());
+  if(m_signalingSocketApp && m_isSignalingConnectedToApp)
+    FlushSignalingQueue(m_signalingSocketApp);
+}
+
+void
+QKDApp014::FlushSignalingQueue(Ptr<Socket> socket, uint32_t)
+{
+  NS_LOG_FUNCTION(this << socket << m_signalingTxQueue.size());
+  if(!socket || !m_isSignalingConnectedToApp ||
+     (m_master && m_signalingRequestPending))
+    return;
+
+  while(!m_signalingTxQueue.empty())
+  {
+    // Preserve the complete HTTP message until the peer acknowledges it.
+    // Socket::Send may consume a temporary copy, but a timeout can still
+    // retransmit the original on a fresh connection.
+    Ptr<Packet> packet = m_signalingTxQueue.front()->Copy();
+    const int sent = socket->Send(packet);
+    if(sent <= 0)
+      break;
+    if(static_cast<uint32_t>(sent) < packet->GetSize())
+    {
+      ConnectionSignalingToAppFailed(socket);
+      break;
+    }
+    if(m_master)
+    {
+      m_signalingRequestPending = true;
+      if(m_signalingRequestTimeoutEvent.IsPending())
+        Simulator::Cancel(m_signalingRequestTimeoutEvent);
+      m_signalingRequestTimeoutEvent = Simulator::Schedule(
+        Seconds(2), &QKDApp014::SignalingRequestTimeout, this);
+      break;
+    }
+    else
+      m_signalingTxQueue.pop_front();
+  }
+}
+
+void
+QKDApp014::SignalingRequestTimeout()
+{
+  NS_LOG_FUNCTION(this << m_signalingTxQueue.size());
+  if(GetState() == STOPPED)
+    return;
+  m_signalingRequestPending = false;
+  if(m_signalingSocketApp)
+  {
+    Ptr<Socket> socket = m_signalingSocketApp;
+    m_signalingSocketApp = nullptr;
+    m_isSignalingConnectedToApp = false;
+    socket->Close();
+  }
+  // A key-ID ACK also acts as end-to-end readiness confirmation.  If it did
+  // not arrive, the peer may have accepted signaling but not the independent
+  // data connection (the sender would otherwise fill its TCP window and then
+  // report only missed sends). Recreate both client sockets as one handshake.
+  if(m_master && m_dataSocketApp)
+  {
+    Ptr<Socket> socket = m_dataSocketApp;
+    m_dataSocketApp = nullptr;
+    m_isDataConnectedToApp = false;
+    socket->Close();
+  }
+  PrepareSocketToApp();
 }
 
 void
@@ -585,6 +673,18 @@ void
 QKDApp014::ConnectionSignalingToAppFailed(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << "failed via socket " << socket);
+  if(socket == m_signalingSocketApp)
+  {
+    m_buffer_kms.erase(socket);
+    m_signalingSocketApp = nullptr;
+    m_isSignalingConnectedToApp = false;
+    m_signalingRequestPending = false;
+    if(m_signalingRequestTimeoutEvent.IsPending())
+      Simulator::Cancel(m_signalingRequestTimeoutEvent);
+    socket->Close();
+    if(m_master && GetState() != STOPPED)
+      Simulator::Schedule(MilliSeconds(100), &QKDApp014::PrepareSocketToApp, this);
+  }
 }
 
 void
@@ -603,23 +703,27 @@ void
 QKDApp014::HandlePeerCloseFromApp(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  ConnectionToAppFailed(socket);
 }
 void
 QKDApp014::HandlePeerErrorFromApp(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  ConnectionToAppFailed(socket);
 }
 
 void
 QKDApp014::HandlePeerCloseSignalingFromApp(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  ConnectionSignalingToAppFailed(socket);
 }
 
 void
 QKDApp014::HandlePeerErrorSignalingFromApp(Ptr<Socket> socket)
 {
   NS_LOG_FUNCTION(this << socket);
+  ConnectionSignalingToAppFailed(socket);
 }
 
 void
@@ -645,7 +749,9 @@ QKDApp014::HandleReadFromKMS(Ptr<Socket> socket)
           );
 
       }
-      HttpPacketReceived(packet, from, socket);
+      // The protocol role belongs to this receive callback, not to whichever
+      // socket happens to be stored as "current" after a reconnect.
+      HttpPacketReceived(packet, from, socket, false);
 
   }
 }
@@ -701,7 +807,7 @@ QKDApp014::HandleReadSignalingFromApp(Ptr<Socket> socket)
           );
 
       }
-      HttpPacketReceived(packet, from, socket);
+      HttpPacketReceived(packet, from, socket, true);
 
   }
 }
@@ -751,12 +857,26 @@ QKDApp014::QAppPacketReceived(const Ptr<Packet> &p, const Address &from, Ptr<Soc
 }
 
 void
-QKDApp014::HttpPacketReceived(const Ptr<Packet> &p, const Address &from, Ptr<Socket> socket)
+QKDApp014::HttpPacketReceived(const Ptr<Packet> &p, const Address &from,
+                              Ptr<Socket> socket, bool signaling)
 {
   NS_LOG_FUNCTION(this << p->GetUid() << p->GetSize() << from);
 
-  // Maintain per-peer buffer
-  Ptr<Packet> &buffer = m_buffer_kms[from];
+  // A timeout closes and replaces the TCP connection. ns-3 may still deliver
+  // an already-scheduled callback from the old socket. Such a response must
+  // not consume the correlation entry belonging to the replacement request.
+  if((signaling && socket != m_signalingSocketApp) ||
+     (!signaling && socket != m_socketToKMS))
+  {
+    m_buffer_kms.erase(socket);
+    NS_LOG_DEBUG("Ignoring HTTP bytes from a superseded socket");
+    return;
+  }
+
+  // Maintain one byte-stream buffer per TCP socket. KMS traffic and peer
+  // signaling can otherwise be coalesced into the same HTTP body because the
+  // Address returned by RecvFrom() is not stable for connected TCP sockets.
+  Ptr<Packet> &buffer = m_buffer_kms[socket];
   if (!buffer) buffer = Create<Packet>(0);
   buffer->AddAtEnd(p);
 
@@ -787,12 +907,7 @@ QKDApp014::HttpPacketReceived(const Ptr<Packet> &p, const Address &from, Ptr<Soc
     Ptr<Packet> completePacket = buffer->CreateFragment(0, static_cast<uint32_t>(httpMsgSize));
     buffer->RemoveAtStart(static_cast<uint32_t>(httpMsgSize));
 
-    Ipv4Address peerIp = GetPeerIp();
-    Ipv4Address senderIp = InetSocketAddress::ConvertFrom(from).GetIpv4();
-
-    NS_LOG_DEBUG("[DEBUG] Received from: " << senderIp << ", expected peer IP: " << peerIp);
-
-    if (senderIp == peerIp) {
+    if (signaling) {
       m_rxSigTrace(GetId(), completePacket);
       ProcessSignalingPacketFromApp(request, completePacket, socket);
     } else {
@@ -828,6 +943,9 @@ QKDApp014::InitKeyStores()
   m_commonStore.clear();
   m_encStore.clear();
   m_authStore.clear();
+  m_encryptionRequestPending = false;
+  m_authenticationRequestPending = false;
+  m_kmsHttpReqQueue.clear();
 
 }
 
@@ -839,10 +957,14 @@ QKDApp014::ManageStores()
     if(m_internalAppWait) m_internalAppWait = false;
     if(m_master)
     { //Only at Primary application!
-      if(GetEncryptionKeySize() != 0 && m_encStore.empty()) //Check the state of encryption key store
-          GetKeysFromKMS("encryption"); // 0 - Encryption key
-      if(GetAuthenticationKeySize() != 0 && m_authStore.empty()) //Check the state of authentication key store
-          GetKeysFromKMS("authentication"); // 1 - Authentication key
+      if(GetEncryptionKeySize() != 0 &&
+         m_encStore.size() <= m_keyBufferLowWatermark &&
+         !m_encryptionRequestPending)
+          GetKeysFromKMS("encryption");
+      if(GetAuthenticationKeySize() != 0 &&
+         m_authStore.size() <= m_keyBufferLowWatermark &&
+         !m_authenticationRequestPending)
+          GetKeysFromKMS("authentication");
       CheckAppState(); 
     }
 }
@@ -858,7 +980,12 @@ QKDApp014::GetLocalKey(std::string type, std::string keyId)
       if(it != m_encStore.end()){
         localKey = it->second;
         NS_LOG_FUNCTION(this << localKey->GetLifetime());
-        if( localKey->GetLifetime() < 2*m_size ){
+        if(m_encryptionType == QKDEncryptor::QKDCRYPTO_OTP){
+          // A one-time pad key must protect exactly one packet. Keep the Ptr
+          // returned to this call alive, but remove it from the local store so
+          // the next packet cannot reuse the same material.
+          m_encStore.erase(it);
+        }else if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && localKey->GetLifetime() < 2*m_size ){
           NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
           m_encStore.erase(it);
         }else
@@ -884,7 +1011,9 @@ QKDApp014::GetLocalKey(std::string type, std::string keyId)
     if(it != m_commonStore.end()){
       localKey = it->second;
       if(localKey->GetType() == AppKey::ENCRYPTION){
-        if( localKey->GetLifetime() < 2*m_size ){
+        if(m_encryptionType == QKDEncryptor::QKDCRYPTO_OTP){
+          m_commonStore.erase(it);
+        }else if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && localKey->GetLifetime() < 2*m_size ){
           NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
           m_commonStore.erase(it);
         }else
@@ -963,7 +1092,11 @@ QKDApp014::PopHttpKmsRequest()
 {
   NS_LOG_FUNCTION(this);
   std::string output;
-  if(m_kmsHttpReqQueue.empty())   NS_LOG_ERROR(this << "request queue is empty");
+  if(m_kmsHttpReqQueue.empty())
+  {
+    NS_LOG_ERROR(this << "request queue is empty");
+    return output;
+  }
   auto it = m_kmsHttpReqQueue.begin();
   output = *it;
   m_kmsHttpReqQueue.erase(it);
@@ -976,7 +1109,11 @@ QKDApp014::PopHttpAppRequest()
 {
   NS_LOG_FUNCTION(this);
   std::vector<std::string> keyIds {};
-  if(m_appHttpReqQueue.empty())   NS_LOG_ERROR(this << "request queue is empty");
+  if(m_appHttpReqQueue.empty())
+  {
+    NS_LOG_ERROR(this << "request queue is empty");
+    return keyIds;
+  }
   auto it = m_appHttpReqQueue.begin();
   keyIds = *it;
   m_appHttpReqQueue.erase(it);
@@ -1025,14 +1162,37 @@ QKDApp014::StopApplication()
 {
   NS_LOG_FUNCTION(this);
   if(m_sendEvent.IsPending()) Simulator::Cancel(m_sendEvent);
+  if(m_scheduleManageStores.IsPending()) Simulator::Cancel(m_scheduleManageStores);
+  if(m_kmsRequestTimeoutEvent.IsPending()) Simulator::Cancel(m_kmsRequestTimeoutEvent);
+  if(m_signalingRequestTimeoutEvent.IsPending()) Simulator::Cancel(m_signalingRequestTimeoutEvent);
+
+  // Enter STOPPED and detach every member before Close().  Close callbacks are
+  // also used for runtime reconnection; leaving the members attached during
+  // normal application shutdown could therefore recreate sockets after the
+  // stop time and keep a realtime endpoint alive indefinitely.
+  SwitchAppState(STOPPED);
+  Ptr<Socket> dataSocket = m_dataSocketApp;
+  Ptr<Socket> signalingSocket = m_signalingSocketApp;
+  Ptr<Socket> dataListener = m_dataListenSocketApp;
+  Ptr<Socket> signalingListener = m_signalingListenSocketApp;
+  Ptr<Socket> kmsSocket = m_socketToKMS;
+  m_dataSocketApp = nullptr;
+  m_signalingSocketApp = nullptr;
+  m_dataListenSocketApp = nullptr;
+  m_signalingListenSocketApp = nullptr;
+  m_socketToKMS = nullptr;
+  m_isDataConnectedToApp = false;
+  m_isSignalingConnectedToApp = false;
+  m_signalingRequestPending = false;
 
   //Close sockets
-  if(m_dataSocketApp)        m_dataSocketApp->Close();
-  if(m_signalingSocketApp)   m_signalingSocketApp->Close();
-  if(m_socketToKMS)          m_socketToKMS->Close();
+  if(dataSocket) dataSocket->Close();
+  if(signalingSocket) signalingSocket->Close();
+  if(dataListener) dataListener->Close();
+  if(signalingListener) signalingListener->Close();
+  if(kmsSocket) kmsSocket->Close();
 
   InitKeyStores(); //Clear key stores
-  SwitchAppState(STOPPED);
 
 }
 
@@ -1111,9 +1271,18 @@ QKDApp014::SendDataPacket()
 
     NS_LOG_FUNCTION(this << "sending data packet id" << packet->GetUid() << packet->GetSize());
 
-    //Send packet!
-    m_txTrace(GetId(), packet);
-    m_dataSocketApp->Send(packet);
+    // Count a packet as transmitted only after TCP accepted it.  Emitting Tx
+    // before Send() made a full socket buffer look like downstream loss and
+    // materially overstated throughput in high-rate real-time experiments.
+    const int sentBytes = m_dataSocketApp->Send(packet);
+    if(sentBytes >= 0)
+      m_txTrace(GetId(), packet);
+    else
+    {
+      m_mxTrace(GetId(), packet);
+      NS_LOG_WARN(this << "application socket rejected packet, errno="
+                       << m_dataSocketApp->GetErrno());
+    }
 
     SwitchAppState(READY); //Application is now ready
     ManageStores(); //Fill stores if necessary
@@ -1233,9 +1402,15 @@ QKDApp014::GetKeysFromKMS(std::string keyType)
   uint32_t number {m_numberOfKeysKMS};
   uint32_t size {0};
   if(keyType == "encryption")
+  {
     size = GetEncryptionKeySize();
+    m_encryptionRequestPending = true;
+  }
   else if(keyType == "authentication")
+  {
     size = GetAuthenticationKeySize();
+    m_authenticationRequestPending = true;
+  }
   else
     NS_FATAL_ERROR(this << "invalid key type" << keyType);
 
@@ -1317,9 +1492,14 @@ QKDApp014::KmsRequestTimeout()
 
   if(m_socketToKMS)
   {
+    m_buffer_kms.erase(m_socketToKMS);
     m_socketToKMS->Close();
     m_socketToKMS = nullptr; //Forces PrepareSocketToKMS() to create a new socket on the next attempt
   }
+
+  m_encryptionRequestPending = false;
+  m_authenticationRequestPending = false;
+  m_kmsHttpReqQueue.clear();
 
   if(m_master)
     ManageStores(); //Retries enc_keys if the key store is empty (same path as a real error)
@@ -1332,7 +1512,7 @@ QKDApp014::ProcessResponseFromKMS(HTTPMessage& header, Ptr<Packet> packet, Ptr<S
 {
   NS_LOG_FUNCTION(this << header.GetRequestUri() << header.GetStatus());
 
-  if(m_kmsRequestTimeoutEvent.IsPending()) //A real response arrived: the socket is alive, cancel the watchdog
+  if(m_kmsRequestTimeoutEvent.IsPending()) //A real response arrived: cancel the bounded request timeout
     Simulator::Cancel(m_kmsRequestTimeoutEvent);
 
   std::string reqMethod = ReadUri(header.GetRequestUri())[5]; //Get method from request URI field!
@@ -1353,8 +1533,17 @@ QKDApp014::ProcessResponseFromKMS(HTTPMessage& header, Ptr<Packet> packet, Ptr<S
 
   /**       enc_keys          **/
   }else if(reqMethod == "enc_keys"){
+    std::string keyType {PopHttpKmsRequest()};
+    if(keyType.empty())
+    {
+      NS_LOG_WARN(this << "Ignoring enc_keys response without a pending request");
+      return;
+    }
+    if(keyType == "encryption")
+      m_encryptionRequestPending = false;
+    else if(keyType == "authentication")
+      m_authenticationRequestPending = false;
     if(header.GetStatus() == HTTPMessage::Ok){
-      std::string keyType {PopHttpKmsRequest()};
       std::vector<std::string> keyIds; //Obtained keyIds
       for(nlohmann::json::iterator it = responseBody["keys"].begin(); it != responseBody["keys"].end(); ++it){
         Ptr<AppKey> key = CreateObject<AppKey>( std::string{(it.value())["key_ID"]}, std::string {(it.value())["key"]}, AppKey::ENCRYPTION, m_size );
@@ -1409,6 +1598,17 @@ QKDApp014::ProcessSignalingPacketFromApp(HTTPMessage& header, Ptr<Packet> packet
   //Sender App014 process response on KEY_IDS notification
   if(m_master)
   {
+    if(m_appHttpReqQueue.empty() || m_signalingTxQueue.empty())
+    {
+      NS_LOG_WARN(this << "Ignoring signaling response without a pending proposal");
+      return;
+    }
+    if(m_signalingRequestTimeoutEvent.IsPending())
+      Simulator::Cancel(m_signalingRequestTimeoutEvent);
+    m_signalingRequestPending = false;
+    if(!m_signalingTxQueue.empty())
+      m_signalingTxQueue.pop_front();
+
     std::vector<std::string> keyIds = PopHttpAppRequest(); //mapping of response to request
 
     //Sender App014 moves keys to outbound key store
@@ -1457,6 +1657,8 @@ QKDApp014::ProcessSignalingPacketFromApp(HTTPMessage& header, Ptr<Packet> packet
 
     }
 
+    FlushSignalingQueue(m_signalingSocketApp);
+
   }else //Receiver App014 process KEY_IDS notification
     GetKeyWithKeyIDs(header.GetMessageBodyString());
 
@@ -1488,10 +1690,22 @@ QKDApp014::SendKeyIds(std::vector<std::string> keyIds, HTTPMessage::HttpStatus s
 
     PushHttpAppRequest(keyIds);
     m_txSigTrace(GetId(), packet);
-    m_signalingSocketApp->Send(packet);
+    SendSignalingMessage(packet);
     NS_LOG_FUNCTION(this << "proposal sent" << packet->GetUid() << packet->GetSize() << httpMessage.ToString());
 
   }else{ //Replica QKDApp014 sends response to Primary QKDApp014.
+    // Do not acknowledge usable keys before the independent data connection
+    // has actually reached HandleAcceptFromApp().  Across FdNetDevice/CORE,
+    // Connect() at Alice can complete slightly before Bob's accept callback;
+    // acknowledging earlier lets Alice enter READY and send into a socket that
+    // nobody is reading yet.
+    if(!m_isDataConnectedToApp)
+    {
+      if(GetState() != STOPPED)
+        Simulator::Schedule(MilliSeconds(100), &QKDApp014::SendKeyIds,
+                            this, keyIds, statusCode);
+      return;
+    }
     HTTPMessage httpMessage;
     httpMessage.CreateResponse(statusCode, "", {
       {"Request URI", "http://"+ IpToString(GetIp()) +"/keys/key_ids"}
@@ -1509,7 +1723,7 @@ QKDApp014::SendKeyIds(std::vector<std::string> keyIds, HTTPMessage::HttpStatus s
     );
 
     m_txSigTrace(GetId(), packet);
-    m_signalingSocketApp->Send(packet);
+    SendSignalingMessage(packet);
 
     NS_LOG_FUNCTION(this << "\n\n\n" << packet->GetUid() << packet->GetSize() << httpMessage.ToString());
 

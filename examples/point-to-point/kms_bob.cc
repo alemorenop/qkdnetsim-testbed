@@ -170,7 +170,10 @@ main(int argc, char* argv[])
                                       const std::string& keyId, const uint32_t& bits,
                                       const std::string& type) {
                          std::cout << "[P2P_KMS_BOB] Mixed key contribution type=" << type
-                                   << " bits=" << bits << " keyId=" << keyId << std::endl;
+                                   << " bits=" << bits << " keyId=" << keyId
+                                   << " ksid=" << ksid << " srcSaeId=" << srcSaeId
+                                   << " dstSaeId=" << dstSaeId << " srcNodeId=" << srcNodeId
+                                   << " dstNodeId=" << dstNodeId << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",
                      MakeCallback(+[](std::string ctx, const uint32_t& node) {

@@ -18,10 +18,58 @@
 #include "ns3/fd-net-device-module.h"
 
 #include "ns3/qkd-app-014.h"
+#include "ns3/qkd-app-header.h"
+
+#include <unordered_set>
 
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("RELAY_ETSI014_ALICE_ETSI014_ALICE");
+
+static uint64_t g_txPackets;
+static uint64_t g_txBytes;
+static uint64_t g_missedSendCalls;
+static uint64_t g_keyUseOperations;
+static uint64_t g_payloadBitsProtected;
+static std::unordered_set<std::string> g_uniqueEncryptionKeys;
+
+static void
+CountTx(std::string, const std::string&, Ptr<const Packet> packet)
+{
+    ++g_txPackets;
+    g_txBytes += packet->GetSize();
+    QKDAppHeader header;
+    packet->PeekHeader(header);
+    const std::string keyId = header.GetEncryptionKeyId();
+    if(!keyId.empty() && keyId.find_first_not_of('0') != std::string::npos)
+    {
+        ++g_keyUseOperations;
+        g_uniqueEncryptionKeys.insert(keyId);
+    }
+    g_payloadBitsProtected +=
+        (header.GetLength() - header.GetSerializedSize()) * 8;
+}
+
+static void
+CountMissed(std::string, const std::string&, Ptr<const Packet>)
+{
+    ++g_missedSendCalls;
+}
+
+static void
+ReportAppStatistics(std::string appId, Time period, Time stopTime)
+{
+    std::cout << "[COMPARE_APP_SUMMARY] time=" << Simulator::Now().GetSeconds()
+              << " appId=" << appId
+              << " txPackets=" << g_txPackets
+              << " txBytes=" << g_txBytes
+              << " missed=" << g_missedSendCalls
+              << " keyUses=" << g_keyUseOperations
+              << " uniqueEncKeys=" << g_uniqueEncryptionKeys.size()
+              << " payloadBits=" << g_payloadBitsProtected << std::endl;
+    if(Simulator::Now() + period <= stopTime)
+        Simulator::Schedule(period, &ReportAppStatistics, appId, period, stopTime);
+}
 
 // Keep a nearby event scheduled while the realtime process waits for external
 // frames from its EmuFdNetDevices.
@@ -83,6 +131,7 @@ main(int argc, char* argv[])
     uint32_t useCrypto = 1;
 
     uint32_t appStartTime = 2;
+    uint32_t appStopTime = 0; // 0 means "use simTime", preserving prior behavior
     uint32_t simulationTime = 5000;
 
     CommandLine cmd;
@@ -95,11 +144,15 @@ main(int argc, char* argv[])
     cmd.AddValue("dataGateway", "Optional gateway on the CORE data interface", dataGateway);
     cmd.AddValue("etsiAliceId", "UUID of this app (must match RELAY_KMS_ALICE)", etsiAliceId);
     cmd.AddValue("etsiBobId", "UUID of the peer app on RELAY_ETSI014_BOB", etsiBobId);
+    cmd.AddValue("appPacketSize", "Application payload size (bytes)", appPacketSize);
+    cmd.AddValue("appRateBps", "Offered application traffic rate (bps)", appRateBps);
     cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
     cmd.AddValue("encryptionType", "0-unencrypted 1-OTP 2-AES", encryptionType);
     cmd.AddValue("authenticationType", "0-none 1-VMAC 2-MD5 3-SHA1", authenticationType);
+    cmd.AddValue("aesLifetime", "AES key lifetime (bytes)", aesLifetime);
     cmd.AddValue("useCrypto", "Run real cryptographic functions", useCrypto);
     cmd.AddValue("appStartTime", "Start instant (s)", appStartTime);
+    cmd.AddValue("appStopTime", "Stop instant for application data traffic (s); defaults to simTime", appStopTime);
     cmd.AddValue("simTime", "Simulation duration (s)", simulationTime);
     cmd.Parse(argc, argv);
 
@@ -137,7 +190,7 @@ main(int argc, char* argv[])
     );
     node->AddApplication(app);
     app->SetStartTime(Seconds(appStartTime));
-    app->SetStopTime(Seconds(simulationTime));
+    app->SetStopTime(Seconds(appStopTime ? appStopTime : simulationTime));
 
     Simulator::Schedule(Seconds(0.0), &KeepAlive, MilliSeconds(100), Seconds(simulationTime));
 
@@ -153,8 +206,17 @@ main(int argc, char* argv[])
                          std::cout << "[RELAY_ETSI014_ALICE] GET_KEY request to KMS Alice, appId=" << appId << " bytes=" << p->GetSize() << std::endl;
                      }));
 
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/Tx",
+                     MakeCallback(&CountTx));
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDApp014/Mx",
+                     MakeCallback(&CountMissed));
+
     Simulator::Stop(Seconds(simulationTime));
+    Simulator::Schedule(Seconds(1), &ReportAppStatistics, etsiAliceId,
+                        Seconds(1), Seconds(simulationTime));
     Simulator::Run();
+    ReportAppStatistics(etsiAliceId, Seconds(1), Seconds(0));
+    std::cout << "[COMPARE_APP_DONE] appId=" << etsiAliceId << std::endl;
     Simulator::Destroy();
     return 0;
 }

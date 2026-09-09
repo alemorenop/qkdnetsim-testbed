@@ -1,0 +1,131 @@
+name: qkdnetsim-secoqc
+
+# Distributed counterpart of examples_qkdnetsim_secoqc.  Each service is one
+# independent realtime ns-3 process and one of the six SECOQC KMS sites.  The
+# edge networks are the six physical QKD links; kms_control is the classical
+# KMS plane.  CORE attaches the two synthetic endpoints to kms_app_a/f.
+
+x-site: &site
+  image: qkdnetsim-testbed:latest
+  cap_add: [NET_ADMIN, NET_RAW]
+  # Comparison images are immutable historical archives.  Mount the common
+  # deployment adapter so both old/new understand the generic EDGE roles.
+  volumes:
+    - ./entrypoint.sh:/opt/entrypoint-current.sh:ro
+  entrypoint: ["/bin/bash", "/opt/entrypoint-current.sh"]
+  environment:
+    NETWORK_SETTLE_MS: "6000"
+    DEV_MAP_CONTROL: "192.168.230"
+    KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+  healthcheck:
+    test: ["CMD-SHELL", "grep -q 'SECOQC_KMS.*listening' /tmp/qkdnetsim.log"]
+    interval: 2s
+    timeout: 2s
+    retries: 60
+    start_period: 5s
+
+networks:
+  edge_ab: {ipam: {config: [{subnet: 192.168.201.0/24}]}}
+  edge_bc: {ipam: {config: [{subnet: 192.168.202.0/24}]}}
+  edge_bd: {ipam: {config: [{subnet: 192.168.203.0/24}]}}
+  edge_ce: {ipam: {config: [{subnet: 192.168.204.0/24}]}}
+  edge_de: {ipam: {config: [{subnet: 192.168.205.0/24}]}}
+  edge_ef: {ipam: {config: [{subnet: 192.168.206.0/24}]}}
+  kms_control: {ipam: {config: [{subnet: 192.168.230.0/24}]}}
+  kms_app_a: {ipam: {config: [{subnet: 192.168.231.0/24}]}}
+  kms_app_f: {ipam: {config: [{subnet: 192.168.232.0/24}]}}
+
+services:
+  site_a:
+    <<: *site
+    container_name: qkd-secoqc-site-a
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.201"
+      DEV_MAP_APP: "192.168.231"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.11}
+      edge_ab: {ipv4_address: 192.168.201.11}
+      kms_app_a: {ipv4_address: 192.168.231.11}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=0", "--appIp=192.168.231.11", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+
+  site_b:
+    <<: *site
+    container_name: qkd-secoqc-site-b
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.201"
+      DEV_MAP_EDGE1: "192.168.202"
+      DEV_MAP_EDGE2: "192.168.203"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.12}
+      edge_ab: {ipv4_address: 192.168.201.12}
+      edge_bc: {ipv4_address: 192.168.202.12}
+      edge_bd: {ipv4_address: 192.168.203.12}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=1", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+
+  site_c:
+    <<: *site
+    container_name: qkd-secoqc-site-c
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.202"
+      DEV_MAP_EDGE1: "192.168.204"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.13}
+      edge_bc: {ipv4_address: 192.168.202.13}
+      edge_ce: {ipv4_address: 192.168.204.13}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=2", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+
+  site_d:
+    <<: *site
+    container_name: qkd-secoqc-site-d
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.203"
+      DEV_MAP_EDGE1: "192.168.205"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.14}
+      edge_bd: {ipv4_address: 192.168.203.14}
+      edge_de: {ipv4_address: 192.168.205.14}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=3", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+
+  site_e:
+    <<: *site
+    container_name: qkd-secoqc-site-e
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.204"
+      DEV_MAP_EDGE1: "192.168.205"
+      DEV_MAP_EDGE2: "192.168.206"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.15}
+      edge_ce: {ipv4_address: 192.168.204.15}
+      edge_de: {ipv4_address: 192.168.205.15}
+      edge_ef: {ipv4_address: 192.168.206.15}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=4", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+
+  site_f:
+    <<: *site
+    container_name: qkd-secoqc-site-f
+    environment:
+      NETWORK_SETTLE_MS: "6000"
+      DEV_MAP_CONTROL: "192.168.230"
+      KMS_HOP_DELAY_MS: "${QKD_KMS_HOP_DELAY_MS:-2}"
+      DEV_MAP_EDGE0: "192.168.206"
+      DEV_MAP_APP: "192.168.232"
+    networks:
+      kms_control: {ipv4_address: 192.168.230.16}
+      edge_ef: {ipv4_address: 192.168.206.16}
+      kms_app_f: {ipv4_address: 192.168.232.16}
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=5", "--appIp=192.168.232.16", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]

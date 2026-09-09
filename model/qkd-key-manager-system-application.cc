@@ -113,6 +113,9 @@ QKDKeyManagerSystemApplication::GetTypeId()
     .AddTraceSource("RelayConsumption", "The trace to monitor key material consumed for key relay",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyConsumedRelay),
                      "ns3::QKDKeyManagerSystemApplication::RelayConsumption") 
+    .AddTraceSource("RelaySuccess", "Key material whose relay was confirmed end to end",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyRelayedSuccess),
+                     "ns3::QKDKeyManagerSystemApplication::RelaySuccess")
     .AddTraceSource("WasteRelay", "The trace to monitor failed relays",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyWasteRelay),
                      "ns3::QKDKeyManagerSystemApplication::WasteRelay")
@@ -630,6 +633,7 @@ QKDKeyManagerSystemApplication::HandleAccept(Ptr<Socket> s, const Address& from)
 {
   NS_LOG_FUNCTION(this << s << from << InetSocketAddress::ConvertFrom(from).GetIpv4());
   s->SetRecvCallback(MakeCallback(&QKDKeyManagerSystemApplication::HandleRead, this));
+  s->SetSendCallback(MakeCallback(&QKDKeyManagerSystemApplication::DataSend, this));
 }
 
 void
@@ -643,6 +647,7 @@ QKDKeyManagerSystemApplication::HandleAcceptKMSs(Ptr<Socket> s, const Address& f
   );
 
   s->SetRecvCallback(MakeCallback(&QKDKeyManagerSystemApplication::HandleReadKMSs, this));
+  s->SetSendCallback(MakeCallback(&QKDKeyManagerSystemApplication::DataSendKMSs, this));
 
   //Check is it necessary to create response socket
   Ipv4Address destKMS = InetSocketAddress::ConvertFrom(from).GetIpv4();
@@ -674,16 +679,7 @@ QKDKeyManagerSystemApplication::ConnectionSucceeded(Ptr<Socket> socket)
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDKeyManagerSystemApplication Connection succeeded");
 
-    std::map<Ptr<Socket>, Ptr<Packet> >::iterator j;
-    for(j = m_packetQueues.begin(); !(j == m_packetQueues.end()); j++){
-      if(j->first == socket){
-        uint32_t response = j->first->Send(j->second);
-        response = j->first->Send(j->second);
-        m_txTrace(j->second);
-        m_packetQueues.erase(j);
-        NS_LOG_FUNCTION(this << j->first << "Sending packet from the queue!" << response );
-      }
-    }
+    DataSend(socket, socket->GetTxAvailable());
 }
 
 void
@@ -692,16 +688,7 @@ QKDKeyManagerSystemApplication::ConnectionSucceededKMSs(Ptr<Socket> socket)
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDKeyManagerSystemApplication KMSs Connection succeeded");
 
-    std::map<Ptr<Socket>, Ptr<Packet> >::iterator j;
-    for(j = m_packetQueuesKMS.begin(); !(j == m_packetQueuesKMS.end()); j++){
-      if(j->first == socket){
-        uint32_t response = j->first->Send(j->second);
-        response = j->first->Send(j->second); 
-        m_txTraceKMSs(j->second, GetNode()->GetId());
-        m_packetQueuesKMS.erase(j);
-        NS_LOG_FUNCTION(this << j->first << "Sending packet from the queue!" << response );
-      }
-    }
+    DataSendKMSs(socket, socket->GetTxAvailable());
 
     if(m_pqc_enabled)      
       SendPQCPublicKey(socket);
@@ -724,13 +711,53 @@ QKDKeyManagerSystemApplication::ConnectionFailedKMSs(Ptr<Socket> socket)
 void
 QKDKeyManagerSystemApplication::DataSend(Ptr<Socket> s, uint32_t par)
 {
-    NS_LOG_FUNCTION(this << s << par );
+  NS_LOG_FUNCTION(this << s << par );
+  auto it = m_packetQueues.find(s);
+  if(it == m_packetQueues.end())
+    return;
+
+  auto& queue = it->second;
+  while(!queue.empty())
+  {
+    Ptr<Packet> packet = queue.front();
+    const int sent = s->Send(packet);
+    if(sent <= 0)
+      break;
+    if(static_cast<uint32_t>(sent) < packet->GetSize())
+    {
+      packet->RemoveAtStart(static_cast<uint32_t>(sent));
+      break;
+    }
+    queue.pop_front();
+  }
+  if(queue.empty())
+    m_packetQueues.erase(it);
 }
 
 void
 QKDKeyManagerSystemApplication::DataSendKMSs(Ptr<Socket> s , uint32_t par)
 {
     NS_LOG_FUNCTION(this << s << par);
+    auto it = m_packetQueuesKMS.find(s);
+    if(it == m_packetQueuesKMS.end())
+      return;
+
+    auto& queue = it->second;
+    while(!queue.empty())
+    {
+      Ptr<Packet> packet = queue.front();
+      const int sent = s->Send(packet);
+      if(sent <= 0)
+        break;
+      if(static_cast<uint32_t>(sent) < packet->GetSize())
+      {
+        packet->RemoveAtStart(static_cast<uint32_t>(sent));
+        break;
+      }
+      queue.pop_front();
+    }
+    if(queue.empty())
+      m_packetQueuesKMS.erase(it);
 }
 
 void
@@ -766,16 +793,15 @@ QKDKeyManagerSystemApplication::SendToSocketPair(Ptr<Socket> socket, Ptr<Packet>
   //https://www.nsnam.org/doxygen/classns3_1_1_socket.html#a78a3c37a539d2e70869bb82cc60fbb09
   Address connectedAddress;
 
-  //send the packet only if connected!
-  if(socket->GetPeerName(connectedAddress) == 0){
-    socket->Send(packet);
-    m_txTrace(packet);
-    NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " sent via socket " << socket);
-  //otherwise wait in the queue
-  }else{
-    m_packetQueues.insert( std::make_pair(  socket ,  packet) );
-    NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " enqued for socket " << socket);
-  }
+  // TCP Send() may accept only a prefix. Queue complete HTTP messages and let
+  // DataSend() retain the unsent suffix; dropping it corrupts Content-Length
+  // framing when several responses share a socket.
+  m_packetQueues[socket].push_back(packet->Copy());
+  m_txTrace(packet);
+  if(socket->GetPeerName(connectedAddress) == 0)
+    DataSend(socket, socket->GetTxAvailable());
+  else
+    NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " queued for socket " << socket);
 }
 
 void
@@ -786,16 +812,12 @@ QKDKeyManagerSystemApplication::SendToSocketPairKMS(Ptr<Socket> socket, Ptr<Pack
     //https://www.nsnam.org/doxygen/classns3_1_1_socket.html#a78a3c37a539d2e70869bb82cc60fbb09
     Address connectedAddress;
 
-    //send the packet only if connected!
-    if(socket->GetPeerName(connectedAddress) == 0){
-      socket->Send(packet); 
-      m_txTraceKMSs(packet, GetNode()->GetId());
-      NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " sent via socket " << socket);
-    //otherwise wait in the queue
-    }else{
-      m_packetQueuesKMS.insert( std::make_pair(  socket ,  packet) );
-      NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " enqued for socket " << socket);
-    }
+    m_packetQueuesKMS[socket].push_back(packet->Copy());
+    m_txTraceKMSs(packet, GetNode()->GetId());
+    if(socket->GetPeerName(connectedAddress) == 0)
+      DataSendKMSs(socket, socket->GetTxAvailable());
+    else
+      NS_LOG_FUNCTION(this << "Packet " << packet->GetUid() << " queued for socket " << socket);
 }
 
 void
@@ -832,7 +854,7 @@ QKDKeyManagerSystemApplication::CheckSocketsKMS(Ipv4Address kmsDstAddress)
     socket->SetConnectCallback(
       MakeCallback(&QKDKeyManagerSystemApplication::ConnectionSucceededKMSs, this),
       MakeCallback(&QKDKeyManagerSystemApplication::ConnectionFailedKMSs, this));
-    socket->SetDataSentCallback( MakeCallback(&QKDKeyManagerSystemApplication::DataSendKMSs, this));
+    socket->SetSendCallback(MakeCallback(&QKDKeyManagerSystemApplication::DataSendKMSs, this));
     socket->SetRecvCallback(MakeCallback(&QKDKeyManagerSystemApplication::HandleReadKMSs, this));
     socket->SetAcceptCallback(
       MakeNullCallback<bool, Ptr<Socket>, const Address &>(),
@@ -1655,6 +1677,15 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     //Create packet
     std::string headerUri = "http://" + GetAddressString(dstKms);
     headerUri += "/api/v1/sbuffers/skey_create";
+    // Embed a dedicated request ID as a correlator (same "/?param=/value"
+    // idiom used elsewhere) so the ACK can be matched to this specific
+    // request instead of assuming a single request in flight per peer: two
+    // independent SAE pairs relayed over the same physical hop (e.g. the 1-5
+    // and 5-1 flows sharing the 3-4-5 path in the Padua topology) can each
+    // have a skey_create outstanding toward the same peer KMS at once, and
+    // their ACKs are not guaranteed to arrive in send order.
+    const std::string requestId = GenerateUUID();
+    headerUri += "/?req_id=/" + requestId;
 
     HTTPMessage httpMessage;
     httpMessage.CreateRequest(headerUri, "POST", msg1);
@@ -1669,6 +1700,7 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     httpRequest.method_type = RequestType::TRANSFORM_KEYS;
     httpRequest.peerNodeId = conn.GetDestinationKmNodeId();
     httpRequest.surplus_key_ID = surplusKeyId;
+    httpRequest.req_id = requestId;
     HttpKMSAddQuery(dstKms, httpRequest); //Remember request to properly map response! 
     SendToSocketPairKMS(socket, packet);
     
@@ -1773,7 +1805,11 @@ QKDKeyManagerSystemApplication::ValidateEtsi014GetKeyRequest(
   }else{ //Others - ability to serve
 
     uint32_t requestedBits = size*number;
-    uint32_t availableKeyBits = buffer->GetSBitCount();
+    // Only ordinary READY keys can be transformed into a new ETSI 014
+    // response. Supply keys are already reserved for dec_keys and stream
+    // keys belong to ETSI 004; counting either here can pass validation and
+    // then leave GetTransformCandidate() with no selectable key.
+    uint32_t availableKeyBits = buffer->GetTransformBitCount();
     NS_LOG_FUNCTION(this << "\nTarget key size: " << size << "\nTarget number: " << number
                          << "\nRequired amount of key material: " << requestedBits
                          << "\nAmount of key material in s-buffer(READY): " << availableKeyBits);
@@ -2974,7 +3010,12 @@ QKDKeyManagerSystemApplication::ComputePqcMixing(uint32_t requestedKeys, uint32_
     //Convert to uint32 and make divisible by 8
     uint32_t qkdKeysToUse = (uint32_t)std::ceil(qkdKeys_d / 8.0) * 8;
     qkdKeysToUse = std::max(uint32_t{8}, qkdKeysToUse);
-    qkdKeysToUse = std::min(requestedKeys, qkdKeysToUse);
+    // Adaptive mixing must also respect what the selected Q/S-buffer can
+    // actually contribute.  Without this cap a scarce buffer repeatedly
+    // requested an unavailable theoretical QKD share and rejected delivery,
+    // even though PQC had enough material to supply the remainder.
+    qkdKeysToUse = std::min({requestedKeys, qkdAvailableKeys, qkdKeysToUse});
+    qkdKeysToUse -= qkdKeysToUse % 8;
 
     NS_LOG_FUNCTION(this << "qkdKeysToUse:" << qkdKeysToUse);
     return qkdKeysToUse;
@@ -3513,6 +3554,8 @@ QKDKeyManagerSystemApplication::Relay(uint32_t dstKmNodeId, uint32_t amount)
   query.method_type = RELAY_KEYS;
   query.peerNodeId = dstKmNodeId;
   query.prev_hop_id = GetNode()->GetId(); //Previous is ME, response reached ME!
+  query.next_hop_id = conn.GetNextHop();
+  query.relay_key_size = relayBuffer->GetKeySize();
   query.keyIds = keyIds;
   HttpProxyRequestAdd(query);
   SendToSocketPairKMS(socket, packet);
@@ -3714,6 +3757,9 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
     query.method_type = RELAY_KEYS; //Relay
     query.req_id = reqId;
     query.peerNodeId = conn.GetNextHop(); //Peer -- next hop
+    query.next_hop_id = conn.GetNextHop();
+    query.relay_key_size = encDefaultKeySize;
+    query.keyIds = keyIds;
     if(jRelayPayload.contains("repeater_node_id"))
       query.prev_hop_id = jRelayPayload["repeater_node_id"];
     else
@@ -3741,10 +3787,28 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
     }
     NS_ASSERT(sBuffer);
     NS_LOG_FUNCTION(this << keyIds.size() << keys.size());
-    bool saved = false;
-    for(uint32_t i = 0; i < keyIds.size(); i++){ //Add keys to RELAY_SBUFFER -- "dec"
+    HTTPMessage::HttpStatus relayStatus = HTTPMessage::HttpStatus::Ok;
+    std::string relayResponsePayload;
+    uint64_t incomingBits = 0;
+    for(const auto& keyMaterial : keys)
+      incomingBits += keyMaterial.size() * 8;
+
+    // Several relay requests can be in flight while the destination buffer is
+    // close to Mmax. Capacity observed by the source is therefore only a
+    // snapshot. Reject the complete batch atomically and let the normal relay
+    // response roll the source-side INIT keys back, instead of inserting a
+    // prefix and aborting the whole KMS when the next StoreKey() returns false.
+    if(static_cast<uint64_t>(sBuffer->GetBitCount()) + incomingBits > sBuffer->GetMmax())
+    {
+      relayStatus = HTTPMessage::HttpStatus::BadRequest;
+      relayResponsePayload = nlohmann::json({{"node-id", GetNode()->GetId()}}).dump();
+      NS_LOG_WARN(this << "Relay destination buffer full; rejecting request " << reqId);
+    }
+
+    for(uint32_t i = 0; relayStatus == HTTPMessage::HttpStatus::Ok && i < keyIds.size(); i++)
+    { //Add keys to RELAY_SBUFFER -- "dec"
       Ptr<QKDKey> key = CreateObject<QKDKey>(keyIds[i], keys[i]);
-      saved = sBuffer->StoreKey(key, true);
+      const bool saved = sBuffer->StoreKey(key, true);
 
       NS_LOG_FUNCTION(this << sBuffer->GetRemoteNodeId() << "\t" << sBuffer->GetDescription() );
       uint32_t dstKeyCount = sBuffer->GetSKeyCount();
@@ -3755,8 +3819,13 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
                            << "\ndst SBuffer Max:" << dstMmax
                      ); 
       if(!saved)
-      { 
-        NS_FATAL_ERROR(this << "Unable to store keys to buffer!!" << keyIds[i]);
+      {
+        // The preflight check above makes this unexpected (e.g. duplicate ID),
+        // but it is still a recoverable relay failure rather than a reason to
+        // terminate an otherwise healthy multi-process KMS.
+        relayStatus = HTTPMessage::HttpStatus::BadRequest;
+        relayResponsePayload = nlohmann::json({{"node-id", GetNode()->GetId()}}).dump();
+        NS_LOG_ERROR(this << "Unable to store relayed key " << keyIds[i]);
         break;
       }else{        
         NS_LOG_FUNCTION(this << "Relayed key " << keyIds[i] << " successfully stored in buffer " << sBuffer << sBuffer->GetRemoteNodeId() << "\t" << sBuffer->GetDescription() );
@@ -3766,7 +3835,7 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
 
     //create packet
     HTTPMessage httpMessage;
-    httpMessage.CreateResponse(HTTPMessage::HttpStatus::Ok, "", {
+    httpMessage.CreateResponse(relayStatus, relayResponsePayload, {
       {"Content-Type", "application/json; charset=utf-8"},
       {"Request URI", headerIn.GetUri() }
     });
@@ -3810,6 +3879,15 @@ QKDKeyManagerSystemApplication::ProcessRelayResponse(HTTPMessage headerIn)
 
   HttpQuery sQuery = GetProxyQuery(reqId); //Find query!
   uint32_t prevHop = sQuery.prev_hop_id; //Get previous node
+
+  if(headerIn.GetStatus() == HTTPMessage::HttpStatus::Ok)
+  {
+    for(const auto& keyId [[maybe_unused]] : sQuery.keyIds)
+    {
+      m_keyRelayedSuccess(GetNode()->GetId(), GetNode()->GetId(),
+                          sQuery.next_hop_id, sQuery.relay_key_size);
+    }
+  }
 
   if(prevHop != GetNode()->GetId())
   {
@@ -5584,7 +5662,12 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
      */
 
     std::string mergedKey;
-    uint32_t targetSize = keySizeQKD;
+    // key_size_QKD is the contribution of each delivered key.  The sender
+    // selected candidate material for the complete batch, so reconstruct the
+    // same key_size_QKD * key_number bits before splitting it into supply
+    // keys.  Using only keySizeQKD left every supply key after the first one
+    // empty when an application requested more than one key.
+    uint32_t targetSize = keySizeQKD * keyNumber;
 
     for (size_t i = 0; i < candidateSetIds.size(); ++i)
     {
@@ -5675,7 +5758,9 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
             NS_FATAL_ERROR(this << "No PQC s-buffer found!");
 
         std::string mergedKeyPQC;
-        uint32_t targetSizePQC = keySizePQC;
+        // As for the QKD component above, the PQC candidate set covers the
+        // complete batch rather than one individual supply key.
+        uint32_t targetSizePQC = keySizePQC * keyNumber;
 
         /*
          * Same logic:
@@ -5837,8 +5922,33 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateResponse(HTTPMessage headerIn, 
 
     Ipv4Address peerAddress = uriParams[0].c_str();
     auto it = m_httpRequestsQueryKMS.find(peerAddress);
-    if(it == m_httpRequestsQueryKMS.end()){
+    if(it == m_httpRequestsQueryKMS.end() || it->second.empty()){
       NS_LOG_ERROR(this);
+      return;
+    }
+
+    // The response carries no body, so the request ID embedded in the
+    // request URI (echoed back verbatim in the "Request URI" header) is the
+    // only correlator available. Two independent SAE pairs relayed over the
+    // same physical hop (e.g. the 1-5 and 5-1 flows sharing the 3-4-5 path in
+    // the Padua topology) can each have a skey_create outstanding toward the
+    // same peer KMS at once; their ACKs are not guaranteed to arrive in send
+    // order, so picking the front of the queue can silently apply one flow's
+    // response to the other's pending request.
+    if(uriParams.size() < 7 || uriParams[5] != "?req_id="){
+      NS_LOG_ERROR(this << "Malformed SKEY_CREATE response URI" << headerIn.GetRequestUri());
+      return;
+    }
+    const std::string requestId = uriParams[6];
+    size_t matchIndex = it->second.size();
+    for(size_t i = 0; i < it->second.size(); ++i){
+      if(it->second[i].req_id == requestId){
+        matchIndex = i;
+        break;
+      }
+    }
+    if(matchIndex == it->second.size()){
+      NS_LOG_ERROR(this << "SKEY_CREATE response does not match any pending query, requestId=" << requestId);
       return;
     }
 
@@ -5847,24 +5957,29 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateResponse(HTTPMessage headerIn, 
 
       NS_LOG_FUNCTION(this << "We received HTTP OK(ack)!");
 
-      if(it->second[0].surplus_key_ID.empty())
+      if(it->second[matchIndex].surplus_key_ID.empty())
       { //There is nothing to perform on this ACK response
         NS_LOG_FUNCTION(this << "2895");
-        HttpKMSCompleteQuery(peerAddress);
+        it->second.erase(it->second.begin() + matchIndex);
+        if(it->second.empty())
+          m_httpRequestsQueryKMS.erase(it);
         return;
       }
 
-      Ptr<SBuffer> sBuffer = GetSBuffer(it->second[0].peerNodeId, "enc");
+      Ptr<SBuffer> sBuffer = GetSBuffer(it->second[matchIndex].peerNodeId, "enc");
       NS_ASSERT(sBuffer);
-      std::string surplusKeyId {(it->second[0]).surplus_key_ID};
-      sBuffer->MarkKey(surplusKeyId, QKDKey::READY);
+      const std::string surplusKeyId = it->second[matchIndex].surplus_key_ID;
+      if(!surplusKeyId.empty())
+        sBuffer->MarkKey(surplusKeyId, QKDKey::READY);
 
     }else{
         NS_LOG_ERROR(this << "Unexpected error");
     }
 
     NS_LOG_FUNCTION(this << "2908");
-    HttpKMSCompleteQuery(peerAddress);
+    it->second.erase(it->second.begin() + matchIndex);
+    if(it->second.empty())
+      m_httpRequestsQueryKMS.erase(it);
 }
 
 void

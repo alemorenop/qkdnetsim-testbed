@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# Pristine upstream QKDNetSim -- NEW baseline (ns-3.48, PQC).
+# Upstream QKDNetSim model -- NEW baseline (ns-3.48, PQC).
 #
 # This is NOT the qkdnetsim-testbed fork. It is vanilla QKDNetSim, built as a
-# plain ns-3 contrib module and run as a single monolithic process, exactly as
-# upstream intends (upstream ships no Docker/emulation infrastructure of its
-# own). Its only purpose here is to be the "before" comparison point for
+# plain ns-3 contrib module and run as a single monolithic process. Its
+# example workload is normalized before the build and the known OTP-lifetime
+# and batched-skey-create regressions are repaired identically in both
+# deployments. Its purpose is to
+# be the "before" comparison point for
 # qkdnetsim-testbed's non-monolithic adaptation (docker/Dockerfile from
 # testbed commit d9f0fc4).
 #
@@ -23,7 +25,7 @@
 # qkdnetsim-testbed:new (PQC enabled), this image inserts ONLY that same
 # isolated CMake-wiring fix (see the python3 step below -- the exact block
 # also lives, for reference, in qkdnetsim-testbed's own CMakeLists.txt). No
-# application/model source code is touched -- the fix is pure CMake plumbing
+# application/model source code is touched by this CMake fix -- it is pure plumbing
 # that makes upstream's own documented, unmodified PQC example
 # (examples_qkdnetsim_secoqc_qkd_and_pqc.cc) buildable as upstream intends.
 #
@@ -36,7 +38,7 @@
 # CMakeLists.txt ("different line endings", every hunk fails). Editing the
 # file directly in Python sidesteps both traps.
 #
-# Build context must be the pristine QKDNetSim tree at that commit
+# Build context starts from the upstream QKDNetSim tree at that commit
 # (build-all.sh handles this via `git archive 525e9bf...`) -- NOT this
 # directory. Supplying the local archived object avoids depending on a moving
 # remote branch:
@@ -51,6 +53,8 @@
 #   ./ns3 run examples_qkdnetsim_secoqc_qkd_and_pqc
 
 FROM ubuntu:22.04
+
+LABEL org.qkdnetsim.comparison.instrumentation="matched-workload-v7"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -92,9 +96,12 @@ WORKDIR /opt
 # --- ns-3.48, required by the current official QKDNetSim baseline ---
 RUN git clone -b ns-3.48 https://gitlab.com/nsnam/ns-3-dev.git
 
-# --- Pristine upstream QKDNetSim, pinned to the current tip 525e9bf --
+# --- Upstream QKDNetSim, pinned to the current tip 525e9bf --
 # supplied via the build context (see header comment) ---
 COPY . /opt/ns-3-dev/contrib/qkdnetsim
+
+# Comparison-only workload normalization is applied to the archived source by
+# instrument-baseline.py before this build; see Dockerfile.base-old.
 
 WORKDIR /opt/ns-3-dev
 
@@ -170,6 +177,7 @@ RUN ./ns3 configure --enable-examples -- -DQKDNETSIM_WITH_PQC=ON && \
         examples_qkdnetsim_etsi_004 \
         examples_qkdnetsim_etsi_014 \
         examples_qkdnetsim_secoqc \
-        examples_qkdnetsim_secoqc_qkd_and_pqc
+        examples_qkdnetsim_secoqc_qkd_and_pqc \
+        examples_qkdnetsim_etsi_combined_input
 
 CMD ["/bin/bash"]

@@ -97,7 +97,8 @@ RUN ./ns3 configure --enable-examples -- -DQKDNETSIM_WITH_PQC=ON && \
         p2p_etsi014_alice \
         p2p_etsi014_bob \
         relay_etsi014_alice \
-        relay_etsi014_bob
+        relay_etsi014_bob \
+        distributed_secoqc_site
 
 # --- Entrypoint: sets each interface to promiscuous mode and clears its kernel IP ---
 COPY docker/entrypoint.sh /opt/entrypoint.sh

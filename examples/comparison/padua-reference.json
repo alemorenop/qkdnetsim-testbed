@@ -1,0 +1,60 @@
+{
+  "profile": "padua-reference",
+  "description": "Reproducible workload corresponding to Tables 2-4 of Dervisevic et al., Large-scale quantum key distribution network simulator.",
+  "simulationTimeSeconds": 130,
+  "qkdGenerationWindowSeconds": 100,
+  "classicalLink": {
+    "bandwidthMbps": 100,
+    "delayMs": 2
+  },
+  "qkdLinks": [
+    {"source": 1, "destination": 2, "keyRateBps": 15000, "keySizeBits": 10000},
+    {"source": 2, "destination": 3, "keyRateBps": 15000, "keySizeBits": 10000},
+    {"source": 3, "destination": 4, "keyRateBps": 100000, "keySizeBits": 50000},
+    {"source": 4, "destination": 5, "keyRateBps": 100000, "keySizeBits": 50000},
+    {"source": 5, "destination": 6, "keyRateBps": 100000, "keySizeBits": 30000},
+    {"source": 3, "destination": 6, "keyRateBps": 100000, "keySizeBits": 30000}
+  ],
+  "applications": [
+    {
+      "id": "1-to-5",
+      "source": 1,
+      "destination": 5,
+      "interface": "ETSI 014",
+      "rateBps": 7000,
+      "packetSizeBytes": 300,
+      "encryption": "OTP",
+      "authentication": "SHA2 (paper; SHA2 is not implemented by QKDNetSim)",
+      "startTimeSeconds": 15,
+      "stopTimeSeconds": 75,
+      "keysPerRequest": 3
+    },
+    {
+      "id": "5-to-1",
+      "source": 5,
+      "destination": 1,
+      "interface": "ETSI 014",
+      "rateBps": 14000,
+      "packetSizeBytes": 300,
+      "encryption": "OTP",
+      "authentication": "SHA2 (paper; SHA2 is not implemented by QKDNetSim)",
+      "startTimeSeconds": 25,
+      "stopTimeSeconds": 85,
+      "keysPerRequest": 3
+    },
+    {
+      "id": "1-to-6",
+      "source": 1,
+      "destination": 6,
+      "interface": "ETSI 014",
+      "rateBps": 10000000,
+      "packetSizeBytes": 800,
+      "encryption": "AES-256",
+      "authentication": "SHA2 (paper; SHA2 is not implemented by QKDNetSim)",
+      "aesLifetimeBytes": 300000,
+      "startTimeSeconds": 10,
+      "stopTimeSeconds": 130,
+      "keysPerRequest": 3
+    }
+  ]
+}

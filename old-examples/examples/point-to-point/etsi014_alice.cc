@@ -94,6 +94,8 @@ main(int argc, char* argv[])
     cmd.AddValue("dataGateway", "Optional gateway on the CORE data interface", dataGateway);
     cmd.AddValue("etsiAliceId", "UUID of this app (must match P2P_KMS_ALICE)", etsiAliceId);
     cmd.AddValue("etsiBobId", "UUID of the peer app on P2P_ETSI014_BOB", etsiBobId);
+    cmd.AddValue("appPacketSize", "Application payload size (bytes)", appPacketSize);
+    cmd.AddValue("appRateBps", "Offered application traffic rate (bps)", appRateBps);
     cmd.AddValue("numberOfKeyToFetchFromKMS", "Keys to request per GET_KEY request", numberOfKeyToFetchFromKMS);
     cmd.AddValue("encryptionType", "0-unencrypted 1-OTP 2-AES", encryptionType);
     cmd.AddValue("authenticationType", "0-none 1-VMAC 2-MD5 3-SHA1", authenticationType);

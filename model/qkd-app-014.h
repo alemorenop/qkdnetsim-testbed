@@ -24,6 +24,7 @@
 #include "ns3/qkd-encryptor.h"
 #include "ns3/app-key.h"
 #include <unordered_map>
+#include <deque>
 #include <string>
 
 #include <iostream>
@@ -238,6 +239,15 @@ public:
      */
     void ConnectionSignalingToAppSucceeded(Ptr<Socket> socket);
 
+    /** Flush signaling messages that were produced before TCP connected. */
+    void FlushSignalingQueue(Ptr<Socket> socket, uint32_t available = 0);
+
+    /** Queue one complete HTTP signaling message and try to write it. */
+    void SendSignalingMessage(Ptr<Packet> packet);
+
+    /** Retry the oldest unacknowledged key-ID proposal on a fresh socket. */
+    void SignalingRequestTimeout();
+
     /**
      * @brief Callback function to notify that data to KMS has been sent
      * @param socket the connected socket
@@ -347,7 +357,8 @@ public:
      * @param address address of the KMS
      * @param socket the connected socket
      */
-    void HttpPacketReceived(const Ptr<Packet> &p, const Address &from, Ptr<Socket> socket);
+    void HttpPacketReceived(const Ptr<Packet> &p, const Address &from,
+                            Ptr<Socket> socket, bool signaling);
 
     /**
      * @brief Check for tcp segmentation of signaling packets received from KMS
@@ -605,6 +616,8 @@ private:
     std::string     m_socketType;
     bool            m_isSignalingConnectedToApp {false};
     bool            m_isDataConnectedToApp {false};
+    Ptr<Socket>     m_signalingListenSocketApp; //!< Replica's persistent signaling listener
+    Ptr<Socket>     m_dataListenSocketApp;      //!< Replica's persistent data listener
     Ptr<Socket>     m_signalingSocketApp;
     Ptr<Socket>     m_dataSocketApp;
     Ptr<Socket>     m_socketToKMS;
@@ -639,6 +652,9 @@ private:
 
     //Crypto params
     uint32_t    m_numberOfKeysKMS;                  //!< number of keys to fetch per request
+    uint32_t    m_keyBufferLowWatermark;             //!< refill when a local key store reaches this size
+    bool        m_encryptionRequestPending {false};  //!< avoid duplicate encryption-key requests
+    bool        m_authenticationRequestPending {false}; //!< avoid duplicate authentication-key requests
     uint32_t    m_useCrypto;                        //!< execute crypo algorithms
     uint32_t    m_encryption;                       //!< encryption type
     uint32_t    m_authentication;                   //!< authentication type
@@ -676,8 +692,14 @@ private:
     /// The `StateTransition` trace source.
     ns3::TracedCallback<const std::string&, const std::string&> m_stateTransitionTrace;
 
-    std::unordered_map<Address, Ptr<Packet>, AddressHash> m_buffer_kms;         //!< Buffer for received packets(fragmentation)
+    // KMS responses and peer signaling are independent HTTP byte streams.
+    // RecvFrom() does not provide a stable peer address for connected TCP
+    // sockets, so the socket itself is the only safe reassembly key.
+    std::map<Ptr<Socket>, Ptr<Packet>> m_buffer_kms;
     std::unordered_map<Address, Ptr<Packet>, AddressHash> m_buffer_QKDApp014;   //!< Buffer for received packets(fragmentation)
+    std::deque<Ptr<Packet>> m_signalingTxQueue; //!< HTTP messages awaiting a connected/available signaling socket
+    bool m_signalingRequestPending {false}; //!< Master waits for Bob's HTTP response before sending the next proposal
+    EventId m_signalingRequestTimeoutEvent;
 
     bool            m_internalAppWait; //Indicate if the longer wait is required(used after GetKey error!)
     EventId         m_sendEvent;

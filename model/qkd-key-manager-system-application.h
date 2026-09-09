@@ -34,6 +34,7 @@
 #include "http.h"
 #include "json.h"
 #include <unordered_map>
+#include <deque>
 #include "ns3/uuid.h"
 
 #ifdef QKDNETSIM_WITH_PQC
@@ -659,6 +660,7 @@ private:
     Ipv4Address prev_hop_address;
     std::string request_uri;
     uint32_t next_hop_id;
+    uint32_t relay_key_size;
 
     //Specific to new FILL method
     uint32_t peerNodeId;
@@ -781,6 +783,7 @@ private:
   TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&, const uint32_t&, const std::string&, const uint32_t&, const std::string&> m_keyServedTraceMixed; //Total amount of key material served by KMS
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
+  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyRelayedSuccess;       //Relay material confirmed end to end
   TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
   TracedCallback<const uint32_t&> m_listenReadyTrace; //!< APP/KMS and KMS/KMS listeners are ready.
 
@@ -799,8 +802,8 @@ private:
   std::map<Ipv4Address, KMSNode > m_socketPairsKMS;
   
   Ptr<Node> m_node; //<! node on which KMS is installed
-  std::map<Ptr<Socket>, Ptr<Packet> > m_packetQueues; //!< Buffering unsend messages due to connection problems
-  std::map<Ptr<Socket>, Ptr<Packet> > m_packetQueuesKMS; //!< Buffering unsend messages due to connection problems
+  std::map<Ptr<Socket>, std::deque<Ptr<Packet>>> m_packetQueues; //!< Complete APP-KMS byte streams waiting for TCP
+  std::map<Ptr<Socket>, std::deque<Ptr<Packet>>> m_packetQueuesKMS; //!< Complete KMS-KMS byte streams waiting for TCP
 
   Ptr<QKDKMSQueueLogic> m_queueLogic; //!< KMS Queue Logic for ETSI 004 QoS handling
 

@@ -1,9 +1,10 @@
-# Pristine, unmodified upstream QKDNetSim -- OLD baseline (pre-PQC, pre ns-3.48).
+# Upstream QKDNetSim model -- OLD baseline (pre-PQC, pre ns-3.48).
 #
 # This is NOT the qkdnetsim-testbed fork. It is vanilla QKDNetSim, built as a
-# plain ns-3 contrib module and run as a single monolithic process, exactly as
-# upstream intends (upstream ships no Docker/emulation infrastructure of its
-# own). Its only purpose here is to be the "before" comparison point for
+# plain ns-3 contrib module and run as a single monolithic process. Its
+# example workload is normalized before the build; the shared OTP guard
+# instrumentation is already present at this revision. Its purpose is to be
+# the "before" comparison point for
 # qkdnetsim-testbed's non-monolithic adaptation (docker/Dockerfile from
 # testbed commit 99783ee).
 #
@@ -11,7 +12,7 @@
 # single socket"), the last upstream commit before the PQC + ns-3.48 migration
 # (7a99fc1, 525e9bf).
 #
-# Build context must be the pristine QKDNetSim tree at that commit (build-all.sh
+# Build context starts from the upstream QKDNetSim tree at that commit (build-all.sh
 # handles this via `git archive 1cda34c...`) -- NOT this directory. Supplying
 # the local archived object avoids depending on a moving remote branch:
 #   git archive 1cda34cbe75b5cb33e2ffa87081f724d6484199f | tar -x -C <tmpdir>
@@ -24,6 +25,8 @@
 #   ./ns3 run examples_qkdnetsim_secoqc
 
 FROM ubuntu:22.04
+
+LABEL org.qkdnetsim.comparison.instrumentation="matched-workload-v5"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -43,9 +46,13 @@ WORKDIR /opt
 # --- ns-3.46, the version this pre-PQC QKDNetSim baseline targets ---
 RUN git clone -b ns-3.46 https://gitlab.com/nsnam/ns-3-dev.git
 
-# --- Pristine upstream QKDNetSim, pinned to the pre-migration commit 1cda34c
+# --- Upstream QKDNetSim, pinned to the pre-migration commit 1cda34c
 # -- supplied via the build context (see header comment) ---
 COPY . /opt/ns-3-dev/contrib/qkdnetsim
+
+# Comparison-only workload normalization is applied to the archived source by
+# instrument-baseline.py before this build.  It does not alter model/protocol
+# code; the image label records that fact for the runner.
 
 WORKDIR /opt/ns-3-dev
 
@@ -66,6 +73,7 @@ RUN ./ns3 configure --enable-examples && \
     ./ns3 build \
         examples_qkdnetsim_etsi_004 \
         examples_qkdnetsim_etsi_014 \
-        examples_qkdnetsim_secoqc
+        examples_qkdnetsim_secoqc \
+        examples_qkdnetsim_etsi_combined_input
 
 CMD ["/bin/bash"]

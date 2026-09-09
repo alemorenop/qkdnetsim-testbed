@@ -86,5 +86,8 @@ build_qkd_example(p2p_etsi014_bob ../old-examples/examples/point-to-point/etsi01
 build_qkd_example(relay_etsi014_alice ../old-examples/examples/key-relay/etsi014_alice.cc)
 build_qkd_example(relay_etsi014_bob ../old-examples/examples/key-relay/etsi014_bob.cc)
 
+# --- Six-site distributed SECOQC comparison fixture ---
+build_qkd_example(distributed_secoqc_site comparison/secoqc_site.cc)
+
 # --- Official QKDNetSim QKD+PQC reference scenario ---
 build_qkd_example(examples_qkdnetsim_secoqc_qkd_and_pqc examples_qkdnetsim_secoqc_qkd_and_pqc.cc)
