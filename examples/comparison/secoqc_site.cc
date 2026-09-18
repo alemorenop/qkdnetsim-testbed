@@ -174,6 +174,7 @@ main(int argc, char* argv[])
     cmd.AddValue("dev2", "Third physical QKD-link interface", dev2);
     cmd.AddValue("keyRateBps", "Generated key rate on every QKD link", keyRateBps);
     cmd.AddValue("keySizeBytes", "Generated key size", keySizeBytes);
+    cmd.AddValue("rsThreshold", "Relay S-buffer refill threshold in bits", rsThreshold);
     cmd.AddValue("simTime", "Process lifetime", simulationTime);
     cmd.Parse(argc, argv);
     NS_ABORT_MSG_IF(site >= SITE_COUNT, "site must be in [0,5]");

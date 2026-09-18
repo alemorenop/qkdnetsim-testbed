@@ -231,24 +231,6 @@ namespace ns3 {
     {
         NS_LOG_FUNCTION(this << m_currentKeyBit << diffValue << positive);
 
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-        // Collect all keys in READY state
-        /*
-        NS_LOG_FUNCTION(this << "m_keys.size(): " << m_keys.size()); 
-        uint32_t totalReadyKeyCount = 0; 
-        for (auto it = m_keys.begin(); it != m_keys.end(); ++it) {
-            if (it->second->GetState() == QKDKey::READY) { 
-                totalReadyKeyCount += it->second->GetSizeInBits();
-                NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits());
-            }
-        }
-        NS_LOG_FUNCTION(this << "m_currentKeyBit: " << m_currentKeyBit);
-        NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount);
-        */
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-
-
-
         if(positive)
         {
             m_currentKeyBit += diffValue;
@@ -284,7 +266,7 @@ namespace ns3 {
     bool
     QBuffer::StoreKey(Ptr<QKDKey> key, bool fireTraces)
     {
-        NS_ASSERT(!key->GetId().empty()); //Unknown bug! 
+        NS_ASSERT(!key->GetId().empty());
 
         NS_LOG_FUNCTION(this
             << "\nKey ID:\t" << key->GetId()

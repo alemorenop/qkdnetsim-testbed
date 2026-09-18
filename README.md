@@ -1,7 +1,7 @@
 # QKDNetSim Testbed
 
 This repository is a testbed built on top of
-[QKDNetSim](https://www.qkdnetsim.info/models/build/html/qkdnetsim.html). It provides real-network emulation
+[QKDNetSim](https://github.com/QKDNetSim/qkdnetsim). It provides real-network emulation
 scenarios in which every node or role runs in its own Docker container and
 communicates over actual network interfaces instead of placing all logical
 roles inside one conventional ns-3 simulation process.
@@ -15,6 +15,7 @@ roles inside one conventional ns-3 simulation process.
   - [Monolithic versus distributed comparison](#monolithic-versus-distributed-comparison)
   - [Padua reference workload](#padua-reference-workload)
   - [Optional QKD and post-quantum mixing](#optional-qkd-and-post-quantum-mixing)
+  - [Validated results](#validated-results)
 - [Distance-aware QKD link budget](#distance-aware-qkd-link-budget)
 - [CORE classical-network integration](#core-classical-network-integration)
 - [Scenarios](#scenarios)
@@ -182,6 +183,10 @@ requires:
 - an x86-64 Linux host, or Docker Desktop configured to use Linux containers
   on Windows. Commands may be issued from PowerShell, WSL or a Linux shell.
 
+The comparison-image builder discovers `python3`, `python` or the Windows
+`py` launcher. If Python is installed elsewhere, set `QKD_PYTHON` to the
+absolute path of a Python 3.10+ executable before running `build-all.sh`.
+
 A pre-existing ns-3 or QKDNetSim installation is not required for this Docker
 workflow. This repository contains the QKDNetSim module together with the
 testbed changes. During the image build,
@@ -275,10 +280,21 @@ On Windows, the equivalent command is `py -3 automation/run-regression.py
 4. key-relay VPN with ETSI 014.
 
 Success requires synchronized QKD generations, a matching newly established
-IKE SA, successful traffic during rekey, retirement of the previous SA, ESP
-on the exterior path and no clear application payload. Relay cases also
+IKE SA, one TCP session that remains active across every requested rekey,
+retirement of the previous SA, ESP on the exterior path and no clear
+application payload. A continuous ping remains as an auxiliary loss probe
+during the cutover. Relay cases also
 require evidence that the trusted-node path was exercised. A deliberate
 key-mismatch case confirms that divergent KMS streams are rejected.
+
+`--traffic-duration` is the minimum TCP observation time. With more than one
+generation, the runner adds one `--rekey-interval` per additional generation,
+so the same `iperf3` connection starts after generation 1, crosses all SA
+replacements and continues for the requested tail interval. For example,
+`--min-generations 2 --rekey-interval 60 --traffic-duration 10` produces a
+70-second TCP session rather than an unbounded process. The result records
+average throughput, retransmissions, minimum one-second interval throughput
+and intervals with zero throughput.
 
 The JSON, CSV and log files written below `results/` are diagnostic evidence
 for pass/fail investigation. They are not benchmark datasets and the runner
@@ -373,7 +389,7 @@ trace with `Config::ConnectFailSafe`; archived revisions that expose only
 Key generation rate is therefore a controlled input, not an
 architecture-performance result.
 
-Build the four pinned images once and run a small pilot:
+Build the pinned comparison images once and run a small pilot:
 
 ```bash
 bash docker/comparison/build-all.sh
@@ -423,7 +439,9 @@ architecture study. The `qkd` profile selects OTP and VMAC key
 acquisition/consumption while retaining `useCrypto=0`, so cryptographic
 algorithm CPU time is not mistaken for deployment overhead. VPN encryption,
 matching key fingerprints and rotations remain the responsibility of the
-functional regression runner described above.
+functional regression runner described above. Consequently, header-level
+encryption-key uniqueness and OTP-protected-bit fields are not correctness
+evidence in this profile; KMS delivery and consumption counters are.
 `qkd-link-statistics.csv` records configured rate, generation interval,
 generated key count, generated bits, average key size and observed generation
 rate per QKD link. Relay and service totals that cannot be associated with a
@@ -511,7 +529,10 @@ must use `RealtimeSimulatorImpl` because their TCP traffic crosses Docker veth
 and CORE. Consequently, simulated protocol statistics are comparable, whereas
 their wall-clock times are not an architecture-overhead result; use
 `automation/compare-architecture.py` for that separate experiment. A full
-unoptimised monolithic run can take several minutes, so its timeout is a
+campaign selects its distributed image explicitly through Compose; historical
+`old`/`new` runs therefore do not overwrite the working-tree
+`qkdnetsim-testbed:latest` tag used by the `working` profile. An unoptimised
+monolithic run can take several minutes, so its timeout is a
 900-second hang guard rather than the measurement window.
 
 The runner writes `summary.json`,
@@ -523,7 +544,9 @@ article. `key-accounting.csv` deliberately preserves both relay attempts and
 confirmed relay blocks; their difference measures retry/rollback overhead in
 the distributed control plane. Physical Q/S-buffer granularity is 512 bits,
 as in the upstream SECOQC/reference setup. Application key-use events and
-buffer time series are additional testbed measurements.
+buffer time series are additional testbed measurements. Distributed runs also
+separate missed sends caused by socket rejection (`missed_send_socket`) from
+those caused by waiting for a key (`missed_send_key_wait`).
 
 The current QKDNetSim baseline and the figures published with an earlier model
 revision need not be numerically identical. The runner therefore keeps the
@@ -536,9 +559,15 @@ required transport adaptations that are irrelevant in a single ns-3 process:
 listener sockets remain separate from accepted sockets; HTTP fragments are
 reassembled per TCP socket; partial writes are queued; responses arriving on a
 superseded socket are discarded instead of consuming a newer request's
-correlation entry; and key-ID proposals are serialized until Bob acknowledges
-them. A destination relay batch that races with a full buffer is rejected and
-rolled back rather than aborting the KMS. OTP keys are removed after one use.
+correlation entry; malformed response streams trigger a clean reconnect and
+request retry instead of terminating the application; failed `enc_keys`
+responses also consume their correlation entry, preventing a later
+authentication response from being mistaken for encryption material;
+encryption and authentication refills are serialized because multislot relay
+responses need not complete in request order; and key-ID proposals are
+serialized until Bob acknowledges them. A destination relay batch that races
+with a full buffer is rejected and rolled back rather than aborting the KMS.
+OTP keys are removed after one use.
 The test runner waits for receiver listeners and sender simulation completion;
 these are bounded protocol/recovery checks, not watchdogs that restart a
 container or hide a failed run.
@@ -625,6 +654,57 @@ strongSwan's normal PRF-based key schedule to derive the IKE and ESP SAs. This
 mode therefore evaluates hybrid key provisioning in the testbed; it must not
 be described as direct ESP-key injection or as a complete implementation of
 RFC 8784.
+
+### Validated results
+
+The final validation campaign completed on 14 September 2026 without fatal
+simulator, framing or parsing errors:
+
+| Validation | Passed | Main observation |
+|---|---:|---|
+| Matched architecture, transport profile | 20/20 | 100% delivery and goodput retention |
+| Matched architecture, QKD profile | 20/20 | 100% delivery and goodput retention with key consumption |
+| VPN, including mismatched-key rejection | 5/5 | Four tunnels accepted; the inconsistent pair was rejected |
+| Forced QKD/PQC delivery | 4/4 | QKD and PQC contributions observed at both endpoints |
+| Adaptive QKD/PQC delivery | 4/4 | The threshold-controlled branch produced both contributions |
+| Full Padua/reference workload | 10/10 | Five monolithic and five distributed runs completed |
+
+The strengthened VPN regression was repeated on 15 September 2026 after
+adding continuous application traffic and fail-closed endpoint filtering. All
+four interface/topology combinations passed with one 18-second TCP connection
+spanning two PSK generations. No run contained a zero-throughput interval or
+clear ICMP/TCP application packet on the exterior path; average throughput was
+89.12--89.57 Mbit/s.
+
+Across the matched 6.4 kbit/s workloads, distribution preserved application
+goodput while increasing aggregate CPU by 1.37--3.91 times and peak memory by
+1.69--2.41 times, depending on version, topology and profile. The four VPN
+variants delivered approximately 87.8--88.7 Mbit/s, completed two verified
+PSK generations, carried application traffic through ESP and exposed no clear
+application payload on the exterior path.
+
+In the full Padua workload, distributed QKD generation remained within 0.72%
+of the monolithic control on every link. Packets that were sent were delivered
+without loss, but the distributed real-time deployment realised 77.8%, 61.2%
+and 63.3% of the offered load for flows 1--5, 5--1 and 1--6 respectively,
+compared with 94.9%, 99.7% and 97.5% in the monolithic execution. This is a
+measured application-level gap. In later diagnostic runs, key waits dominated
+the shortfall in flow 1--6; socket rejections were absent in runs without
+verbose logging. The available evidence does not isolate a single cause
+within the relay and key-delivery path, so these results cannot yet quantify
+a pure process-boundary cost.
+
+This is a current limitation of the Padua distributed workload, not packet
+loss: in a diagnostic run, Alice's Q-buffer still held over 250 kbit near
+second 90, while its local S-buffer had no complete 512-bit key eligible for
+the next relay hop and the end-to-end relay buffer had fallen to 512 bits.
+The S-buffer's aggregate bit threshold can therefore report available
+material that is unusable for a full-size hop key. A single trial refill
+policy drained the Q-buffer but did not close the application-throughput gap;
+that pilot also recorded more unconfirmed relay attempts, so the policy was
+not retained. Resolving this
+requires examining fragment reuse and failed relay batches together; the
+current measurements must not be presented as an isolated container overhead.
 
 ### Optional native ns-3 development
 
@@ -1095,10 +1175,11 @@ consumer's ETSI retry budget.
 The retired runner waited for ETSI requests and encrypted synthetic TCP/8081
 traffic. Its current replacement applies a stronger VPN-specific condition:
 `core/vpn-topology.py` requires matching key generations, the expected current
-IKE SA, retirement of the previous SA after rekey, successful ping, sustained
-`iperf3` traffic, ESP on the exterior path and no plaintext ICMP or TCP
-payload. Relay cases additionally require evidence from both QKD links and
-the trusted KMS. Packet inspection is transient; captures and CORE endpoints
+IKE SA, retirement of the previous SA after rekey, a single `iperf3` TCP
+session spanning the complete rekey window, ESP on the exterior path and no
+plaintext ICMP or TCP payload. A continuous ping measures packet loss during
+the SA cutover. Relay cases additionally require evidence from both QKD links
+and the trusted KMS. Packet inspection is transient; captures and CORE endpoints
 are deleted after the run and no capture is stored in the repository.
 
 The endpoint sources, traffic runner, diagrams and reproduction commands are
@@ -1169,8 +1250,11 @@ strongSwan otherwise reuses the previous IKE_SA and creates only another
 CHILD_SA, which would not authenticate with the new QKD PSK. Alice closes the
 old IKE_SA, initiates `qkd-N`, verifies that both endpoints report that exact
 IKE_SA as `ESTABLISHED`, and commits the generation. This creates a short,
-controlled cutover. If it fails, both endpoints restore the previous PSK and
-connection and Alice re-establishes the previous generation.
+controlled cutover. Fail-closed firewall rules allow IKE, ESP and the explicit
+TCP/9090 key-coordination channel, but drop application traffic that has no
+matching IPsec policy, preventing plaintext fallback during that interval. If
+the cutover fails, both endpoints restore the previous PSK and connection and
+Alice re-establishes the previous generation.
 
 The operation repeats every `REKEY_INTERVAL_S` (60 seconds by default).
 `/run/qkd-vpn/state.json` contains only the KSID, generation, key index,
@@ -1200,9 +1284,10 @@ docker compose -f docker/docker-compose.core.yml exec core \
 ```
 
 The runner verifies the selected interface, multiple matching generations
-with different key fingerprints, traffic continuity during rekey, retirement
-of the previous IKE SA, successful ping, sustained `iperf3` throughput, ESP,
-and zero plaintext ICMP or TCP payload. Its transient endpoints and temporary
+with different key fingerprints, retirement of the previous IKE SA, and a
+single sustained `iperf3` connection that remains alive throughout rekey. It
+also requires ESP, zero plaintext ICMP or TCP payload and acceptable loss in
+the auxiliary continuous ping. Its transient endpoints and temporary
 capture are deleted after each run, while the QKD/KMS infrastructure may
 remain active for comparisons.
 
@@ -1421,9 +1506,15 @@ standards and model limitations are stated in
 The QKDNetSim model imported by this repository in its initial commit is
 traceable to upstream commit
 [`1cda34c`](https://github.com/QKDNetSim/qkdnetsim/commit/1cda34c).
-The code has now been updated to current upstream commit
-[`525e9bf`](https://github.com/QKDNetSim/qkdnetsim/commit/525e9bf7882ff51b7e197a9fd2ca9ba0b19af0c9),
-which targets ns-3.48 and includes the preceding
+The code has now been updated to the model code published in upstream release
+[`v3.1.3`](https://github.com/QKDNetSim/qkdnetsim/releases/tag/v3.1.3), pinned
+reproducibly at that tag's commit,
+[`1f11f55`](https://github.com/QKDNetSim/qkdnetsim/commit/1f11f55915249c88fb5542620493a2f6919a7231).
+Comparison campaigns recorded before this pin was updated report provenance
+[`525e9bf`](https://github.com/QKDNetSim/qkdnetsim/commit/525e9bf7882ff51b7e197a9fd2ca9ba0b19af0c9);
+`v3.1.3` only adds `CHANGELOG.md`/`CONTRIBUTING.md` over that revision, so the
+compiled model is identical and that earlier provenance remains valid. This code
+targets ns-3.48 and includes the preceding
 [`7a99fc1`](https://github.com/QKDNetSim/qkdnetsim/commit/7a99fc172f9a6b815b67b6c19b96a2fb52865ed2)
 key-management update. The current library provides Q-buffers, local and relay
 S-buffers, both ETSI-facing interfaces, the trusted-node `Relay()` procedure,
@@ -1590,7 +1681,12 @@ internal QKDNetSim mechanisms, not new ETSI API methods.
 - **[`automation/compare-architecture.py`](automation/compare-architecture.py)**
   and **[`docker/comparison/`](docker/comparison/)** — build and execute the
   pinned old/new monolithic-versus-distributed comparison pairs with matched
-  workload instrumentation.
+  workload instrumentation. The helpers modify temporary source archives
+  only; they do not patch the working tree or retag `latest`.
+- **[`automation/run-padua-reference.py`](automation/run-padua-reference.py)**
+  — executes the JSON-defined six-site workload against the current
+  monolithic and distributed deployments and exports application, link, relay
+  and buffer accounting.
 - **[`automation/plot_architecture_comparison.py`](automation/plot_architecture_comparison.py)**
   — converts a comparison `summary.json` into the dependency-free SVG used to
   inspect delivery, goodput and resource cost.

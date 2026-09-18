@@ -1035,6 +1035,14 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication, Connection Failed");
+    if(socket == m_sendSocket)
+    {
+      socket->Close();
+      m_sendSocket = nullptr;
+      m_peerSocketConnected = false;
+      if(!m_peerConnectCheckEvent.IsPending())
+        m_peerConnectCheckEvent = Simulator::Schedule(Seconds(0.1), &QKDPostprocessingApplication::PeerConnectCheck, this);
+    }
   }
 
   void
@@ -1092,6 +1100,14 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
   {
     NS_LOG_FUNCTION(this << socket);
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication-KMS Connection Failed");
+    if(socket == m_sendSocketKMS)
+    {
+      socket->Close();
+      m_sendSocketKMS = nullptr;
+      m_kmsSocketConnected = false;
+      if(!m_kmsConnectCheckEvent.IsPending())
+        m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(0.1), &QKDPostprocessingApplication::KmsConnectCheck, this);
+    }
   }
 
   void

@@ -69,7 +69,7 @@ networks:
 services:
 
   pp_alice:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-pp-alice
     hostname: relay-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -94,7 +94,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_alice-default"]
 
   pp_relay_a:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-pp-a
     hostname: relay-pp-a
     cap_add: [NET_ADMIN, NET_RAW]
@@ -120,7 +120,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_relay_a-default"]
 
   pp_relay_b:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-pp-b
     hostname: relay-pp-b
     cap_add: [NET_ADMIN, NET_RAW]
@@ -142,7 +142,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_relay_b-default"]
 
   pp_bob:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-pp-bob
     hostname: relay-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -168,7 +168,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-relay_pp_bob-default"]
 
   kms_alice:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-kms-alice
     hostname: relay-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -205,7 +205,7 @@ services:
       - "--qbThr=${QKD_BUFFER_THRESHOLD_BITS:-500000}"
 
   kms_trusted:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-kms-trusted
     hostname: relay-kms-trusted
     cap_add: [NET_ADMIN, NET_RAW]
@@ -238,7 +238,7 @@ services:
       - "--qbThr=${QKD_BUFFER_THRESHOLD_BITS:-500000}"
 
   kms_bob:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-relay-kms-bob
     hostname: relay-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]

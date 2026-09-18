@@ -152,11 +152,11 @@ def run_distributed(version: str, repetition: int, scale: float,
     container_result = "/workspace/" + str(
         (case_dir / "result.json").resolve().relative_to(ROOT.resolve())
     ).replace("\\", "/")
-    docker("tag", image, "qkdnetsim-testbed:latest")
     compose(core_compose, "up", "-d", "core")
     compose(compose_file, "down", "--remove-orphans")
     env = dict(os.environ)
     env["QKD_NS3_VERSION"] = ns_version
+    env["QKD_TESTBED_IMAGE"] = image
     up = __import__("subprocess").run(
         [DOCKER, "compose", "-f", str(compose_file), "up", "-d", "--force-recreate"],
         cwd=ROOT, env=env, text=True, encoding="utf-8", errors="replace",
@@ -207,6 +207,7 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
     app_fields = (
         "version", "repetition", "deployment", "application", "sent_bytes",
         "received_bytes", "sent_packets", "received_packets", "missed_send_calls",
+        "missed_send_socket", "missed_send_key_wait",
         "delivery_ratio", "application_goodput_bps", "keys_consumed",
         "offered_rate_bps", "offered_rate_achievement",
         "keys_consumed_bits", "actual_key_use_events",
@@ -237,6 +238,8 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                         "sent_packets": app.get("Packets Sent"),
                         "received_packets": app.get("Packets Received"),
                         "missed_send_calls": app.get("Missed send packet calls"),
+                        "missed_send_socket": None,
+                        "missed_send_key_wait": None,
                         "delivery_ratio": (
                             app.get("Packets Received") / app.get("Packets Sent")
                             if app.get("Packets Sent") else None

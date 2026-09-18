@@ -5,7 +5,7 @@ name: qkdnetsim-padua-reference
 # large-scale QKDNetSim paper. CORE supplies the three classical app paths.
 
 x-site: &site
-  image: qkdnetsim-testbed:latest
+  image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
   cap_add: [NET_ADMIN, NET_RAW]
   volumes:
     - ./entrypoint.sh:/opt/entrypoint-current.sh:ro

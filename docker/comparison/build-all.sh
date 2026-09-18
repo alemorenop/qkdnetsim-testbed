@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the comparison images:
 #   qkdnetsim:base-old        upstream model + matched workload, ns-3.46       (commit 1cda34c)
-#   qkdnetsim:base-new        upstream model + matched workload, ns-3.48/PQC   (commit 525e9bf)
+#   qkdnetsim:base-new        upstream model + matched workload, ns-3.48/PQC   (commit 1f11f55, v3.1.3)
 #   qkdnetsim:base-new-reference  same upstream workload using discrete-event
 #                                execution for the Padua statistics profile
 #   qkdnetsim-testbed:old     our non-monolithic adaptation, pre-PQC / ns-3.46 (commit 99783ee)
@@ -9,7 +9,7 @@
 #
 # Run from anywhere; paths below are relative to this script's location.
 #
-#   ./build-all.sh              build all 4
+#   ./build-all.sh              build every comparison image
 #   ./build-all.sh base-old     build just one (base-old | base-new | testbed-old | testbed-new)
 #   ./build-all.sh check        verify Docker/Python discovery without building
 
@@ -54,11 +54,23 @@ docker() {
 
 resolve_python() {
   local candidate
+
+  if [[ -n "${QKD_PYTHON:-}" ]]; then
+    if [[ -x "${QKD_PYTHON}" ]] && \
+       "${QKD_PYTHON}" -c 'import sys; assert sys.version_info >= (3, 10)' \
+         >/dev/null 2>&1; then
+      PYTHON_CMD=("${QKD_PYTHON}")
+      return
+    fi
+    echo "QKD_PYTHON does not identify a Python 3.10+ executable." >&2
+    return 1
+  fi
+
   for candidate in python3 python; do
     if command -v "${candidate}" >/dev/null 2>&1 && \
-       "${candidate}" -c 'import sys; assert sys.version_info >= (3, 10)' \
+      "${candidate}" -c 'import sys; assert sys.version_info >= (3, 10)' \
          >/dev/null 2>&1; then
-      printf '%s\n' "${candidate}"
+      PYTHON_CMD=("${candidate}")
       return
     fi
   done
@@ -67,32 +79,19 @@ resolve_python() {
   # so test it before selecting it.
   for candidate in /c/Windows/py.exe /mnt/c/Windows/py.exe; do
     if [[ -f "${candidate}" && -x "${candidate}" ]] && \
-       "${candidate}" -3 -c 'import sys; assert sys.version_info >= (3, 10)' \
+      "${candidate}" -3 -c 'import sys; assert sys.version_info >= (3, 10)' \
          >/dev/null 2>&1; then
-      printf '%s\n' "${candidate} -3"
+      PYTHON_CMD=("${candidate}" -3)
       return
     fi
   done
 
-  # Codex Desktop bundles Python in its local runtime. This fallback makes the
-  # developer checkout immediately usable; ordinary Windows installations
-  # should still install Python 3.10+ system-wide.
-  for candidate in \
-    /c/Users/*/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe \
-    /mnt/c/Users/*/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe; do
-    if [[ -f "${candidate}" && -x "${candidate}" ]] && \
-       "${candidate}" -c 'import sys; assert sys.version_info >= (3, 10)' \
-         >/dev/null 2>&1; then
-      printf '%s\n' "${candidate}"
-      return
-    fi
-  done
-
-  echo "Python 3.10+ not found. Install it before building comparison images." >&2
+  echo "Python 3.10+ not found. Install it or set QKD_PYTHON." >&2
   return 1
 }
 
-read -r -a PYTHON_CMD <<< "$(resolve_python)"
+PYTHON_CMD=()
+resolve_python
 python3() {
   "${PYTHON_CMD[@]}" "$@"
 }
@@ -100,12 +99,28 @@ python3() {
 # Never use branch names here. These four immutable revisions define the two
 # comparison pairs even after main, develop or upstream/master move forward.
 UPSTREAM_OLD_COMMIT="1cda34cbe75b5cb33e2ffa87081f724d6484199f"
-UPSTREAM_NEW_COMMIT="525e9bf7882ff51b7e197a9fd2ca9ba0b19af0c9"
+# v3.1.3 (tag), upstream master. Supersedes 525e9bf7882ff51b7e197a9fd2ca9ba0b19af0c9,
+# which earlier comparison campaigns recorded as their provenance; the tag only
+# adds CHANGELOG.md/CONTRIBUTING.md over that commit, so the compiled model is
+# unchanged and that historical provenance remains valid.
+UPSTREAM_NEW_COMMIT="1f11f55915249c88fb5542620493a2f6919a7231"
 TESTBED_OLD_COMMIT="99783ee7f10314b52af71ce0528db7305f461f44"
 TESTBED_NEW_COMMIT="cc6b619a4474913468722ab16000adbcadccce3f"
 
+# A fresh clone of this repo won't have these upstream QKDNetSim commits --
+# they live on the separate "upstream" remote's history, not this repo's own
+# commits -- so `git archive` below would fail with "unknown revision" until
+# they're fetched.
+ensure_upstream_commit() {
+  local commit="$1"
+  if ! git -C "${REPO_ROOT}" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+    git -C "${REPO_ROOT}" fetch upstream master --tags
+  fi
+}
+
 build_base_old() {
   echo "==> Building qkdnetsim:base-old (upstream model, matched workload, 1cda34c)"
+  ensure_upstream_commit "${UPSTREAM_OLD_COMMIT}"
   local ctx
   ctx="$(mktemp -d)"
   trap 'rm -rf "'"${ctx}"'"' RETURN
@@ -115,7 +130,8 @@ build_base_old() {
 }
 
 build_base_new() {
-  echo "==> Building qkdnetsim:base-new (upstream model, matched workload, 525e9bf)"
+  echo "==> Building qkdnetsim:base-new (upstream model, matched workload, 1f11f55 / v3.1.3)"
+  ensure_upstream_commit "${UPSTREAM_NEW_COMMIT}"
   local ctx
   ctx="$(mktemp -d)"
   trap 'rm -rf "'"${ctx}"'"' RETURN
@@ -126,6 +142,7 @@ build_base_new() {
 
 build_base_new_reference() {
   echo "==> Building qkdnetsim:base-new-reference (upstream model, discrete-event Padua reference)"
+  ensure_upstream_commit "${UPSTREAM_NEW_COMMIT}"
   local ctx
   ctx="$(mktemp -d)"
   trap 'rm -rf "'"${ctx}"'"' RETURN
@@ -143,7 +160,7 @@ build_testbed_old() {
   python3 "${SCRIPT_DIR}/instrument-testbed.py" "${ctx}"
   docker build \
     --label org.qkdnetsim.comparison.revision="${TESTBED_OLD_COMMIT}" \
-    --label org.qkdnetsim.comparison.instrumentation="matched-app-traces-v7" \
+    --label org.qkdnetsim.comparison.instrumentation="matched-app-traces-v15" \
     -t qkdnetsim-testbed:old -f "${ctx}/docker/Dockerfile" "${ctx}"
 }
 
@@ -156,7 +173,7 @@ build_testbed_new() {
   python3 "${SCRIPT_DIR}/instrument-testbed.py" "${ctx}"
   docker build \
     --label org.qkdnetsim.comparison.revision="${TESTBED_NEW_COMMIT}" \
-    --label org.qkdnetsim.comparison.instrumentation="matched-app-traces-v8" \
+    --label org.qkdnetsim.comparison.instrumentation="matched-app-traces-v15" \
     -t qkdnetsim-testbed:new -f "${ctx}/docker/Dockerfile" "${ctx}"
 }
 

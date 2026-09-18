@@ -195,15 +195,19 @@ def app_metrics(flow: dict[str, Any], alice_log: str, bob_log: str,
                 scale: float) -> dict[str, Any]:
     alice_summaries = re.findall(
         r"\[COMPARE_APP_SUMMARY\][^\n]*txPackets=(\d+)\s+txBytes=(\d+)"
-        r"\s+missed=(\d+)\s+keyUses=(\d+)\s+uniqueEncKeys=(\d+)"
+        r"\s+missed=(\d+)(?:\s+missedSocket=(\d+)\s+missedKeyWait=(\d+))?"
+        r"\s+keyUses=(\d+)\s+uniqueEncKeys=(\d+)"
         r"\s+payloadBits=(\d+)", alice_log)
     bob_summaries = re.findall(
         r"\[COMPARE_APP_SUMMARY\][^\n]*rxPackets=(\d+)\s+rxBytes=(\d+)",
         bob_log)
 
     if alice_summaries and bob_summaries:
-        sent_packets, sent_bytes, missed, key_uses, unique_keys, payload_bits = (
-            int(value) for value in alice_summaries[-1])
+        tx, tx_bytes, mx, socket_mx, key_wait_mx, uses, unique, payload = alice_summaries[-1]
+        sent_packets, sent_bytes, missed = int(tx), int(tx_bytes), int(mx)
+        missed_socket = int(socket_mx) if socket_mx else None
+        missed_key_wait = int(key_wait_mx) if key_wait_mx else None
+        key_uses, unique_keys, payload_bits = int(uses), int(unique), int(payload)
         received_packets, received_bytes = (
             int(value) for value in bob_summaries[-1])
     else:
@@ -218,6 +222,8 @@ def app_metrics(flow: dict[str, Any], alice_log: str, bob_log: str,
         sent_packets, sent_bytes = len(sent_sizes), sum(sent_sizes)
         received_packets, received_bytes = len(received_sizes), sum(received_sizes)
         missed = len(re.findall(r"\[COMPARE_APP\] Mx\b", alice_log))
+        missed_socket = None
+        missed_key_wait = None
         key_uses, unique_keys = len(used_ids), len(set(used_ids))
         payload_bits = sum(int(bits) for key, _, bits in keys if key.strip("0"))
     duration = scaled_time(
@@ -232,6 +238,8 @@ def app_metrics(flow: dict[str, Any], alice_log: str, bob_log: str,
         "sent_bytes": sent_bytes,
         "received_bytes": received_bytes,
         "missed_send_calls": missed,
+        "missed_send_socket": missed_socket,
+        "missed_send_key_wait": missed_key_wait,
         "delivery_ratio": received_packets / sent_packets if sent_packets else None,
         "application_goodput_bps": achieved_goodput,
         "offered_rate_bps": int(flow["rateBps"]),

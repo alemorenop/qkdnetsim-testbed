@@ -894,6 +894,24 @@ QKDApp014::HttpPacketReceived(const Ptr<Packet> &p, const Address &from,
       break;
     }
 
+    // A timed-out connection can leave an incomplete response immediately
+    // followed by a later HTTP response.  Content-Length then makes the two
+    // byte streams look like one complete message, although the embedded
+    // response line makes its JSON body invalid.  Discard this connection and
+    // retry the pending KMS operation instead of terminating the application.
+    const size_t bodyStart = httpMsgStr.find("\r\n\r\n");
+    const size_t nestedResponse = bodyStart == std::string::npos
+      ? std::string::npos
+      : httpMsgStr.find("HTTP/1.1 ", bodyStart + 4);
+    if (!signaling && nestedResponse != std::string::npos) {
+      NS_LOG_WARN("Malformed KMS HTTP stream; reconnecting and retrying the request");
+      m_buffer_kms.erase(socket);
+      if(m_kmsRequestTimeoutEvent.IsPending())
+        Simulator::Cancel(m_kmsRequestTimeoutEvent);
+      Simulator::ScheduleNow(&QKDApp014::KmsRequestTimeout, this);
+      return;
+    }
+
     // Parse full HTTP message
     HTTPMessage request;
     parser.Parse(&request, httpMsgStr);
@@ -959,11 +977,13 @@ QKDApp014::ManageStores()
     { //Only at Primary application!
       if(GetEncryptionKeySize() != 0 &&
          m_encStore.size() <= m_keyBufferLowWatermark &&
-         !m_encryptionRequestPending)
-          GetKeysFromKMS("encryption");
-      if(GetAuthenticationKeySize() != 0 &&
-         m_authStore.size() <= m_keyBufferLowWatermark &&
+         !m_encryptionRequestPending &&
          !m_authenticationRequestPending)
+          GetKeysFromKMS("encryption");
+      else if(GetAuthenticationKeySize() != 0 &&
+         m_authStore.size() <= m_keyBufferLowWatermark &&
+         !m_authenticationRequestPending &&
+         !m_encryptionRequestPending)
           GetKeysFromKMS("authentication");
       CheckAppState(); 
     }
@@ -1520,7 +1540,9 @@ QKDApp014::ProcessResponseFromKMS(HTTPMessage& header, Ptr<Packet> packet, Ptr<S
   try{
     responseBody = nlohmann::json::parse(header.GetMessageBodyString());
   }catch(...){
-    NS_FATAL_ERROR(this << "json parse error" << header.GetMessageBodyString());
+    NS_LOG_WARN(this << "Malformed JSON response from KMS; reconnecting and retrying");
+    Simulator::ScheduleNow(&QKDApp014::KmsRequestTimeout, this);
+    return;
   }
 
   /**       status          **/
@@ -1635,6 +1657,7 @@ QKDApp014::ProcessSignalingPacketFromApp(HTTPMessage& header, Ptr<Packet> packet
 
       PrintStoreStats();
       CheckAppState();
+      ManageStores();
 
     }else{ //Error
       NS_LOG_WARN(this << "unexpected KEY_IDS error");

@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import queue
+import re
 import shutil
 import shlex
 import subprocess
@@ -244,7 +245,13 @@ def remove_stale_endpoints() -> None:
             check=False,
             echo_output=False,
         )
-        identifiers.extend((result.stdout or "").split())
+        if result.returncode:
+            continue
+        identifiers.extend(
+            identifier
+            for identifier in (result.stdout or "").split()
+            if re.fullmatch(r"[0-9a-f]{12,64}", identifier)
+        )
     if identifiers:
         unique = list(dict.fromkeys(identifiers))
         print(

@@ -1,56 +1,8 @@
 # syntax=docker/dockerfile:1.7
-# Upstream QKDNetSim model -- NEW baseline (ns-3.48, PQC).
-#
-# This is NOT the qkdnetsim-testbed fork. It is vanilla QKDNetSim, built as a
-# plain ns-3 contrib module and run as a single monolithic process. Its
-# example workload is normalized before the build and the known OTP-lifetime
-# and batched-skey-create regressions are repaired identically in both
-# deployments. Its purpose is to
-# be the "before" comparison point for
-# qkdnetsim-testbed's non-monolithic adaptation (docker/Dockerfile from
-# testbed commit d9f0fc4).
-#
-# Pinned to commit 525e9bf ("QKDNetSim compatible with NS-3 v3.48"), the
-# current upstream tip, which adds QKD+PQC key mixing (7a99fc1) and the
-# ns-3.48 migration on top of the OLD baseline (1cda34c, see Dockerfile.base-old).
-#
-# NOTE on PQC: pristine upstream's CMakeLists.txt at this commit defines the
-# QKDNETSIM_WITH_PQC option, and its README documents installing liboqs +
-# liboqs-cpp then reconfiguring with -DQKDNETSIM_WITH_PQC=ON, but the checked-in
-# CMakeLists.txt never calls find_package(liboqs-cpp) or links
-# OQS_LIBRARY/liboqs-cpp into the qkdnetsim target -- so following the README
-# to the letter still fails to build ("LIBOQS_CPP_VERSION was not declared").
-# qkdnetsim-testbed commit d9f0fc4 fixes exactly this gap in its
-# CMakeLists.txt. To keep base-new a meaningful comparison point for
-# qkdnetsim-testbed:new (PQC enabled), this image inserts ONLY that same
-# isolated CMake-wiring fix (see the python3 step below -- the exact block
-# also lives, for reference, in qkdnetsim-testbed's own CMakeLists.txt). No
-# application/model source code is touched by this CMake fix -- it is pure plumbing
-# that makes upstream's own documented, unmodified PQC example
-# (examples_qkdnetsim_secoqc_qkd_and_pqc.cc) buildable as upstream intends.
-#
-# The fix is applied as a plain text-anchor insertion (not a `patch`/`git
-# apply` diff): contrib/qkdnetsim/ is listed in ns-3's own contrib/.gitignore
-# (it's meant to be a plugged-in external module), and since this directory
-# sits inside the ns-3.48 git clone's working tree, `git apply` silently
-# no-ops on gitignored paths (reports success, writes nothing, no error).
-# `patch` avoids that but chokes on upstream's CRLF line endings in
-# CMakeLists.txt ("different line endings", every hunk fails). Editing the
-# file directly in Python sidesteps both traps.
-#
-# Build context starts from the upstream QKDNetSim tree at that commit
-# (build-all.sh handles this via `git archive 525e9bf...`) -- NOT this
-# directory. Supplying the local archived object avoids depending on a moving
-# remote branch:
-#   git archive 525e9bf7882ff51b7e197a9fd2ca9ba0b19af0c9 | tar -x -C <tmpdir>
-#   docker build -t qkdnetsim:base-new -f Dockerfile.base-new <tmpdir>
-#
-# Run an example inside the container:
-#   docker run --rm -it qkdnetsim:base-new
-#   ./ns3 run examples_qkdnetsim_etsi_004
-#   ./ns3 run examples_qkdnetsim_etsi_014
-#   ./ns3 run examples_qkdnetsim_secoqc
-#   ./ns3 run examples_qkdnetsim_secoqc_qkd_and_pqc
+# Upstream QKDNetSim baseline pinned to ns-3.48 with PQC enabled. The build
+# context is an immutable source archive prepared by build-all.sh. Workload
+# instrumentation and shared correctness normalizations are applied before
+# this image is built, while the runtime remains one monolithic ns-3 process.
 
 FROM ubuntu:22.04
 
@@ -72,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ancillary files and dependency compatibility.
 RUN python3 -m pip install --no-cache-dir "cmake>=3.25,<4"
 
-# --- Reproducible PQC toolchain ---
+# Reproducible PQC toolchain.
 # liboqs provides ML-KEM-512 and liboqs-cpp is the header-only C++ wrapper
 # used by QKDNetSim's KMS. Same pinned versions as qkdnetsim-testbed's own
 # docker/Dockerfile, so the PQC ABI is comparable between the two.
@@ -93,11 +45,10 @@ RUN git clone --branch ${LIBOQS_VERSION} --depth 1 https://github.com/open-quant
 
 WORKDIR /opt
 
-# --- ns-3.48, required by the current official QKDNetSim baseline ---
+# ns-3.48, required by this upstream revision.
 RUN git clone -b ns-3.48 https://gitlab.com/nsnam/ns-3-dev.git
 
-# --- Upstream QKDNetSim, pinned to the current tip 525e9bf --
-# supplied via the build context (see header comment) ---
+# The archived QKDNetSim source is supplied as the build context.
 COPY . /opt/ns-3-dev/contrib/qkdnetsim
 
 # Comparison-only workload normalization is applied to the archived source by
@@ -105,8 +56,7 @@ COPY . /opt/ns-3-dev/contrib/qkdnetsim
 
 WORKDIR /opt/ns-3-dev
 
-# --- Official patches on src/stats/model/gnuplot.{cc,h}, shipped by upstream
-# itself in contrib/qkdnetsim/patches/ ---
+# Apply the gnuplot compatibility patches shipped by QKDNetSim.
 RUN sed -i 's/\r$//' \
         contrib/qkdnetsim/patches/gnuplot_cc.patches \
         contrib/qkdnetsim/patches/gnuplot_h.patches && \
@@ -115,9 +65,7 @@ RUN sed -i 's/\r$//' \
     git apply contrib/qkdnetsim/patches/gnuplot_h.patches && \
     git apply contrib/qkdnetsim/patches/gnuplot_cc.patches
 
-# --- CMake-wiring fix for PQC (see NOTE on PQC above): inserts the same
-# find_package/find_path/find_library/link block already present in
-# qkdnetsim-testbed's develop branch, by anchored text replacement. ---
+# Complete the upstream PQC dependency wiring without changing model code.
 RUN python3 <<'PYEOF'
 import pathlib
 
@@ -168,10 +116,7 @@ path.write_text(text)
 print("PQC CMake wiring inserted OK")
 PYEOF
 
-# --- Configure and build the monolithic examples relevant to the comparison,
-# including upstream's own PQC example (skip --enable-mpi:
-# examples_qkdnetsim_etsi_combined_input is the only target that needs it,
-# and it's out of scope here) ---
+# Build the monolithic examples used by the comparison.
 RUN ./ns3 configure --enable-examples -- -DQKDNETSIM_WITH_PQC=ON && \
     ./ns3 build \
         examples_qkdnetsim_etsi_004 \

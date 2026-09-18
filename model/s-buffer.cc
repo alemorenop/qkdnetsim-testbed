@@ -189,9 +189,7 @@ namespace ns3 {
         if(GetBitCount() > m_notReadyBitCount) 
             return GetBitCount() - m_notReadyBitCount;
 
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-        // Collect all keys in READY state - DEBUG CODE
-
+        // Optional consistency diagnostics for non-ready accounting.
         if(m_log){
             NS_LOG_FUNCTION(this << "m_keys.size(): " << m_keys.size()); 
             uint32_t totalReadyKeyCount = 0; 
@@ -206,8 +204,6 @@ namespace ns3 {
             NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount);
             return totalReadyKeyCount;
         }
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-
         return GetBitCount();
     }
 
@@ -251,8 +247,7 @@ namespace ns3 {
             LogUpdate(key->GetSizeInBits(), true);
         }
 
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-        // Collect all keys in READY state - DEBUG CODE
+        // Optional consistency diagnostics across transform, stream and supply pools.
         if(m_log)
         {
 
@@ -293,8 +288,6 @@ namespace ns3 {
         }
         
 
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
- 
         return output; 
     }
 
@@ -330,8 +323,7 @@ namespace ns3 {
         //NS_ASSERT(m_currentKeyBit == keycount* keySize);
 
 
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-        // Collect all keys in READY state - DEBUG CODE
+        // Optional consistency diagnostics across transform, stream and supply pools.
         if(m_log)
         {
 
@@ -371,9 +363,6 @@ namespace ns3 {
             NS_ASSERT(totalReadyKeyCount == m_currentKeyBit);
         }
         
-        ///////////////////////////////// TEMP TEMP TEMP /////////////////////////////////
-
-
         CheckState();
     }
 
@@ -517,8 +506,7 @@ namespace ns3 {
         NS_LOG_FUNCTION(this << keyId << size);
  
  
-        // Collect all keys in READY state
-        /////////////////////// TEMP TEMP TEMP //////////////////////////////////////
+        // Optional consistency diagnostics for the transform pool.
         if(m_log){
             NS_LOG_FUNCTION(this << "m_keys.size(): " << m_keys.size()); 
             uint32_t totalReadyKeyCount = 0;
@@ -535,8 +523,6 @@ namespace ns3 {
             NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount); 
             NS_ASSERT(totalReadyKeyCount == m_currentKeyBit);
         }
-        //////////////////////////////////////////////////////////////////////////////// 
-
         auto it = m_keys.find(keyId);
         if(it!=m_keys.end()){
             if(it->second->GetSizeInBits() > size)

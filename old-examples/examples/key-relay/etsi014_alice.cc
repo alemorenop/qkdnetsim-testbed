@@ -29,6 +29,8 @@ NS_LOG_COMPONENT_DEFINE("RELAY_ETSI014_ALICE_ETSI014_ALICE");
 static uint64_t g_txPackets;
 static uint64_t g_txBytes;
 static uint64_t g_missedSendCalls;
+static uint64_t g_missedSendSocket;
+static uint64_t g_missedSendKeyWait;
 static uint64_t g_keyUseOperations;
 static uint64_t g_payloadBitsProtected;
 static std::unordered_set<std::string> g_uniqueEncryptionKeys;
@@ -51,9 +53,13 @@ CountTx(std::string, const std::string&, Ptr<const Packet> packet)
 }
 
 static void
-CountMissed(std::string, const std::string&, Ptr<const Packet>)
+CountMissed(std::string, const std::string&, Ptr<const Packet> packet)
 {
     ++g_missedSendCalls;
+    if(packet)
+        ++g_missedSendSocket;
+    else
+        ++g_missedSendKeyWait;
 }
 
 static void
@@ -64,6 +70,8 @@ ReportAppStatistics(std::string appId, Time period, Time stopTime)
               << " txPackets=" << g_txPackets
               << " txBytes=" << g_txBytes
               << " missed=" << g_missedSendCalls
+              << " missedSocket=" << g_missedSendSocket
+              << " missedKeyWait=" << g_missedSendKeyWait
               << " keyUses=" << g_keyUseOperations
               << " uniqueEncKeys=" << g_uniqueEncryptionKeys.size()
               << " payloadBits=" << g_payloadBitsProtected << std::endl;

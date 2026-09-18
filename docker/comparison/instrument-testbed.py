@@ -9,11 +9,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from prefetch_policy import apply_prefetch_policy
-from correctness_fixes import remove_transform_accounting_assertions
+from correctness_fixes import (
+    correlate_skey_create_responses,
+    normalize_etsi014_http_recovery,
+    normalize_partial_tcp_sends,
+    remove_transform_accounting_assertions,
+)
 
 
 root = Path(sys.argv[1])
 remove_transform_accounting_assertions(root)
+normalize_partial_tcp_sends(root)
+normalize_etsi014_http_recovery(root)
+correlate_skey_create_responses(root)
 
 # Add the comparison-only six-site distributed fixture to both immutable
 # historical source archives.  This changes no model code: it supplies the

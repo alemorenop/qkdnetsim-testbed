@@ -793,9 +793,9 @@ QKDKeyManagerSystemApplication::SendToSocketPair(Ptr<Socket> socket, Ptr<Packet>
   //https://www.nsnam.org/doxygen/classns3_1_1_socket.html#a78a3c37a539d2e70869bb82cc60fbb09
   Address connectedAddress;
 
-  // TCP Send() may accept only a prefix. Queue complete HTTP messages and let
-  // DataSend() retain the unsent suffix; dropping it corrupts Content-Length
-  // framing when several responses share a socket.
+  // Queue complete HTTP messages until TCP accepts them.  ns-3 TCP rejects a
+  // write when its transmit buffer is full; the generic Socket API also lets
+  // DataSend() preserve a partially accepted suffix.
   m_packetQueues[socket].push_back(packet->Copy());
   m_txTrace(packet);
   if(socket->GetPeerName(connectedAddress) == 0)
@@ -2090,7 +2090,7 @@ QKDKeyManagerSystemApplication::ProcessEtsi004OpenConnect(HTTPMessage headerIn, 
       if(it == m_associations004.end()){
           NS_LOG_ERROR(this << "Key stream association identified with " << ksid << "does not exists!");
 
-          //TEMP TEMP TEMP
+          // Create the local replica when the peer registers first.
           ksid = CreateEtsi004KeyStreamSession(srcSaeId, dstSaeId, inQos, ksid); //Create new key stream session!
           ProcessEtsi004OpenConnect(headerIn, socket);
 
@@ -3705,7 +3705,7 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
       return;
 
     }
- 
+
     nlohmann::json jRelay;
     uint32_t encDefaultKeySize = encBuffer->GetKeySize();
     for(uint32_t i = 0; i < keyIds.size(); i++)
@@ -4388,10 +4388,7 @@ QKDKeyManagerSystemApplication::ProcessFillRequest(
 
   NS_LOG_FUNCTION(this << "pqcMixing enabled:" << pqcMixing);
 
-  // =====================================================
-  // OFFSETS (CRITICAL FIX)
-  // =====================================================
-
+  // QKD and PQC contributions have independent source offsets.
   std::unordered_map<std::string, uint32_t> qkdOffsetBits;
   std::unordered_map<std::string, uint32_t> pqcOffsetBits;
 

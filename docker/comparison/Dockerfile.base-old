@@ -1,28 +1,7 @@
-# Upstream QKDNetSim model -- OLD baseline (pre-PQC, pre ns-3.48).
-#
-# This is NOT the qkdnetsim-testbed fork. It is vanilla QKDNetSim, built as a
-# plain ns-3 contrib module and run as a single monolithic process. Its
-# example workload is normalized before the build; the shared OTP guard
-# instrumentation is already present at this revision. Its purpose is to be
-# the "before" comparison point for
-# qkdnetsim-testbed's non-monolithic adaptation (docker/Dockerfile from
-# testbed commit 99783ee).
-#
-# Pinned to commit 1cda34c ("KMS-KMS communication is bidirectional over a
-# single socket"), the last upstream commit before the PQC + ns-3.48 migration
-# (7a99fc1, 525e9bf).
-#
-# Build context starts from the upstream QKDNetSim tree at that commit (build-all.sh
-# handles this via `git archive 1cda34c...`) -- NOT this directory. Supplying
-# the local archived object avoids depending on a moving remote branch:
-#   git archive 1cda34cbe75b5cb33e2ffa87081f724d6484199f | tar -x -C <tmpdir>
-#   docker build -t qkdnetsim:base-old -f Dockerfile.base-old <tmpdir>
-#
-# Run an example inside the container:
-#   docker run --rm -it qkdnetsim:base-old
-#   ./ns3 run examples_qkdnetsim_etsi_004
-#   ./ns3 run examples_qkdnetsim_etsi_014
-#   ./ns3 run examples_qkdnetsim_secoqc
+# Upstream QKDNetSim baseline pinned to ns-3.46 before PQC support. The build
+# context is an immutable source archive prepared by build-all.sh. Workload
+# instrumentation is applied before this image is built, while the runtime
+# remains one monolithic ns-3 process.
 
 FROM ubuntu:22.04
 
@@ -43,11 +22,10 @@ RUN python3 -m pip install --no-cache-dir "cmake>=3.25,<4"
 
 WORKDIR /opt
 
-# --- ns-3.46, the version this pre-PQC QKDNetSim baseline targets ---
+# ns-3.46, required by this upstream revision.
 RUN git clone -b ns-3.46 https://gitlab.com/nsnam/ns-3-dev.git
 
-# --- Upstream QKDNetSim, pinned to the pre-migration commit 1cda34c
-# -- supplied via the build context (see header comment) ---
+# The archived QKDNetSim source is supplied as the build context.
 COPY . /opt/ns-3-dev/contrib/qkdnetsim
 
 # Comparison-only workload normalization is applied to the archived source by

@@ -6,7 +6,7 @@ name: qkdnetsim-secoqc
 # KMS plane.  CORE attaches the two synthetic endpoints to kms_app_a/f.
 
 x-site: &site
-  image: qkdnetsim-testbed:latest
+  image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
   cap_add: [NET_ADMIN, NET_RAW]
   # Comparison images are immutable historical archives.  Mount the common
   # deployment adapter so both old/new understand the generic EDGE roles.
@@ -49,7 +49,7 @@ services:
       kms_control: {ipv4_address: 192.168.230.11}
       edge_ab: {ipv4_address: 192.168.201.11}
       kms_app_a: {ipv4_address: 192.168.231.11}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=0", "--appIp=192.168.231.11", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=0", "--appIp=192.168.231.11", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]
 
   site_b:
     <<: *site
@@ -66,7 +66,7 @@ services:
       edge_ab: {ipv4_address: 192.168.201.12}
       edge_bc: {ipv4_address: 192.168.202.12}
       edge_bd: {ipv4_address: 192.168.203.12}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=1", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=1", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]
 
   site_c:
     <<: *site
@@ -81,7 +81,7 @@ services:
       kms_control: {ipv4_address: 192.168.230.13}
       edge_bc: {ipv4_address: 192.168.202.13}
       edge_ce: {ipv4_address: 192.168.204.13}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=2", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=2", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]
 
   site_d:
     <<: *site
@@ -96,7 +96,7 @@ services:
       kms_control: {ipv4_address: 192.168.230.14}
       edge_bd: {ipv4_address: 192.168.203.14}
       edge_de: {ipv4_address: 192.168.205.14}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=3", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=3", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]
 
   site_e:
     <<: *site
@@ -113,7 +113,7 @@ services:
       edge_ce: {ipv4_address: 192.168.204.15}
       edge_de: {ipv4_address: 192.168.205.15}
       edge_ef: {ipv4_address: 192.168.206.15}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=4", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=4", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]
 
   site_f:
     <<: *site
@@ -128,4 +128,4 @@ services:
       kms_control: {ipv4_address: 192.168.230.16}
       edge_ef: {ipv4_address: 192.168.206.16}
       kms_app_f: {ipv4_address: 192.168.232.16}
-    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=5", "--appIp=192.168.232.16", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}"]
+    command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns${QKD_NS3_VERSION:-3.48}-distributed_secoqc_site-default", "--site=5", "--appIp=192.168.232.16", "--keyRateBps=${QKD_ZERO_LOSS_KEY_RATE_BPS:-10000}", "--rsThreshold=${QKD_RS_THRESHOLD_BITS:-16000}"]

@@ -185,6 +185,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--app-rate-bps", type=positive_int, default=6400)
     parser.add_argument("--app-packet-size", type=positive_int, default=800)
     parser.add_argument("--keys-per-request", type=positive_int, default=3)
+    parser.add_argument("--app-start-time", type=positive_int, default=2)
     parser.add_argument("--encryption-type", type=int, choices=(0, 1, 2), default=0)
     parser.add_argument("--authentication-type", type=int, choices=(0, 1, 2, 3), default=0)
     parser.add_argument("--delivery-drain-seconds", type=nonnegative_float, default=2.0)
@@ -472,6 +473,7 @@ def start_endpoint(
     app_rate_bps: int,
     app_packet_size: int,
     keys_per_request: int,
+    app_start_time: int,
     encryption_type: int,
     authentication_type: int,
     app_ids: tuple[str, str],
@@ -484,7 +486,7 @@ def start_endpoint(
         f"--{'kmsAliceIp' if 'alice' in node.name else 'kmsBobIp'}={kms}",
         f"--etsiAliceId={app_ids[0]}",
         f"--etsiBobId={app_ids[1]}",
-        "--appStartTime=2",
+        f"--appStartTime={app_start_time}",
         f"--numberOfKeyToFetchFromKMS={keys_per_request}",
         "--useCrypto=0",
         f"--authenticationType={authentication_type}",
@@ -818,12 +820,14 @@ def main() -> None:
             endpoints[1], scenario.binaries[1], own_data[1], own_data[0],
             scenario.app_kms_ips[1], scenario.kms_ips[1], scenario.peer_flags[1], bob_gateway,
             args.app_rate_bps, args.app_packet_size, args.keys_per_request,
+            args.app_start_time,
             args.encryption_type, args.authentication_type, scenario.app_ids,
         )
         start_endpoint(
             endpoints[0], scenario.binaries[0], own_data[0], own_data[1],
             scenario.app_kms_ips[0], scenario.kms_ips[0], scenario.peer_flags[0], alice_gateway,
             args.app_rate_bps, args.app_packet_size, args.keys_per_request,
+            args.app_start_time,
             args.encryption_type, args.authentication_type, scenario.app_ids,
         )
         metrics = wait_for_traffic(

@@ -23,6 +23,7 @@
 #include "qkd-app-header.h"
 #include "ns3/qkd-encryptor.h"
 #include "ns3/app-key.h"
+#include <map>
 #include <unordered_map>
 #include <deque>
 #include <string>

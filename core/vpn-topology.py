@@ -85,6 +85,13 @@ class VpnEndpoint:
     peer_app_id: str
 
 
+@dataclass(frozen=True)
+class TrafficProbe:
+    capture: str
+    duration: int
+    started_at: float
+
+
 @dataclass
 class VpnDockerOptions(DockerOptions):
     kms_network: str = ""
@@ -162,7 +169,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--startup-timeout", type=positive_int, default=240)
     parser.add_argument("--rekey-interval", type=positive_int, default=60)
     parser.add_argument("--min-generations", type=positive_int, default=1)
-    parser.add_argument("--traffic-duration", type=positive_int, default=5)
+    parser.add_argument(
+        "--traffic-duration",
+        type=positive_int,
+        default=5,
+        help=(
+            "minimum TCP traffic time, and tail time after the nominal rekey "
+            "window when multiple generations are required"
+        ),
+    )
     parser.add_argument(
         "--min-throughput-mbps", type=positive_float, default=0.01
     )
@@ -454,12 +469,11 @@ def verify_old_generations_retired(
     )
 
 
-def verify_encrypted_traffic(
+def start_encrypted_traffic(
     alice: VpnEndpoint,
     bob: VpnEndpoint,
     duration: int,
-    min_throughput_mbps: float,
-) -> dict[str, float | int]:
+) -> TrafficProbe:
     route = alice.node.cmd(f"ip route get {bob.own_ip}")
     match = re.search(r"\bdev\s+(\S+)", route)
     if not match:
@@ -489,9 +503,43 @@ def verify_encrypted_traffic(
         "exec", "-d", bob.node.name, "iperf3", "-s", "-1", "-B", bob.own_ip
     )
     time.sleep(1)
-    iperf_output = alice.node.cmd(
-        f"iperf3 -c {bob.own_ip} -t {duration} -J"
+    docker(
+        "exec", alice.node.name, "sh", "-c",
+        "rm -f /tmp/qkd-iperf.json /tmp/qkd-iperf.pid; "
+        f"iperf3 -c {bob.own_ip} -t {duration} -J "
+        ">/tmp/qkd-iperf.json 2>&1 & echo $! >/tmp/qkd-iperf.pid",
     )
+    print(
+        "[CORE_VPN] sustainedTraffic=STARTED "
+        f"durationSeconds={duration}"
+    )
+    return TrafficProbe(capture, duration, time.monotonic())
+
+
+def encrypted_traffic_is_active(alice: VpnEndpoint) -> bool:
+    result = docker(
+        "exec", alice.node.name, "sh", "-c",
+        "test -s /tmp/qkd-iperf.pid && "
+        "kill -0 $(cat /tmp/qkd-iperf.pid) 2>/dev/null",
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def finish_encrypted_traffic(
+    alice: VpnEndpoint,
+    probe: TrafficProbe,
+    min_throughput_mbps: float,
+) -> dict[str, float | int]:
+    deadline = probe.started_at + probe.duration + 15
+    while encrypted_traffic_is_active(alice) and time.monotonic() < deadline:
+        time.sleep(1)
+    if encrypted_traffic_is_active(alice):
+        raise RuntimeError("sustained iperf3 traffic did not finish in time")
+
+    iperf_output = docker(
+        "exec", alice.node.name, "cat", "/tmp/qkd-iperf.json", check=False
+    ).stdout
     json_start = iperf_output.find("{")
     if json_start < 0:
         raise RuntimeError(f"iperf3 returned no JSON: {iperf_output}")
@@ -504,6 +552,13 @@ def verify_encrypted_traffic(
     sent = end.get("sum_sent", {})
     throughput_mbps = float(received.get("bits_per_second", 0.0)) / 1_000_000
     retransmits = int(sent.get("retransmits", 0) or 0)
+    intervals = iperf_result.get("intervals", [])
+    interval_rates = [
+        float(interval.get("sum", {}).get("bits_per_second", 0.0)) / 1_000_000
+        for interval in intervals
+    ]
+    minimum_interval_mbps = min(interval_rates, default=0.0)
+    zero_throughput_intervals = sum(rate <= 0.0 for rate in interval_rates)
     if throughput_mbps < min_throughput_mbps:
         raise RuntimeError(
             f"iperf3 throughput too low: {throughput_mbps:.6f} Mbit/s"
@@ -517,25 +572,28 @@ def verify_encrypted_traffic(
         alice.node.name,
         "sh",
         "-c",
-        f"tcpdump -nn -r {capture} 'ip proto 50' 2>/dev/null | wc -l",
+        f"tcpdump -nn -r {probe.capture} 'ip proto 50' 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext = docker(
         "exec",
         alice.node.name,
         "sh",
         "-c",
-        f"tcpdump -nn -r {capture} icmp 2>/dev/null | wc -l",
+        f"tcpdump -nn -r {probe.capture} icmp 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext_iperf = docker(
         "exec", alice.node.name, "sh", "-c",
-        f"tcpdump -nn -r {capture} 'tcp port 5201' 2>/dev/null | wc -l",
+        f"tcpdump -nn -r {probe.capture} 'tcp port 5201' 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext_iperf_payload = docker(
         "exec", alice.node.name, "sh", "-c",
-        f"tcpdump -nn -r {capture} 'tcp port 5201' 2>/dev/null "
+        f"tcpdump -nn -r {probe.capture} 'tcp port 5201' 2>/dev/null "
         "| grep -Ev 'length 0$' | wc -l",
     ).stdout.strip()
-    docker("exec", alice.node.name, "rm", "-f", capture)
+    docker(
+        "exec", alice.node.name, "rm", "-f",
+        probe.capture, "/tmp/qkd-iperf.json", "/tmp/qkd-iperf.pid",
+    )
     if (
         int(esp) <= 0
         or int(plaintext) != 0
@@ -551,7 +609,9 @@ def verify_encrypted_traffic(
         "[CORE_VPN] encryptedTraffic=OK "
         f"espPackets={esp} plaintextICMP=0 "
         f"plaintextIperfPayload=0 plaintextIperfControl={plaintext_iperf} "
-        f"throughputMbps={throughput_mbps:.3f} retransmits={retransmits}"
+        f"throughputMbps={throughput_mbps:.3f} retransmits={retransmits} "
+        f"minIntervalMbps={minimum_interval_mbps:.3f} "
+        f"zeroIntervals={zero_throughput_intervals}"
     )
     return {
         "esp_packets": int(esp),
@@ -560,6 +620,9 @@ def verify_encrypted_traffic(
         "plaintext_iperf_payload_packets": int(plaintext_iperf_payload),
         "throughput_mbps": round(throughput_mbps, 6),
         "iperf_retransmits": retransmits,
+        "iperf_min_interval_mbps": round(minimum_interval_mbps, 6),
+        "iperf_zero_throughput_intervals": zero_throughput_intervals,
+        "sustained_traffic_duration_seconds": probe.duration,
     }
 
 
@@ -749,6 +812,13 @@ def main() -> None:
             alice, bob, args.qkd_interface, args.startup_timeout,
             target_generation=1,
         )
+        sustained_duration = (
+            args.traffic_duration
+            + (args.min_generations - 1) * args.rekey_interval
+        )
+        traffic_probe = start_encrypted_traffic(
+            alice, bob, sustained_duration
+        )
         if args.min_generations > 1:
             start_rekey_probe(alice, bob)
             alice_state, _, fingerprints = wait_for_tunnel(
@@ -758,6 +828,15 @@ def main() -> None:
             )
             metrics.update(
                 stop_rekey_probe(alice, args.max_rekey_loss_percent)
+            )
+            if not encrypted_traffic_is_active(alice):
+                raise RuntimeError(
+                    "the sustained TCP session ended before the final VPN "
+                    "generation was committed"
+                )
+            print(
+                "[CORE_VPN] sustainedTrafficAcrossRekey=OK "
+                f"generation={args.min_generations}"
             )
         generation = int(alice_state["generation"])
         verify_old_generations_retired(alice, generation)
@@ -772,8 +851,8 @@ def main() -> None:
             f"routers={args.routers} links={args.routers + 1}"
         )
         metrics.update(
-            verify_encrypted_traffic(
-                alice, bob, args.traffic_duration, args.min_throughput_mbps
+            finish_encrypted_traffic(
+                alice, traffic_probe, args.min_throughput_mbps
             )
         )
         if args.qkd_topology == "key-relay":
@@ -812,7 +891,8 @@ def main() -> None:
         "bandwidth_per_link_mbps": args.bandwidth_mbps,
         "loss_per_link_percent": args.loss_percent,
         "rekey_interval_seconds": args.rekey_interval,
-        "traffic_duration_seconds": args.traffic_duration,
+        "traffic_tail_duration_seconds": args.traffic_duration,
+        "traffic_duration_seconds": sustained_duration,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "metrics": metrics,
     }

@@ -58,11 +58,13 @@ def apply_prefetch_policy(root: Path) -> None:
         "          GetKeysFromKMS(\"authentication\"); // 1 - Authentication key\n",
         "      if(GetEncryptionKeySize() != 0 &&\n"
         "         m_encStore.size() <= m_keyBufferLowWatermark &&\n"
-        "         !m_encryptionRequestPending)\n"
-        "          GetKeysFromKMS(\"encryption\");\n"
-        "      if(GetAuthenticationKeySize() != 0 &&\n"
-        "         m_authStore.size() <= m_keyBufferLowWatermark &&\n"
+        "         !m_encryptionRequestPending &&\n"
         "         !m_authenticationRequestPending)\n"
+        "          GetKeysFromKMS(\"encryption\");\n"
+        "      else if(GetAuthenticationKeySize() != 0 &&\n"
+        "         m_authStore.size() <= m_keyBufferLowWatermark &&\n"
+        "         !m_authenticationRequestPending &&\n"
+        "         !m_encryptionRequestPending)\n"
         "          GetKeysFromKMS(\"authentication\");\n",
         "ManageStores",
     )
@@ -113,6 +115,15 @@ def apply_prefetch_policy(root: Path) -> None:
         "      m_authenticationRequestPending = false;\n"
         "    if(header.GetStatus() == HTTPMessage::Ok){\n",
         "response reset",
+    )
+    c = replace_once(
+        c,
+        "      PrintStoreStats();\n"
+        "      CheckAppState();\n",
+        "      PrintStoreStats();\n"
+        "      CheckAppState();\n"
+        "      ManageStores();\n",
+        "continue serialized refill",
     )
     header.write_text(h, encoding="utf-8")
     source.write_text(c, encoding="utf-8")

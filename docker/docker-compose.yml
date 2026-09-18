@@ -59,7 +59,7 @@ networks:
 services:
 
   pp_alice:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-p2p-pp-alice
     hostname: p2p-pp-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -81,7 +81,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_pp_alice-default"]
 
   pp_bob:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-p2p-pp-bob
     hostname: p2p-pp-bob
     cap_add: [NET_ADMIN, NET_RAW]
@@ -107,7 +107,7 @@ services:
     command: ["/opt/ns-3-dev/build/contrib/qkdnetsim/examples/ns3.48-p2p_pp_bob-default"]
 
   kms_alice:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-p2p-kms-alice
     hostname: p2p-kms-alice
     cap_add: [NET_ADMIN, NET_RAW]
@@ -137,7 +137,7 @@ services:
       - "--qbThr=${QKD_BUFFER_THRESHOLD_BITS:-51200}"
 
   kms_bob:
-    image: qkdnetsim-testbed:latest
+    image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}
     container_name: qkd-p2p-kms-bob
     hostname: p2p-kms-bob
     cap_add: [NET_ADMIN, NET_RAW]

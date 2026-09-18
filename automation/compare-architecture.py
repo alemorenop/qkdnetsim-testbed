@@ -38,6 +38,8 @@ APP_RATE_BPS = 6400
 APP_PACKET_SIZE = 800
 DEFAULT_KEYS_PER_REQUEST = 3
 KEY_BUFFER_LOW_WATERMARK = 1
+RELAY_BUFFER_THRESHOLD_BITS = 20480
+APPLICATION_START_SECONDS = 20
 MEASUREMENT_WARMUP_SECONDS = 5
 DELIVERY_DRAIN_SECONDS = 2.0
 DOCKER_DESKTOP = (
@@ -239,8 +241,8 @@ def require_images(versions: tuple[str, ...]) -> None:
                 expected = {
                     ("old", "baseline_image"): "matched-workload-v5",
                     ("new", "baseline_image"): "matched-workload-v7",
-                    ("old", "testbed_image"): "matched-app-traces-v7",
-                    ("new", "testbed_image"): "matched-app-traces-v8",
+                    ("old", "testbed_image"): "matched-app-traces-v15",
+                    ("new", "testbed_image"): "matched-app-traces-v15",
                 }[(version, role)]
                 if inspection.stdout.strip() != expected:
                     stale.append(image)
@@ -478,7 +480,7 @@ def run_monolithic(version: str, topology: str, duration: int, repetition: int,
     config = VERSIONS[version]
     topo = TOPOLOGIES[topology]
     name = f"qkd-compare-base-{version}-{topology}-{os.getpid()}-{repetition}"
-    warmup = 20
+    warmup = APPLICATION_START_SECONDS
     measurement_start = warmup + MEASUREMENT_WARMUP_SECONDS
     sim_time = measurement_start + duration + 1
     invocation = (
@@ -495,12 +497,7 @@ def run_monolithic(version: str, topology: str, duration: int, repetition: int,
     sampler.start()
     started = time.monotonic()
     try:
-        # NOT --SimulatorImplementationType=... on the ns-3 CommandLine: that
-        # GlobalValue is silently ignored there (confirmed with --PrintGlobals
-        # -- it still reports [ns3::DefaultSimulatorImpl] afterwards, and the
-        # process runs 10x+ faster than simulated time). NS_GLOBAL_VALUE is
-        # the one mechanism that actually switches the simulator backend
-        # before Simulator::Run(), verified with `time` against wall clock.
+        # GlobalValues must be selected before ns-3 parses the example command.
         result = docker(
             "run", "--name", name,
             "-e", "NS_GLOBAL_VALUE=SimulatorImplementationType=ns3::RealtimeSimulatorImpl",
@@ -528,7 +525,15 @@ def run_monolithic(version: str, topology: str, duration: int, repetition: int,
 def materialize_old_compose(directory: Path, filename: str) -> Path:
     output = directory / filename
     result = run(["git", "show", f"{OLD_TESTBED_COMMIT}:docker/{filename}"], check=True)
-    output.write_text(result.stdout, encoding="utf-8")
+    fixed_image = "image: qkdnetsim-testbed:latest"
+    selected_image = "image: ${QKD_TESTBED_IMAGE:-qkdnetsim-testbed:latest}"
+    if fixed_image not in result.stdout:
+        raise RuntimeError(
+            f"historical Compose file {filename} has no fixed testbed image to replace"
+        )
+    output.write_text(
+        result.stdout.replace(fixed_image, selected_image), encoding="utf-8"
+    )
     return output
 
 
@@ -554,7 +559,6 @@ def run_distributed(version: str, topology: str, duration: int, repetition: int,
                     encryption_type: int, authentication_type: int) -> dict[str, Any]:
     config = VERSIONS[version]
     topo = TOPOLOGIES[topology]
-    docker("tag", config["testbed_image"], "qkdnetsim-testbed:latest", check=True)
     compose_file = (
         materialize_old_compose(temp_directory, str(topo["compose"]))
         if version == "old" and topology != "secoqc"
@@ -566,6 +570,9 @@ def run_distributed(version: str, topology: str, duration: int, repetition: int,
         started = time.monotonic()
         compose_env = dict(topo["rate_env"])
         compose_env["QKD_NS3_VERSION"] = "3.46" if version == "old" else "3.48"
+        compose_env["QKD_TESTBED_IMAGE"] = config["testbed_image"]
+        if topology == "secoqc":
+            compose_env["QKD_RS_THRESHOLD_BITS"] = str(RELAY_BUFFER_THRESHOLD_BITS)
         compose(compose_file, "up", "-d", "--force-recreate",
                 env=compose_env, check=True)
         infrastructure_seconds = time.monotonic() - started
@@ -592,6 +599,7 @@ def run_distributed(version: str, topology: str, duration: int, repetition: int,
             "--app-rate-bps", str(APP_RATE_BPS),
             "--app-packet-size", str(APP_PACKET_SIZE),
             "--keys-per-request", str(keys_per_request),
+            "--app-start-time", str(APPLICATION_START_SECONDS),
             "--encryption-type", str(encryption_type),
             "--authentication-type", str(authentication_type),
             "--delivery-drain-seconds", str(DELIVERY_DRAIN_SECONDS),
@@ -711,9 +719,9 @@ def write_paper_style_tables(records: list[dict[str, Any]], output_dir: Path) ->
                         [record["controls"]["authentication_type"]]
                     ),
                     "key_lifetime_bytes": None,
-                    "configured_start_time_seconds": 20 if deployment_key == "monolithic" else 2,
+                    "configured_start_time_seconds": APPLICATION_START_SECONDS,
                     "configured_stop_time_seconds": (
-                        20 + MEASUREMENT_WARMUP_SECONDS + duration
+                        APPLICATION_START_SECONDS + MEASUREMENT_WARMUP_SECONDS + duration
                         if deployment_key == "monolithic"
                         else 5000
                     ),
@@ -1007,6 +1015,8 @@ def main() -> int:
                         "postprocessing_key_size_bytes": 256,
                         "keys_per_request": args.keys_per_request,
                         "key_buffer_low_watermark": KEY_BUFFER_LOW_WATERMARK,
+                        "relay_buffer_threshold_bits": RELAY_BUFFER_THRESHOLD_BITS,
+                        "application_start_seconds": APPLICATION_START_SECONDS,
                         "measurement_warmup_seconds": MEASUREMENT_WARMUP_SECONDS,
                         "workload_profile": args.workload_profile,
                         "encryption_type": encryption_type,
@@ -1029,8 +1039,6 @@ def main() -> int:
                     json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
                 records.append(record)
         finally:
-            docker("tag", VERSIONS["new"]["testbed_image"],
-                   "qkdnetsim-testbed:latest")
             compose(CORE_COMPOSE, "down", "--remove-orphans")
 
     summary = {

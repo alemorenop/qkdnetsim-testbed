@@ -61,6 +61,18 @@ EOF
 : > /etc/ipsec.secrets
 chmod 0600 /etc/ipsec.secrets
 
+# Keep application traffic fail-closed while an IKE SA is being replaced.
+# IKE and ESP remain reachable; any other peer traffic without an outbound or
+# inbound IPsec policy is dropped instead of falling back to plaintext.
+iptables -w -I OUTPUT 1 -d "${PEER_IP}" -m policy --dir out --pol none -j DROP
+iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p esp -j ACCEPT
+iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p udp -m multiport --dports 500,4500 -j ACCEPT
+iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p tcp -m multiport --ports "${CONTROL_PORT:-9090}" -j ACCEPT
+iptables -w -I INPUT 1 -s "${PEER_IP}" -m policy --dir in --pol none -j DROP
+iptables -w -I INPUT 1 -s "${PEER_IP}" -p esp -j ACCEPT
+iptables -w -I INPUT 1 -s "${PEER_IP}" -p udp -m multiport --dports 500,4500 -j ACCEPT
+iptables -w -I INPUT 1 -s "${PEER_IP}" -p tcp -m multiport --ports "${CONTROL_PORT:-9090}" -j ACCEPT
+
 echo "[vpn] starting strongSwan (role=${VPN_ROLE})"
 ipsec start
 
