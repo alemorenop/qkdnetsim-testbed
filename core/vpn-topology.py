@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import subprocess
 import time
 from dataclasses import dataclass
@@ -164,6 +165,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss-percent", type=percentage, default=0.0)
     parser.add_argument("--qkd-interface", choices=("004", "014"), default="004")
     parser.add_argument(
+        "--keying-mode", choices=("psk", "ppk"), default="psk",
+        help="Use QKD as the IKE authentication PSK or a mandatory RFC 8784 PPK",
+    )
+    parser.add_argument(
         "--qkd-topology", choices=QKD_TOPOLOGIES, default="point-to-point"
     )
     parser.add_argument("--startup-timeout", type=positive_int, default=240)
@@ -185,7 +190,9 @@ def parse_args() -> argparse.Namespace:
         "--max-rekey-loss-percent", type=percentage, default=25.0
     )
     parser.add_argument(
-        "--fault-mode", choices=("none", "bob-key-mismatch"), default="none"
+        "--fault-mode",
+        choices=("none", "bob-key-mismatch", "bob-ppk-mismatch"),
+        default="none",
     )
     parser.add_argument(
         "--require-pqc",
@@ -289,10 +296,13 @@ def configure_routes(
             )
 
 
-def start_vpn(endpoint: VpnEndpoint, args: argparse.Namespace) -> None:
+def start_vpn(
+    endpoint: VpnEndpoint, args: argparse.Namespace, auth_psk_hex: str | None
+) -> None:
     variables = {
         "VPN_ROLE": endpoint.role,
         "QKD_INTERFACE": args.qkd_interface,
+        "VPN_KEYING_MODE": args.keying_mode,
         "OWN_IP": endpoint.own_ip,
         "PEER_IP": endpoint.peer_ip,
         "KMS_IP": endpoint.kms_ip,
@@ -306,7 +316,14 @@ def start_vpn(endpoint: VpnEndpoint, args: argparse.Namespace) -> None:
             if args.fault_mode == "bob-key-mismatch" and endpoint.role == "bob"
             else "0"
         ),
+        "QKD_TEST_TAMPER_PPK": (
+            "1"
+            if args.fault_mode == "bob-ppk-mismatch" and endpoint.role == "bob"
+            else "0"
+        ),
     }
+    if auth_psk_hex is not None:
+        variables["IKE_AUTH_PSK_HEX"] = auth_psk_hex
     command = ["exec", "-d"]
     for key, value in variables.items():
         command.extend(("-e", f"{key}={value}"))
@@ -334,7 +351,9 @@ def wait_for_tunnel(
     alice: VpnEndpoint,
     bob: VpnEndpoint,
     qkd_interface: str,
+    keying_mode: str,
     timeout: int,
+    fault_mode: str = "none",
     target_generation: int = 1,
     generation_fingerprints: dict[int, str] | None = None,
 ) -> tuple[dict[str, object], dict[str, object], dict[int, str]]:
@@ -354,6 +373,12 @@ def wait_for_tunnel(
                 last_error = str(endpoint_state.get("last_error") or "")
                 if "KMS streams diverged" in last_error:
                     raise RuntimeError(f"{endpoint}: {last_error}")
+                if (
+                    fault_mode == "bob-ppk-mismatch"
+                    and endpoint == "Alice"
+                    and "failed to establish qkd-1" in last_error
+                ):
+                    raise RuntimeError("PPK mismatch rejected by IKEv2")
             same_generation = (
                 alice_state.get("generation") == bob_state.get("generation")
                 and int(alice_state.get("generation", 0)) >= 1
@@ -367,11 +392,21 @@ def wait_for_tunnel(
                     raise RuntimeError("Alice reports the wrong ETSI interface")
                 if bob_state.get("qkd_interface") != qkd_interface:
                     raise RuntimeError("Bob reports the wrong ETSI interface")
+                if any(
+                    endpoint_state.get("keying_mode") != keying_mode
+                    for endpoint_state in (alice_state, bob_state)
+                ):
+                    raise RuntimeError("VPN peers report the wrong IKE keying mode")
                 if alice_state.get("key_fingerprint") != bob_state.get(
                     "key_fingerprint"
                 ):
                     raise RuntimeError("VPN peers committed different QKD keys")
                 generation = int(alice_state["generation"])
+                if keying_mode == "ppk" and any(
+                    endpoint_state.get("ppk_id") != f"qkd-{generation}"
+                    for endpoint_state in (alice_state, bob_state)
+                ):
+                    raise RuntimeError("VPN peers did not confirm the QKD PPK ID")
                 fingerprint = str(alice_state.get("key_fingerprint", ""))
                 if not fingerprint:
                     raise RuntimeError("VPN generation has no key fingerprint")
@@ -453,15 +488,23 @@ def stop_rekey_probe(
 
 
 def verify_old_generations_retired(
-    alice: VpnEndpoint, current_generation: int
+    alice: VpnEndpoint, current_generation: int, keying_mode: str
 ) -> None:
     if current_generation <= 1:
         return
     status = docker(
-        "exec", alice.node.name, "ipsec", "statusall", check=False
+        "exec", alice.node.name,
+        *( ("swanctl", "--list-sas") if keying_mode == "ppk"
+           else ("ipsec", "statusall") ),
+        check=False,
     ).stdout
     for generation in range(1, current_generation):
-        if re.search(rf"^\s*qkd-{generation}\[\d+\]: ESTABLISHED", status, re.MULTILINE):
+        pattern = (
+            rf"^\s*qkd-{generation}: #\d+, ESTABLISHED"
+            if keying_mode == "ppk" else
+            rf"^\s*qkd-{generation}\[\d+\]: ESTABLISHED"
+        )
+        if re.search(pattern, status, re.MULTILINE):
             raise RuntimeError(f"old IKE SA qkd-{generation} is still established")
     print(
         "[CORE_VPN] oldGenerationsRetired=OK "
@@ -706,6 +749,14 @@ def stop_vpn(endpoint: VpnEndpoint | None) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.fault_mode == "bob-ppk-mismatch" and args.keying_mode != "ppk":
+        raise ValueError("bob-ppk-mismatch requires --keying-mode ppk")
+    if args.keying_mode == "ppk":
+        auth_psk_hex = (
+            os.environ.get("QKD_VPN_AUTH_PSK_HEX") or secrets.token_hex(32)
+        )
+    else:
+        auth_psk_hex = None
     started = time.monotonic()
     topology = QKD_TOPOLOGIES[args.qkd_topology]
     suffix = str(os.getpid())
@@ -805,11 +856,12 @@ def main() -> None:
             topology.app_ids[1],
             topology.app_ids[0],
         )
-        start_vpn(bob, args)
-        start_vpn(alice, args)
+        start_vpn(bob, args, auth_psk_hex)
+        start_vpn(alice, args, auth_psk_hex)
 
         alice_state, _, fingerprints = wait_for_tunnel(
-            alice, bob, args.qkd_interface, args.startup_timeout,
+            alice, bob, args.qkd_interface, args.keying_mode,
+            args.startup_timeout, args.fault_mode,
             target_generation=1,
         )
         sustained_duration = (
@@ -822,7 +874,8 @@ def main() -> None:
         if args.min_generations > 1:
             start_rekey_probe(alice, bob)
             alice_state, _, fingerprints = wait_for_tunnel(
-                alice, bob, args.qkd_interface, args.startup_timeout,
+                alice, bob, args.qkd_interface, args.keying_mode,
+                args.startup_timeout, args.fault_mode,
                 target_generation=args.min_generations,
                 generation_fingerprints=fingerprints,
             )
@@ -839,15 +892,18 @@ def main() -> None:
                 f"generation={args.min_generations}"
             )
         generation = int(alice_state["generation"])
-        verify_old_generations_retired(alice, generation)
+        verify_old_generations_retired(alice, generation, args.keying_mode)
         metrics["generations_verified"] = generation
+        if args.keying_mode == "ppk":
+            metrics["mandatory_ppk_generations_verified"] = generation
         metrics["generation_fingerprints"] = {
             str(number): fingerprint
             for number, fingerprint in sorted(fingerprints.items())
         }
         print(
             "[CORE_VPN] tunnel=OK "
-            f"topology={args.qkd_topology} interface=ETSI{args.qkd_interface} generation={generation} "
+            f"topology={args.qkd_topology} interface=ETSI{args.qkd_interface} "
+            f"keyingMode={args.keying_mode} generation={generation} "
             f"routers={args.routers} links={args.routers + 1}"
         )
         metrics.update(
@@ -883,6 +939,7 @@ def main() -> None:
         "status": "passed",
         "topology": args.qkd_topology,
         "qkd_interface": args.qkd_interface,
+        "keying_mode": args.keying_mode,
         "fault_mode": args.fault_mode,
         "pqc_required": args.require_pqc,
         "routers": args.routers,

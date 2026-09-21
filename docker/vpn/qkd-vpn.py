@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ETSI QKD 004/014 consumer and transactional strongSwan PSK rotator."""
+"""ETSI QKD 004/014 consumer with transactional PSK or RFC 8784 PPK rotation."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from typing import Any, Callable
 
 ROLE = os.environ["VPN_ROLE"].lower()
 QKD_INTERFACE = os.getenv("QKD_INTERFACE", "004")
+VPN_KEYING_MODE = os.getenv("VPN_KEYING_MODE", "psk").lower()
+IKE_AUTH_PSK_HEX = os.getenv("IKE_AUTH_PSK_HEX", "")
 OWN_IP = os.environ["OWN_IP"]
 PEER_IP = os.environ["PEER_IP"]
 KMS_IP = os.environ["KMS_IP"]
@@ -37,11 +39,13 @@ REKEY_INTERVAL_S = int(os.getenv("REKEY_INTERVAL_S", "60"))
 RETRY_INTERVAL_S = float(os.getenv("RETRY_INTERVAL_S", "2"))
 RETRY_LIMIT = int(os.getenv("RETRY_LIMIT", "60"))
 TEST_TAMPER_KEY = os.getenv("QKD_TEST_TAMPER_KEY", "0") == "1"
+TEST_TAMPER_PPK = os.getenv("QKD_TEST_TAMPER_PPK", "0") == "1"
 
 RUN_DIR = pathlib.Path("/run/qkd-vpn")
 STATE_FILE = RUN_DIR / "state.json"
 SECRETS_FILE = pathlib.Path("/etc/ipsec.secrets")
 CONNECTION_DIR = pathlib.Path("/etc/ipsec.d")
+SWANCTL_FILE = pathlib.Path("/etc/swanctl/swanctl.conf")
 
 
 def log(message: str) -> None:
@@ -69,6 +73,24 @@ def run_ipsec(*args: str, check: bool = True) -> subprocess.CompletedProcess[str
     if check and result.returncode:
         raise RuntimeError(
             f"ipsec {' '.join(args)} failed with status {result.returncode}"
+        )
+    return result
+
+
+def run_swanctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["swanctl", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    output = result.stdout.strip()
+    if output and (result.returncode or args[0] in {"--initiate", "--terminate"}):
+        log(output)
+    if check and result.returncode:
+        raise RuntimeError(
+            f"swanctl {args[0]} failed with status {result.returncode}: {output}"
         )
     return result
 
@@ -162,8 +184,6 @@ class KeyVersion:
 
 def tamper_key_for_negative_test(key: KeyVersion) -> KeyVersion:
     """Return deliberately divergent material for the opt-in fail-closed test."""
-    if not TEST_TAMPER_KEY:
-        return key
     if key.value.startswith("0x"):
         material = bytearray.fromhex(key.value[2:])
         material[0] ^= 0x01
@@ -305,7 +325,75 @@ def escape_ipsec_secret(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def key_material_hex(key: KeyVersion) -> str:
+    if key.value.startswith("0x"):
+        return key.value
+    return "0x" + key.value.encode().hex()
+
+
+PPK_KEYS: dict[int, KeyVersion] = {}
+
+
+def render_swanctl_config() -> str:
+    connections = []
+    secrets = [
+        "  ike-auth {\n"
+        f"    id-1 = {OWN_IP}\n"
+        f"    id-2 = {PEER_IP}\n"
+        f"    secret = 0x{IKE_AUTH_PSK_HEX}\n"
+        "  }\n"
+    ]
+    for generation, key in sorted(PPK_KEYS.items()):
+        name = f"qkd-{generation}"
+        connections.append(
+            f"  {name} {{\n"
+            "    version = 2\n"
+            f"    local_addrs = {OWN_IP}\n"
+            f"    remote_addrs = {PEER_IP}\n"
+            "    proposals = aes256-sha256-modp2048\n"
+            "    mobike = no\n"
+            "    rekey_time = 0\n"
+            f"    ppk_id = {name}\n"
+            "    ppk_required = yes\n"
+            "    local {\n"
+            "      auth = psk\n"
+            f"      id = {OWN_IP}\n"
+            "    }\n"
+            "    remote {\n"
+            "      auth = psk\n"
+            f"      id = {PEER_IP}\n"
+            "    }\n"
+            "    children {\n"
+            f"      {name} {{\n"
+            "        mode = transport\n"
+            f"        local_ts = {OWN_IP}/32\n"
+            f"        remote_ts = {PEER_IP}/32\n"
+            "        esp_proposals = aes256-sha256\n"
+            "        rekey_time = 0\n"
+            "      }\n"
+            "    }\n"
+            "  }\n"
+        )
+        secrets.append(
+            f"  ppk-{name} {{\n"
+            f"    id = {name}\n"
+            f"    secret = {key_material_hex(key)}\n"
+            "  }\n"
+        )
+    return (
+        "connections {\n" + "".join(connections) + "}\n"
+        "secrets {\n" + "".join(secrets) + "}\n"
+    )
+
+
+def load_ppk_configuration() -> None:
+    atomic_write(SWANCTL_FILE, render_swanctl_config(), 0o600)
+    run_swanctl("--load-all", "--clear", "--file", str(SWANCTL_FILE))
+
+
 def install_secret(key: KeyVersion | None) -> None:
+    if VPN_KEYING_MODE == "ppk":
+        return
     content = ""
     if key is not None:
         if key.value.startswith("0x"):
@@ -326,7 +414,15 @@ def connection_path(generation: int) -> pathlib.Path:
     return CONNECTION_DIR / f"qkd-{generation}.conf"
 
 
-def install_connection(generation: int) -> None:
+def install_connection(generation: int, key: KeyVersion | None = None) -> None:
+    if VPN_KEYING_MODE == "ppk":
+        if key is None:
+            raise ValueError("PPK connection requires QKD key material")
+        PPK_KEYS[generation] = (
+            tamper_key_for_negative_test(key) if TEST_TAMPER_PPK else key
+        )
+        load_ppk_configuration()
+        return
     atomic_write(
         connection_path(generation),
         f"conn qkd-{generation}\n    also=%default\n",
@@ -336,6 +432,10 @@ def install_connection(generation: int) -> None:
 
 
 def remove_connection(generation: int) -> None:
+    if VPN_KEYING_MODE == "ppk":
+        if PPK_KEYS.pop(generation, None) is not None:
+            load_ppk_configuration()
+        return
     try:
         connection_path(generation).unlink()
     except FileNotFoundError:
@@ -344,6 +444,19 @@ def remove_connection(generation: int) -> None:
 
 
 def tunnel_is_up(generation: int) -> bool:
+    if VPN_KEYING_MODE == "ppk":
+        result = run_swanctl(
+            "--list-sas", "--ike", f"qkd-{generation}", "--raw",
+            check=False,
+        )
+        return result.returncode == 0 and all(
+            re.search(rf"\b{field}\s*=\s*{value}\b", result.stdout)
+            for field, value in (
+                ("state", "ESTABLISHED"),
+                ("state", "INSTALLED"),
+                ("ppk", "yes"),
+            )
+        )
     result = run_ipsec("statusall", check=False)
     return bool(
         re.search(
@@ -369,6 +482,11 @@ class SharedState:
             state = {
                 "role": ROLE,
                 "qkd_interface": QKD_INTERFACE,
+                "keying_mode": VPN_KEYING_MODE,
+                "ppk_id": (
+                    f"qkd-{self.current.generation}"
+                    if VPN_KEYING_MODE == "ppk" and self.current else None
+                ),
                 "ksid": self.ksid,
                 "generation": self.current.generation if self.current else 0,
                 "key_index": self.current.index if self.current else None,
@@ -444,8 +562,9 @@ def prepare_bob(
                 lambda: fetch_etsi014_dec_key(key_id, generation),
                 f"dec_keys generation {generation}",
             )
-        key = tamper_key_for_negative_test(key)
-        install_connection(generation)
+        if TEST_TAMPER_KEY:
+            key = tamper_key_for_negative_test(key)
+        install_connection(generation, key)
         install_secret(key)
         STATE.pending = key
         STATE.last_error = None
@@ -496,7 +615,7 @@ def rollback_bob(generation: int) -> None:
             remove_connection(generation)
             STATE.pending = None
         if STATE.current:
-            install_connection(STATE.current.generation)
+            install_connection(STATE.current.generation, STATE.current)
         install_secret(STATE.current)
         STATE.tunnel_up = bool(
             STATE.current and tunnel_is_up(STATE.current.generation)
@@ -537,6 +656,7 @@ class ControlHandler(http.server.BaseHTTPRequestHandler):
                 {
                     "generation": generation,
                     "established": tunnel_is_up(generation),
+                    "keying_mode": VPN_KEYING_MODE,
                 },
             )
             return
@@ -616,7 +736,10 @@ class ControlHandler(http.server.BaseHTTPRequestHandler):
 
 def initiate(generation: int) -> None:
     for attempt in range(1, 6):
-        run_ipsec("up", f"qkd-{generation}", check=False)
+        if VPN_KEYING_MODE == "ppk":
+            run_swanctl("--initiate", "--child", f"qkd-{generation}", check=False)
+        else:
+            run_ipsec("up", f"qkd-{generation}", check=False)
         if tunnel_is_up(generation):
             return
         log(
@@ -629,9 +752,19 @@ def initiate(generation: int) -> None:
 
 def require_peer_tunnel(generation: int) -> dict[str, Any]:
     response = peer_request(f"/status?generation={generation}")
-    if not response.get("established"):
+    if (
+        not response.get("established")
+        or response.get("keying_mode") != VPN_KEYING_MODE
+    ):
         raise RuntimeError("peer has not established the new IKE_SA")
     return response
+
+
+def terminate_tunnel(generation: int) -> None:
+    if VPN_KEYING_MODE == "ppk":
+        run_swanctl("--terminate", "--ike", f"qkd-{generation}", check=False)
+    else:
+        run_ipsec("down", f"qkd-{generation}", check=False)
 
 
 def rollback_alice(failed: KeyVersion, previous: KeyVersion | None) -> None:
@@ -645,7 +778,7 @@ def rollback_alice(failed: KeyVersion, previous: KeyVersion | None) -> None:
     finally:
         remove_connection(failed.generation)
         if previous:
-            install_connection(previous.generation)
+            install_connection(previous.generation, previous)
         install_secret(previous)
         with STATE.lock:
             STATE.pending = None
@@ -710,7 +843,7 @@ def rotate_alice() -> None:
             f"peer index={peer.get('index')} key_ID={peer.get('key_id')}"
         )
 
-    install_connection(generation)
+    install_connection(generation, key)
     install_secret(key)
     with STATE.lock:
         STATE.pending = key
@@ -730,7 +863,7 @@ def rotate_alice() -> None:
                 ),
                 f"peer activate generation {generation}",
             )
-            run_ipsec("down", f"qkd-{previous.generation}", check=False)
+            terminate_tunnel(previous.generation)
             remove_connection(previous.generation)
             with STATE.lock:
                 STATE.tunnel_up = False
@@ -758,10 +891,12 @@ def rotate_alice() -> None:
         STATE.publish()
     if previous:
         remove_connection(previous.generation)
-    log(
-        f"COMMITTED generation={generation} {key_reference(key)}; "
+    keying_result = (
+        "new IKE_SA uses the mandatory QKD PPK"
+        if VPN_KEYING_MODE == "ppk" else
         "new IKE_SA authenticated with the QKD PSK"
     )
+    log(f"COMMITTED generation={generation} {key_reference(key)}; {keying_result}")
 
 
 def run_bob() -> None:
@@ -817,6 +952,13 @@ def main() -> None:
         raise SystemExit("VPN_ROLE must be alice or bob")
     if QKD_INTERFACE not in {"004", "014"}:
         raise SystemExit("QKD_INTERFACE must be 004 or 014")
+    if VPN_KEYING_MODE not in {"psk", "ppk"}:
+        raise SystemExit("VPN_KEYING_MODE must be psk or ppk")
+    if VPN_KEYING_MODE == "ppk" and (
+        not re.fullmatch(r"[0-9a-fA-F]{64,}", IKE_AUTH_PSK_HEX)
+        or len(IKE_AUTH_PSK_HEX) % 2 != 0
+    ):
+        raise SystemExit("IKE_AUTH_PSK_HEX must contain at least 256 bits")
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     CONNECTION_DIR.mkdir(parents=True, exist_ok=True)
     if ROLE == "bob":

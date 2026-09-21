@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the four supported QKD-backed VPN regression variants."""
+"""Run the QKD-backed VPN and RFC 8784 PPK regression variants."""
 
 from __future__ import annotations
 
@@ -44,7 +44,12 @@ CASE_NAMES = (
     "vpn-point-to-point-etsi014",
     "vpn-key-relay-etsi004",
     "vpn-key-relay-etsi014",
+    "vpn-point-to-point-etsi004-ppk",
+    "vpn-point-to-point-etsi014-ppk",
+    "vpn-key-relay-etsi004-ppk",
+    "vpn-key-relay-etsi014-ppk",
     "negative-vpn-rejects-mismatched-key",
+    "negative-vpn-rejects-mismatched-ppk",
 )
 
 
@@ -317,6 +322,38 @@ def matrix(args: argparse.Namespace) -> list[Case]:
             "vpn-key-relay-etsi014", COMPOSE_FILES[1], "vpn-topology.py",
             ("--qkd-topology", "key-relay", "--qkd-interface", "014", *vpn),
         ),
+        Case(
+            "vpn-point-to-point-etsi004-ppk", COMPOSE_FILES[0],
+            "vpn-topology.py",
+            (
+                "--qkd-topology", "point-to-point",
+                "--qkd-interface", "004", "--keying-mode", "ppk", *vpn,
+            ),
+        ),
+        Case(
+            "vpn-point-to-point-etsi014-ppk", COMPOSE_FILES[0],
+            "vpn-topology.py",
+            (
+                "--qkd-topology", "point-to-point",
+                "--qkd-interface", "014", "--keying-mode", "ppk", *vpn,
+            ),
+        ),
+        Case(
+            "vpn-key-relay-etsi004-ppk", COMPOSE_FILES[1],
+            "vpn-topology.py",
+            (
+                "--qkd-topology", "key-relay",
+                "--qkd-interface", "004", "--keying-mode", "ppk", *vpn,
+            ),
+        ),
+        Case(
+            "vpn-key-relay-etsi014-ppk", COMPOSE_FILES[1],
+            "vpn-topology.py",
+            (
+                "--qkd-topology", "key-relay",
+                "--qkd-interface", "014", "--keying-mode", "ppk", *vpn,
+            ),
+        ),
     ]
 
 
@@ -335,6 +372,27 @@ def negative_case(args: argparse.Namespace) -> Case:
             "--startup-timeout", str(args.startup_timeout),
             "--rekey-interval", "10",
             "--fault-mode", "bob-key-mismatch",
+        ),
+        expected_failure=True,
+    )
+
+
+def negative_ppk_case(args: argparse.Namespace) -> Case:
+    return Case(
+        "negative-vpn-rejects-mismatched-ppk",
+        COMPOSE_FILES[0],
+        "vpn-topology.py",
+        (
+            "--qkd-topology", "point-to-point",
+            "--qkd-interface", "004",
+            "--keying-mode", "ppk",
+            "--routers", str(args.routers),
+            "--delay-ms", str(args.delay_ms),
+            "--bandwidth-mbps", str(args.bandwidth_mbps),
+            "--loss-percent", str(args.loss_percent),
+            "--startup-timeout", str(args.startup_timeout),
+            "--rekey-interval", "10",
+            "--fault-mode", "bob-ppk-mismatch",
         ),
         expected_failure=True,
     )
@@ -392,7 +450,10 @@ def run_case(
     expected_rejection = (
         case.expected_failure
         and completed.returncode != 0
-        and "KMS streams diverged" in (completed.stdout or "")
+        and (
+            "KMS streams diverged" if case.name.endswith("mismatched-key")
+            else "PPK mismatch rejected by IKEv2"
+        ) in (completed.stdout or "")
     )
     passed = (
         expected_rejection
@@ -495,6 +556,7 @@ def main() -> int:
     cases = matrix(args)
     if not args.skip_negative_tests:
         cases.append(negative_case(args))
+        cases.append(negative_ppk_case(args))
     if args.selected_cases:
         selected = set(args.selected_cases)
         cases = [case for case in cases if case.name in selected]

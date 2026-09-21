@@ -168,6 +168,15 @@ For trusted-node key relay, start
 `--qkd-topology key-relay`. Both topologies accept ETSI 004 or ETSI 014 and
 zero to eight classical routers. Delay, bandwidth and loss apply to each link.
 
+For RFC 8784 PPK-backed operation, add `--keying-mode ppk` to any of the four
+topology/interface combinations above. The runner
+provisions an independent IKE authentication PSK to both endpoints, loads each
+QKD key as a mandatory PPK through `swanctl`, and accepts only an established
+SA reporting PPK use and an installed ESP CHILD_SA. The original four VPN
+variants remain on `--keying-mode psk` by default. Automated acceptance covers
+PPK with ETSI 004 and ETSI 014 over both the point-to-point and trusted-node
+QKD topologies.
+
 The runner waits for both KMS containers, creates Bob before Alice and relies
 on bounded application-level TCP/KMS retries for the remaining readiness
 window. No fixed sleep, watchdog or manual endpoint ordering is required. It
@@ -190,8 +199,9 @@ Run the complete supported matrix from the repository root:
 python3 automation/run-regression.py --build
 ```
 
-It runs the four VPN variants three times by default, then executes the
-expected mismatched-key rejection once and writes JSON, CSV and per-run logs
+It runs the four PSK and four PPK VPN variants three times by default,
+then executes the expected mismatched-key and mismatched-PPK rejections once
+and writes JSON, CSV and per-run logs
 below `results/`. Use `--repetitions 1`, `--case NAME` or `--list` for
 shorter workflows. `--pqc` enables forced hybrid delivery in Compose and
 automatically adds `--require-pqc` to every positive VPN case.
@@ -218,7 +228,8 @@ current CORE package targets x86-64 hosts.
 - `core/classical-topology.py` is an isolated classical-network laboratory for
   direct and multi-router paths without QKDNetSim or strongSwan.
 - `core/vpn-topology.py` creates the strongSwan Alice/Bob DockerNodes, selects
-  ETSI 004 or ETSI 014, verifies rekeys and old-SA retirement, drives ping and
+  ETSI 004 or ETSI 014 and PSK or PPK keying, verifies fresh IKE SAs and
+  old-SA retirement, drives ping and
   `iperf3`, and checks ESP with no plaintext application payload.
 - `automation/run-regression.py` orchestrates builds, Compose lifecycle,
   repeated scenario execution, negative testing and structured evidence.

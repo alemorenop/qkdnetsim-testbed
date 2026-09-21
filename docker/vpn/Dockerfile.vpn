@@ -4,6 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     strongswan \
+    strongswan-swanctl \
+    libcharon-extra-plugins \
     python3 \
     iproute2 \
     ethtool \

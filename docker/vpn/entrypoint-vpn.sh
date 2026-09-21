@@ -27,6 +27,12 @@ done
 mkdir -p /run/qkd-vpn /etc/ipsec.d
 chmod 0700 /run/qkd-vpn
 
+VPN_KEYING_MODE="${VPN_KEYING_MODE:-psk}"
+if [ "${VPN_KEYING_MODE}" != "psk" ] && [ "${VPN_KEYING_MODE}" != "ppk" ]; then
+    echo "[vpn] VPN_KEYING_MODE must be psk or ppk" >&2
+    exit 1
+fi
+
 # Native Linux TCP packets reach ns-3 before Docker's virtual offload
 # metadata is finalized.  Disable offloads so EmuFdNetDevice sees valid
 # checksums and segmentation.
@@ -37,7 +43,15 @@ done
 
 exec > >(tee -a /tmp/qkdnetsim.log) 2>&1
 
-cat > /etc/ipsec.conf << EOF
+if [ "${VPN_KEYING_MODE}" = "ppk" ]; then
+    # RFC 8784 PPKs are configured through VICI/swanctl, not ipsec.conf.
+    mkdir -p /etc/swanctl
+    cat > /etc/ipsec.conf << EOF
+config setup
+    uniqueids=yes
+EOF
+else
+    cat > /etc/ipsec.conf << EOF
 config setup
     uniqueids=yes
 
@@ -57,6 +71,7 @@ conn %default
 
 include /etc/ipsec.d/*.conf
 EOF
+fi
 
 : > /etc/ipsec.secrets
 chmod 0600 /etc/ipsec.secrets
@@ -77,7 +92,8 @@ echo "[vpn] starting strongSwan (role=${VPN_ROLE})"
 ipsec start
 
 for _ in $(seq 1 50); do
-    if ipsec status >/dev/null 2>&1; then
+    if ipsec status >/dev/null 2>&1 && \
+       { [ "${VPN_KEYING_MODE}" = "psk" ] || swanctl --stats >/dev/null 2>&1; }; then
         exec /opt/qkd-vpn.py
     fi
     sleep 0.2
