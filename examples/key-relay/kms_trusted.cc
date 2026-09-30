@@ -217,16 +217,16 @@ main(int argc, char* argv[])
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
                          std::cout << "[RELAY_KMS_TRUSTED] KMS Relay stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
-                     MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyRelayed",
+                     MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const std::string& keyId, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_TRUSTED] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/WasteRelay",
-                     MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyWasted",
+                     MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const std::string& keyId, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_TRUSTED] Relay WASTED src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",

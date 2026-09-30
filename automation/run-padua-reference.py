@@ -108,7 +108,9 @@ def run_monolithic(version: str, repetition: int, profile: dict[str, Any],
                    directory: Path) -> dict[str, Any]:
     image, _, ns_version = VERSIONS[version]
     case_dir = directory / f"{version}-monolithic-{repetition}"
-    case_dir.mkdir(parents=True)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    for stale_output in ("stats.json", "events.json"):
+        (case_dir / stale_output).unlink(missing_ok=True)
     input_file = case_dir / "input.json"
     input_file.write_text(json.dumps(qkdnetsim_input(profile), indent=2), encoding="utf-8")
     mount = f"{case_dir.resolve()}:/results"
@@ -203,6 +205,41 @@ def run_distributed(version: str, repetition: int, scale: float,
         compose(compose_file, "down", "--remove-orphans")
 
 
+def load_completed_run(version: str, repetition: int, deployment: str,
+                       directory: Path) -> dict[str, Any] | None:
+    """Load a successful run when explicitly resuming an output directory."""
+    case_dir = directory / f"{version}-{deployment}-{repetition}"
+    run_log = case_dir / "run.log"
+    log_text = run_log.read_text(encoding="utf-8") if run_log.exists() else ""
+    if deployment == "monolithic":
+        stats_file = case_dir / "stats.json"
+        if not stats_file.exists():
+            return None
+        statistics = json.loads(stats_file.read_text(encoding="utf-8"))
+        if not statistics:
+            return None
+        actual_key_use_events = log_text.count("[COMPARE_APP_KEY]")
+    else:
+        result_file = case_dir / "result.json"
+        if not result_file.exists():
+            return None
+        statistics = json.loads(result_file.read_text(encoding="utf-8"))
+        if not statistics.get("passed", False):
+            return None
+        actual_key_use_events = sum(
+            app.get("encryption_key_use_operations", 0)
+            for app in statistics.get("applications", [])
+        )
+    return {
+        "deployment": deployment,
+        "returncode": 0,
+        "passed": True,
+        "wall_seconds": None,
+        "statistics": statistics,
+        "actual_key_use_events": actual_key_use_events,
+    }
+
+
 def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
     app_fields = (
         "version", "repetition", "deployment", "application", "sent_bytes",
@@ -227,14 +264,40 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                         "actual_key_use_events": app.get("encryption_key_use_operations"),
                     })
             else:
-                for app_id, values in run_result.get("etsi_014", {}).items():
+                monolithic_apps = run_result.get(
+                    "ETSI_014", run_result.get("etsi_014", {})
+                )
+                for app_id, values in monolithic_apps.items():
                     app = values.get("QKDApps Statistics", {})
                     keys = values.get("Key Consumption Statistics", {})
+                    duration = max(
+                        float(app.get("Stop Time (sec)", 0)) -
+                        float(app.get("Start Time (sec)", 0)),
+                        1.0,
+                    )
+                    received_bytes = app.get("Bytes Received")
+                    goodput = (
+                        float(received_bytes) * 8 / duration
+                        if received_bytes is not None else None
+                    )
+                    offered_rate = app.get("Traffic Rate (bit/sec)")
+                    key_uses = keys.get(
+                        "Key-pairs Consumed by App for Encryption/Decryption",
+                        keys.get("Key-pairs consumed"),
+                    )
+                    key_use_bits = keys.get(
+                        "Key-pairs Consumed by App for Encryption/Decryption (bits)",
+                        keys.get("Key-pairs consumed (bits)"),
+                    )
                     writer.writerow({
                         "version": record["version"], "repetition": record["repetition"],
-                        "deployment": "monolithic", "application": app_id,
+                        "deployment": "monolithic",
+                        "application": (
+                            app_id if "-to-" in app_id
+                            else app_id.replace("-", "-to-", 1)
+                        ),
                         "sent_bytes": app.get("Bytes Sent"),
-                        "received_bytes": app.get("Bytes Received"),
+                        "received_bytes": received_bytes,
                         "sent_packets": app.get("Packets Sent"),
                         "received_packets": app.get("Packets Received"),
                         "missed_send_calls": app.get("Missed send packet calls"),
@@ -244,12 +307,16 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                             app.get("Packets Received") / app.get("Packets Sent")
                             if app.get("Packets Sent") else None
                         ),
-                        "offered_rate_bps": None,
-                        "offered_rate_achievement": None,
-                        "keys_consumed": keys.get("Key-pairs consumed"),
-                        "keys_consumed_bits": keys.get("Key-pairs consumed (bits)"),
-                        "actual_key_use_events": record["actual_key_use_events"],
-                        "encryption_key_use_operations": None,
+                        "application_goodput_bps": goodput,
+                        "offered_rate_bps": offered_rate,
+                        "offered_rate_achievement": (
+                            goodput / float(offered_rate)
+                            if goodput is not None and offered_rate else None
+                        ),
+                        "keys_consumed": key_uses,
+                        "keys_consumed_bits": key_use_bits,
+                        "actual_key_use_events": key_uses,
+                        "encryption_key_use_operations": key_uses,
                         "unique_encryption_keys_used": None,
                         "otp_payload_bits_protected": None,
                     })
@@ -267,8 +334,13 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                     writer.writerow({
                         "version": record["version"], "repetition": record["repetition"],
                         "deployment": "monolithic", "link_id": link_id,
-                        "generated_keys": link.get("Key-pairs generated"),
-                        "generated_bits": link.get("Key-pairs generated (bits)"),
+                        "generated_keys": link.get(
+                            "Key-pairs generated QKD", link.get("Key-pairs generated")
+                        ),
+                        "generated_bits": link.get(
+                            "Key-pairs generated QKD (bits)",
+                            link.get("Key-pairs generated (bits)"),
+                        ),
                         "configured_key_rate_bps": link.get("Key rate (bit/sec)"),
                         "relayed_keys": link.get("Key-pairs relayed"),
                         "relayed_bits": link.get("Key-pairs relayed (bits)"),
@@ -331,8 +403,9 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                 })
 
     with (output / "key-accounting.csv").open("w", newline="", encoding="utf-8") as stream:
-        fields = ("version", "repetition", "deployment", "kms", "supplied_keys",
-                  "supplied_bits", "relay_attempts", "relay_attempt_bits",
+        fields = ("version", "repetition", "deployment", "kms", "prepared_keys",
+                  "prepared_bits", "supplied_keys", "supplied_bits",
+                  "relay_attempts", "relay_attempt_bits",
                   "relay_successes", "relay_success_bits", "waste_events",
                   "wasted_bits")
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -341,6 +414,7 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
             if record["deployment"] != "distributed":
                 continue
             for kms_name, values in record["result"].get("kms", {}).items():
+                prepared = values.get("prepared", [])
                 supplied = values.get("application_supplied", [])
                 relayed = values.get("relayed", [])
                 succeeded = values.get("relay_succeeded", [])
@@ -348,6 +422,8 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                 writer.writerow({
                     "version": record["version"], "repetition": record["repetition"],
                     "deployment": "distributed", "kms": kms_name,
+                    "prepared_keys": len(prepared) if "prepared" in values and prepared else None,
+                    "prepared_bits": sum(row["bits"] for row in prepared) if prepared else None,
                     "supplied_keys": len(supplied),
                     "supplied_bits": sum(row["bits"] for row in supplied),
                     "relay_attempts": len(relayed),
@@ -390,7 +466,8 @@ def render_comparison(records: list[dict[str, Any]], output: Path) -> None:
                     values.append(sum(float(row.get("application_goodput_bps", 0)) for row in apps))
                     deliveries.extend(float(row.get("delivery_ratio") or 0) for row in apps)
                 else:
-                    apps = record["result"].get("etsi_014", {}).values()
+                    result = record["result"]
+                    apps = result.get("ETSI_014", result.get("etsi_014", {})).values()
                     total = 0.0
                     for values_map in apps:
                         app = values_map.get("QKDApps Statistics", {})
@@ -441,7 +518,19 @@ def main() -> int:
         "--deployment", choices=("monolithic", "distributed", "both"), default="both"
     )
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="reuse successful runs already present in --output-dir",
+    )
+    parser.add_argument(
+        "--rerun-deployment",
+        choices=("none", "monolithic", "distributed", "both"),
+        default="none",
+        help="with --resume, rerun this deployment instead of reusing it",
+    )
     args = parser.parse_args()
+    if args.resume and args.output_dir is None:
+        parser.error("--resume requires --output-dir")
     versions = ("old", "new") if args.version == "both" else (args.version,)
     deployments = (
         ("monolithic", "distributed")
@@ -452,6 +541,7 @@ def main() -> int:
     output = (args.output_dir or ROOT / "results" / f"padua-reference-{stamp}").resolve()
     output.mkdir(parents=True, exist_ok=True)
     records = []
+    distributed_cleanup_required = False
     try:
         for version in versions:
             for repetition in range(1, args.repetitions + 1):
@@ -462,9 +552,17 @@ def main() -> int:
                         f"{len(versions) * args.repetitions * len(deployments)})",
                         flush=True,
                     )
-                    if deployment == "monolithic":
+                    force_rerun = args.rerun_deployment in (deployment, "both")
+                    run_result = (
+                        load_completed_run(version, repetition, deployment, output)
+                        if args.resume and not force_rerun else None
+                    )
+                    if run_result is not None:
+                        print("[PADUA] reusing completed run", flush=True)
+                    elif deployment == "monolithic":
                         run_result = run_monolithic(version, repetition, profile, output)
                     else:
+                        distributed_cleanup_required = True
                         run_result = run_distributed(
                             version, repetition, args.time_scale, profile, output
                         )
@@ -477,14 +575,38 @@ def main() -> int:
                         "result": run_result["statistics"],
                     })
     finally:
-        compose(DOCKER_DIR / "docker-compose.padua-reference.yml", "down", "--remove-orphans")
+        if distributed_cleanup_required:
+            compose(
+                DOCKER_DIR / "docker-compose.padua-reference.yml",
+                "down", "--remove-orphans",
+            )
+    summary_runs = []
+    for record in records:
+        compact = {key: value for key, value in record.items() if key != "result"}
+        if record["deployment"] == "distributed":
+            # Per-KMS event and buffer histories remain available in each
+            # run's result.json and in the generated CSV tables. Duplicating
+            # them here made summary.json hundreds of megabytes larger.
+            compact["result"] = {
+                key: value for key, value in record["result"].items()
+                if key != "kms"
+            }
+            compact["detailed_result"] = (
+                f"{record['version']}-distributed-{record['repetition']}/result.json"
+            )
+        else:
+            compact["result"] = record["result"]
+            compact["detailed_result"] = (
+                f"{record['version']}-monolithic-{record['repetition']}/stats.json"
+            )
+        summary_runs.append(compact)
     summary = {
         "schema_version": 1, "profile": profile,
         "authentication_limitation": (
             "The paper reports SHA2, whereas QKDNetSim supports VMAC, MD5 and SHA1. "
             "Authentication is disabled so real OTP/AES execution remains comparable."
         ),
-        "runs": records,
+        "runs": summary_runs,
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     flatten_results(records, output)

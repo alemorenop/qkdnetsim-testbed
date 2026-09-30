@@ -336,23 +336,22 @@ main(int argc, char* argv[])
                             MilliSeconds(relayCheckPeriodMs), Seconds(simulationTime));
     }
 
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
-                    MakeCallback(+[](std::string, const std::string& appId,
+    auto generatedCallback = MakeCallback(+[](std::string, const std::string& appId,
                                      const std::string& keyId, const uint32_t& bits) {
                         std::cout << "[SECOQC_KMS] stores key appId=" << appId
                                   << " keyId=" << keyId << " bits=" << bits << std::endl;
-                    }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
+                    });
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
+                            generatedCallback);
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyGenerated",
+                            generatedCallback);
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
                     MakeCallback(+[](std::string, const std::string& appId,
                                      const std::string& keyId, const uint32_t& bits) {
                         std::cout << "[SECOQC_KMS] serves key appId=" << appId
                                   << " keyId=" << keyId << " bits=" << bits << std::endl;
                     }));
-    // This trace was introduced with mixed QKD/PQC delivery.  Fail-safe
-    // connection keeps the same fixture buildable against the archived
-    // pre-PQC revision, where KeyServed above is the available trace.
-    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServedMixed",
-                    MakeCallback(+[](std::string, const std::string& ksid,
+    auto deliveryCallback = MakeCallback(+[](std::string, const std::string& ksid,
                                      const std::string& srcSaeId, const std::string& dstSaeId,
                                      const uint32_t& srcNodeId, const uint32_t& dstNodeId,
                                      const std::string& keyId, const uint32_t& bits,
@@ -362,11 +361,34 @@ main(int argc, char* argv[])
                                   << " ksid=" << ksid << " srcSaeId=" << srcSaeId
                                   << " dstSaeId=" << dstSaeId << " srcNodeId=" << srcNodeId
                                   << " dstNodeId=" << dstNodeId << std::endl;
+                    });
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServedMixed",
+                            deliveryCallback);
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyPrepared",
+                    MakeCallback(+[](std::string, const std::string& ksid,
+                                     const std::string& srcSaeId, const std::string& dstSaeId,
+                                     const uint32_t& srcNodeId, const uint32_t& dstNodeId,
+                                     const std::string& keyId, const uint32_t& bits,
+                                     const std::string& type) {
+                        std::cout << "[SECOQC_KMS] Prepared key contribution type=" << type
+                                  << " bits=" << bits << " keyId=" << keyId
+                                  << " ksid=" << ksid << " srcSaeId=" << srcSaeId
+                                  << " dstSaeId=" << dstSaeId << " srcNodeId=" << srcNodeId
+                                  << " dstNodeId=" << dstNodeId << std::endl;
                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyDelivered",
+                            deliveryCallback);
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
                     MakeCallback(+[](std::string, const uint32_t& node, const uint32_t& src,
                                      const uint32_t& dst, const uint32_t& bits) {
                         std::cout << "[SECOQC_KMS] Relay consumed node=" << node
+                                  << " src=" << src << " dst=" << dst
+                                  << " bits=" << bits << std::endl;
+                    }));
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyRelayed",
+                    MakeCallback(+[](std::string, const uint32_t& src, const uint32_t& dst,
+                                     const std::string& keyId, const uint32_t& bits) {
+                        std::cout << "[SECOQC_KMS] Relay consumed node=" << src
                                   << " src=" << src << " dst=" << dst
                                   << " bits=" << bits << std::endl;
                     }));
@@ -381,9 +403,16 @@ main(int argc, char* argv[])
                                   << " src=" << src << " dst=" << dst
                                   << " bits=" << bits << std::endl;
                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/WasteRelay",
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/WasteRelay",
                     MakeCallback(+[](std::string, const uint32_t& src,
                                      const uint32_t& dst, const uint32_t& bits) {
+                        std::cout << "[SECOQC_KMS] Relay WASTED src=" << src
+                                  << " dst=" << dst << " bits=" << bits << std::endl;
+                    }));
+    Config::ConnectFailSafe("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyWasted",
+                    MakeCallback(+[](std::string, const uint32_t& src,
+                                     const uint32_t& dst, const std::string& keyId,
+                                     const uint32_t& bits) {
                         std::cout << "[SECOQC_KMS] Relay WASTED src=" << src
                                   << " dst=" << dst << " bits=" << bits << std::endl;
                     }));

@@ -115,7 +115,8 @@ public:
     ETSI_QKD_004_KMS_CLOSE = 11,
     RELAY_KEYS = 12,
     PQC_PUBLIC_KEY = 13,
-    PQC_CIPHER = 14
+    PQC_CIPHER = 14,
+    ETSI_QKD_004_DISCOVER_SESSION = 15
   };
 
   /**
@@ -514,6 +515,17 @@ private:
    */
   void ProcessEtsi004OpenConnect(HTTPMessage header, Ptr<Socket> socket);
 
+  /**
+   * Return the KSID of a replica association already announced by the peer
+   * KMS. This is a local testbed extension used when independent SAEs cannot
+   * exchange the KSID through a separate coordination service.
+   */
+  void ProcessEtsi004DiscoverSession(
+    std::string remoteAppId,
+    HTTPMessage header,
+    Ptr<Socket> socket
+  );
+
   /*
    * @brief Process GET_KEY request - ETSI QKD GS 004
    * @param ksid Unique identifier of the association
@@ -776,16 +788,16 @@ private:
   TracedCallback<Ptr<const Packet> > m_txTrace;
   TracedCallback<Ptr<const Packet>, const Ipv4Address &, const uint32_t&> m_rxTraceKMSs;
   TracedCallback<Ptr<const Packet>, const uint32_t& > m_txTraceKMSs;
-  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&> m_ksidGenerated;
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&> m_ksidGeneratedTrace;
 
-  TracedCallback<const std::string&, const std::string&, const uint32_t&> m_qkdKeyGeneratedTrace;   //Generated key material!
-  TracedCallback<const std::string&, const std::string&, const uint32_t&> m_keyServedTrace; //Total amount of key material served by KMS
-  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&, const uint32_t&, const std::string&, const uint32_t&, const std::string&> m_keyServedTraceMixed; //Total amount of key material served by KMS
-  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedLink; //Total amount of key material consumed for direct p2p usage!
-  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyConsumedRelay;       //Amount of relayed key material
-  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyRelayedSuccess;       //Relay material confirmed end to end
-  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&> m_keyWasteRelay;          //Amount of wasted key material(traced on source node, and failed relay node only)
-  TracedCallback<const uint32_t&> m_listenReadyTrace; //!< APP/KMS and KMS/KMS listeners are ready.
+  TracedCallback<const std::string&, const std::string&, const uint32_t&> m_keyGeneratedTrace;
+  TracedCallback<const uint32_t&, const uint32_t&, const std::string&, const uint32_t&> m_keyPQCGeneratedTrace;
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&, const uint32_t&, const std::string&, const uint32_t&, const std::string&> m_keyPreparedTrace;
+  TracedCallback<const std::string&, const std::string&, const std::string&, const uint32_t&, const uint32_t&, const std::string&, const uint32_t&, const std::string&> m_keyDeliveredTrace;
+  TracedCallback<const uint32_t&, const uint32_t&, const std::string&, const uint32_t&> m_keyRelayedTrace;
+  TracedCallback<const uint32_t&, const uint32_t&, const std::string&, const uint32_t&> m_keyWastedOnRelayTrace;
+  TracedCallback<const uint32_t&, const uint32_t&, const uint32_t&, const uint32_t&> m_keyRelayedSuccess;
+  TracedCallback<const uint32_t&> m_listenReadyTrace;
 
   uint32_t m_maxKeyPerRequest; //Maximal number of keys per request QKDApp can ask for
   uint32_t m_minKeySize; //Minimal size of key QKDApp can request from KMS
@@ -970,14 +982,7 @@ private:
    * @return string UUID
    */
   std::string GenerateUUID();
-
-  /**
-   * @brief Generate random string with given length
-   * @param len string length
-   * @return string random string
-   */
-  std::string GenerateRandomString(const int len, const uint32_t seed = 0);
-
+ 
   /**
    * @brief Start s-buffers control -- monitoring
    * @param dstKmNodeId remote KM node ID

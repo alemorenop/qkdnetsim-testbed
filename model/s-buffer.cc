@@ -95,6 +95,7 @@ namespace ns3 {
         m_streamIndexInitialized = false;
         m_relayActive = false; 
         m_log = 0;
+        m_randomVariable = CreateObject<UniformRandomVariable>();
     }
 
     SBuffer::SBuffer(SBuffer::Type type, uint32_t size)
@@ -407,8 +408,9 @@ namespace ns3 {
                 return nullptr;
             }
 
-            // Pick random READY key
-            auto chosenIt = readyKeys[std::rand() % readyKeys.size()]; 
+            // Pick random READY key 
+            uint32_t randomIndex = m_randomVariable->GetInteger(0, readyKeys.size() - 1);
+            auto chosenIt = readyKeys[randomIndex];
             NS_LOG_FUNCTION(this << "get a key " << chosenIt->second->GetId() << " of size " << chosenIt->second->GetSizeInBits() );
 
             return GetKey(chosenIt->second->GetId());
@@ -594,7 +596,7 @@ namespace ns3 {
     void
     SBuffer::StoreSupplyKey(Ptr<QKDKey> key)
     {
-        NS_LOG_FUNCTION(this << key->GetId() << key->GetSizeInBits() << key->GetStateString());
+        NS_LOG_FUNCTION(this << key->GetId() << key->GetSizeInBits() << key->GetStateString() << key->GetKeyString());
 
         if(GetType() == SBuffer::STREAM_SBUFFER)
         {
@@ -719,7 +721,7 @@ namespace ns3 {
                                  //<< "\nLast key value:" << m_stream_keys.rbegin()->second->GetKeyString()
                             );
             if(m_stream_keys.rbegin()->second->GetSizeInBits() != GetKeySize())
-                startingInReady = false;
+                startingInReady = false; 
             else
                 startingIndex++;
         }
@@ -823,6 +825,34 @@ namespace ns3 {
             nextIndex = m_stream_keys.begin()->first;
 
         return nextIndex;
+    }
+
+    uint32_t
+    SBuffer::GetKeySizeById(std::string keyId)
+    {
+        NS_LOG_FUNCTION(this << keyId);
+
+        if(m_log){
+            NS_LOG_FUNCTION(this << "m_keys.size(): " << m_keys.size()); 
+            uint32_t totalReadyKeyCount = 0; 
+            for (auto it = m_keys.begin(); it != m_keys.end(); ++it) {
+                if (it->second->GetState() == QKDKey::READY) { 
+                    totalReadyKeyCount += it->second->GetSizeInBits();
+                    NS_LOG_FUNCTION(this << "id:" << it->second->GetId() << "\t size:" << it->second->GetSizeInBits());
+                }
+            }
+            NS_LOG_FUNCTION(this << "m_notReadyBitCount: " << m_notReadyBitCount);
+            NS_LOG_FUNCTION(this << "m_currentKeyBit: " << m_currentKeyBit);
+            NS_LOG_FUNCTION(this << "totalReadyKeyCount: " << totalReadyKeyCount);  
+        }
+
+        auto it = m_keys.find(keyId);
+        if(it != m_keys.end())
+        {
+            NS_LOG_FUNCTION(this << "we found the key with id " << keyId << " and it was in state: " << it->second->GetStateString());
+            return it->second->GetSizeInBits();
+        }
+        return 0;
     }
 
     void

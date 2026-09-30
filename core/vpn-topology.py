@@ -29,8 +29,11 @@ class QkdTopology:
     app_kms_ips: tuple[str, str]
     app_ids: tuple[str, str]
     macs: tuple[str, str]
-    readiness_containers: tuple[str, str]
+    readiness_containers: tuple[str, ...]
     readiness_markers: tuple[tuple[str, str], ...] = ()
+    pqc_evidence_containers: tuple[str, ...] = ()
+    relay_hops: tuple[tuple[int, int], ...] = ()
+    relay_path: str = ""
 
 
 QKD_TOPOLOGIES = {
@@ -47,6 +50,9 @@ QKD_TOPOLOGIES = {
         ),
         macs=("02:00:00:00:35:05", "02:00:00:00:46:06"),
         readiness_containers=("qkd-p2p-vpn-kms-alice", "qkd-p2p-vpn-kms-bob"),
+        pqc_evidence_containers=(
+            "qkd-p2p-vpn-kms-alice", "qkd-p2p-vpn-kms-bob",
+        ),
         readiness_markers=(
             ("qkd-p2p-vpn-kms-alice", "KMS Alice stores key"),
             ("qkd-p2p-vpn-kms-bob", "KMS Bob stores key"),
@@ -65,10 +71,73 @@ QKD_TOPOLOGIES = {
         ),
         macs=("02:00:00:00:77:08", "02:00:00:00:78:09"),
         readiness_containers=("qkd-relay-vpn-kms-alice", "qkd-relay-vpn-kms-bob"),
+        pqc_evidence_containers=(
+            "qkd-relay-vpn-kms-alice", "qkd-relay-vpn-kms-bob",
+        ),
         readiness_markers=(
             ("qkd-relay-vpn-kms-alice", "Relay consumed src=3 dst=2"),
             ("qkd-relay-vpn-kms-trusted", "Relay consumed src=2 dst=1"),
         ),
+    ),
+    "padua-1-to-6": QkdTopology(
+        kms_networks=(
+            "qkdnetsim-padua-reference_kms_app_a",
+            "qkdnetsim-padua-reference_kms_app_f",
+        ),
+        kms_ips=("192.168.231.11", "192.168.233.16"),
+        app_kms_ips=("192.168.231.41", "192.168.233.46"),
+        app_ids=(
+            "eeeeeeee-0000-0000-0002-000000000001",
+            "eeeeeeee-0000-0000-0002-000000000006",
+        ),
+        macs=("02:00:00:fa:01:06", "02:00:00:fa:06:01"),
+        readiness_containers=tuple(
+            f"qkd-padua-site-{letter}" for letter in "abcdef"
+        ),
+        pqc_evidence_containers=("qkd-padua-site-a", "qkd-padua-site-f"),
+        relay_hops=((1, 2), (2, 3), (3, 6)),
+        relay_path="site-1 -> site-2 -> site-3 -> site-6",
+    ),
+    "padua-1-to-5": QkdTopology(
+        kms_networks=(
+            "qkdnetsim-padua-reference_kms_app_a",
+            "qkdnetsim-padua-reference_kms_app_e",
+        ),
+        kms_ips=("192.168.231.11", "192.168.232.15"),
+        app_kms_ips=("192.168.231.51", "192.168.232.55"),
+        app_ids=(
+            "eeeeeeee-0000-0000-0001-000000000001",
+            "eeeeeeee-0000-0000-0001-000000000005",
+        ),
+        macs=("02:00:00:fa:15:01", "02:00:00:fa:15:05"),
+        readiness_containers=tuple(
+            f"qkd-padua-site-{letter}" for letter in "abcdef"
+        ),
+        pqc_evidence_containers=("qkd-padua-site-a", "qkd-padua-site-e"),
+        relay_hops=((1, 2), (2, 3), (3, 4), (4, 5)),
+        relay_path="site-1 -> site-2 -> site-3 -> site-4 -> site-5",
+    ),
+    "padua-5-to-1": QkdTopology(
+        kms_networks=(
+            "qkdnetsim-padua-reference_kms_app_a",
+            "qkdnetsim-padua-reference_kms_app_e",
+        ),
+        # Application traffic runs from site 5 to site 1, but site 1 remains
+        # the ETSI 014 key supplier.  The direction of an IPsec flow is
+        # independent of the master/slave direction used to provision its PPK.
+        kms_ips=("192.168.231.11", "192.168.232.15"),
+        app_kms_ips=("192.168.231.61", "192.168.232.65"),
+        app_ids=(
+            "eeeeeeee-0000-0000-0001-000000000001",
+            "eeeeeeee-0000-0000-0001-000000000005",
+        ),
+        macs=("02:00:00:fa:51:01", "02:00:00:fa:51:05"),
+        readiness_containers=tuple(
+            f"qkd-padua-site-{letter}" for letter in "abcdef"
+        ),
+        pqc_evidence_containers=("qkd-padua-site-a", "qkd-padua-site-e"),
+        relay_hops=((1, 2), (2, 3), (3, 4), (4, 5)),
+        relay_path="site-1 -> site-2 -> site-3 -> site-4 -> site-5",
     ),
 }
 
@@ -141,6 +210,13 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be zero or greater")
+    return parsed
+
+
 def percentage(value: str) -> float:
     parsed = float(value)
     if not 0.0 <= parsed <= 100.0:
@@ -185,6 +261,28 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--min-throughput-mbps", type=positive_float, default=0.01
+    )
+    parser.add_argument(
+        "--traffic-rate-mbps",
+        type=positive_float,
+        help="pace the sustained TCP flow to this offered rate",
+    )
+    parser.add_argument(
+        "--traffic-block-size",
+        type=positive_int,
+        help="iperf3 application write size in bytes",
+    )
+    parser.add_argument(
+        "--traffic-direction",
+        choices=("forward", "reverse"),
+        default="forward",
+        help="send application traffic from Alice to Bob or Bob to Alice",
+    )
+    parser.add_argument(
+        "--traffic-start-delay",
+        type=nonnegative_int,
+        default=0,
+        help="seconds to wait after tunnel establishment before starting traffic",
     )
     parser.add_argument(
         "--max-rekey-loss-percent", type=percentage, default=25.0
@@ -327,7 +425,16 @@ def start_vpn(
     command = ["exec", "-d"]
     for key, value in variables.items():
         command.extend(("-e", f"{key}={value}"))
-    command.extend((endpoint.node.name, "/opt/entrypoint-vpn.sh"))
+    command.extend(
+        (
+            endpoint.node.name,
+            "sh",
+            "-c",
+            "/opt/entrypoint-vpn.sh >>/tmp/vpn-entrypoint-bootstrap.log 2>&1; "
+            "status=$?; printf '%s\\n' \"$status\" "
+            ">/run/qkd-vpn/entrypoint.exit; exit \"$status\"",
+        )
+    )
     docker(*command)
 
 
@@ -340,6 +447,27 @@ def state(endpoint: VpnEndpoint) -> dict[str, object] | None:
         check=False,
     )
     if result.returncode:
+        exited = docker(
+            "exec",
+            endpoint.node.name,
+            "cat",
+            "/run/qkd-vpn/entrypoint.exit",
+            check=False,
+        )
+        if exited.returncode == 0:
+            logs = docker(
+                "exec",
+                endpoint.node.name,
+                "sh",
+                "-c",
+                "cat /tmp/vpn-entrypoint-bootstrap.log "
+                "/tmp/qkdnetsim.log 2>/dev/null || true",
+                check=False,
+            ).stdout.strip()
+            raise RuntimeError(
+                f"{endpoint.role} VPN endpoint exited with status "
+                f"{exited.stdout.strip()}: {logs or 'no startup log'}"
+            )
         return None
     try:
         return json.loads(result.stdout)
@@ -402,11 +530,26 @@ def wait_for_tunnel(
                 ):
                     raise RuntimeError("VPN peers committed different QKD keys")
                 generation = int(alice_state["generation"])
-                if keying_mode == "ppk" and any(
-                    endpoint_state.get("ppk_id") != f"qkd-{generation}"
-                    for endpoint_state in (alice_state, bob_state)
-                ):
-                    raise RuntimeError("VPN peers did not confirm the QKD PPK ID")
+                if keying_mode == "ppk":
+                    ppk_ids = {
+                        str(endpoint_state.get("ppk_id") or "")
+                        for endpoint_state in (alice_state, bob_state)
+                    }
+                    if (
+                        len(ppk_ids) != 1
+                        or not next(iter(ppk_ids)).startswith("qkdppk-")
+                    ):
+                        raise RuntimeError(
+                            "VPN peers did not confirm the same dynamic QKD PPK ID"
+                        )
+                    if any(
+                        endpoint_state.get("ppk_provider") != "dynamic"
+                        or endpoint_state.get("peer_coordination") is not False
+                        for endpoint_state in (alice_state, bob_state)
+                    ):
+                        raise RuntimeError(
+                            "VPN peers did not use the dynamic local PPK provider"
+                        )
                 fingerprint = str(alice_state.get("key_fingerprint", ""))
                 if not fingerprint:
                     raise RuntimeError("VPN generation has no key fingerprint")
@@ -512,10 +655,45 @@ def verify_old_generations_retired(
     )
 
 
+def verify_dynamic_ppk_provider(
+    alice: VpnEndpoint, bob: VpnEndpoint
+) -> dict[str, object]:
+    for endpoint in (alice, bob):
+        socket_result = docker(
+            "exec", endpoint.node.name, "test", "-S",
+            "/run/qkd-vpn/ppk-provider.sock", check=False,
+        )
+        if socket_result.returncode:
+            raise RuntimeError(
+                f"{endpoint.role} has no local dynamic PPK provider socket"
+            )
+        listeners = docker(
+            "exec", endpoint.node.name, "sh", "-c",
+            "ss -ltnH 'sport = :9090'", check=False,
+        ).stdout.strip()
+        if listeners:
+            raise RuntimeError(
+                f"{endpoint.role} still exposes the retired TCP/9090 "
+                "PPK coordination API"
+            )
+    print(
+        "[CORE_VPN] dynamicPpkProvider=OK "
+        "localSockets=2 peerCoordinationPort=closed"
+    )
+    return {
+        "provider": "strongSwan credential plugin over local Unix socket",
+        "local_provider_sockets": 2,
+        "alice_bob_coordination_port_open": False,
+    }
+
+
 def start_encrypted_traffic(
     alice: VpnEndpoint,
     bob: VpnEndpoint,
     duration: int,
+    rate_mbps: float | None = None,
+    block_size: int | None = None,
+    max_probe_loss_percent: float = 25.0,
 ) -> TrafficProbe:
     route = alice.node.cmd(f"ip route get {bob.own_ip}")
     match = re.search(r"\bdev\s+(\S+)", route)
@@ -537,19 +715,41 @@ def start_encrypted_traffic(
         f"host {bob.own_ip} and (ip proto 50 or icmp or tcp port 5201)",
     )
     time.sleep(1)
-    ping = alice.node.cmd(f"ping -c 3 -W 3 {bob.own_ip}")
+    ping = alice.node.cmd(f"ping -c 5 -i 0.2 -W 3 {bob.own_ip}")
     print(ping)
-    if "0% packet loss" not in ping:
-        raise RuntimeError("traffic through the QKD-backed VPN failed")
+    ping_summary = re.search(
+        r"(\d+) packets transmitted, (\d+) received.*?"
+        r"([0-9.]+)% packet loss",
+        ping,
+        re.DOTALL,
+    )
+    if not ping_summary:
+        raise RuntimeError(
+            f"initial VPN traffic probe produced no summary: {ping}"
+        )
+    transmitted = int(ping_summary.group(1))
+    received = int(ping_summary.group(2))
+    loss = float(ping_summary.group(3))
+    if transmitted < 1 or received < 1 or loss > max_probe_loss_percent:
+        raise RuntimeError(
+            "initial VPN traffic probe failed: "
+            f"transmitted={transmitted} received={received} "
+            f"lossPercent={loss}"
+        )
 
     docker(
         "exec", "-d", bob.node.name, "iperf3", "-s", "-1", "-B", bob.own_ip
     )
     time.sleep(1)
+    traffic_options = ""
+    if rate_mbps is not None:
+        traffic_options += f" -b {rate_mbps:g}M"
+    if block_size is not None:
+        traffic_options += f" -l {block_size}"
     docker(
         "exec", alice.node.name, "sh", "-c",
         "rm -f /tmp/qkd-iperf.json /tmp/qkd-iperf.pid; "
-        f"iperf3 -c {bob.own_ip} -t {duration} -J "
+        f"iperf3 -c {bob.own_ip} -t {duration} -J{traffic_options} "
         ">/tmp/qkd-iperf.json 2>&1 & echo $! >/tmp/qkd-iperf.pid",
     )
     print(
@@ -559,29 +759,44 @@ def start_encrypted_traffic(
     return TrafficProbe(capture, duration, time.monotonic())
 
 
-def encrypted_traffic_is_active(alice: VpnEndpoint) -> bool:
+def encrypted_traffic_is_active(source: VpnEndpoint) -> bool:
     result = docker(
-        "exec", alice.node.name, "sh", "-c",
-        "test -s /tmp/qkd-iperf.pid && "
-        "kill -0 $(cat /tmp/qkd-iperf.pid) 2>/dev/null",
+        "exec", source.node.name, "sh", "-c",
+        "test -s /tmp/qkd-iperf.pid || exit 1; "
+        "pid=$(cat /tmp/qkd-iperf.pid); "
+        "test -r /proc/$pid/stat || exit 1; "
+        "state=$(awk '{print $3}' /proc/$pid/stat); "
+        "comm=$(cat /proc/$pid/comm 2>/dev/null); "
+        "test \"$state\" != Z && test \"$comm\" = iperf3",
         check=False,
     )
     return result.returncode == 0
 
 
 def finish_encrypted_traffic(
-    alice: VpnEndpoint,
+    source: VpnEndpoint,
     probe: TrafficProbe,
     min_throughput_mbps: float,
 ) -> dict[str, float | int]:
     deadline = probe.started_at + probe.duration + 15
-    while encrypted_traffic_is_active(alice) and time.monotonic() < deadline:
+    while encrypted_traffic_is_active(source) and time.monotonic() < deadline:
         time.sleep(1)
-    if encrypted_traffic_is_active(alice):
-        raise RuntimeError("sustained iperf3 traffic did not finish in time")
+    if encrypted_traffic_is_active(source):
+        diagnostic = docker(
+            "exec", source.node.name, "sh", "-c",
+            "pid=$(cat /tmp/qkd-iperf.pid 2>/dev/null || true); "
+            "echo pid=$pid; "
+            "test -n \"$pid\" && ps -o pid,ppid,stat,etime,comm,args -p \"$pid\"; "
+            "tail -c 2000 /tmp/qkd-iperf.json 2>/dev/null || true",
+            check=False,
+        ).stdout
+        raise RuntimeError(
+            "sustained iperf3 traffic did not finish in time: "
+            f"{diagnostic.strip()}"
+        )
 
     iperf_output = docker(
-        "exec", alice.node.name, "cat", "/tmp/qkd-iperf.json", check=False
+        "exec", source.node.name, "cat", "/tmp/qkd-iperf.json", check=False
     ).stdout
     json_start = iperf_output.find("{")
     if json_start < 0:
@@ -607,34 +822,34 @@ def finish_encrypted_traffic(
             f"iperf3 throughput too low: {throughput_mbps:.6f} Mbit/s"
         )
 
-    docker("exec", alice.node.name, "pkill", "-INT", "tcpdump", check=False)
+    docker("exec", source.node.name, "pkill", "-INT", "tcpdump", check=False)
     time.sleep(1)
 
     esp = docker(
         "exec",
-        alice.node.name,
+        source.node.name,
         "sh",
         "-c",
         f"tcpdump -nn -r {probe.capture} 'ip proto 50' 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext = docker(
         "exec",
-        alice.node.name,
+        source.node.name,
         "sh",
         "-c",
         f"tcpdump -nn -r {probe.capture} icmp 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext_iperf = docker(
-        "exec", alice.node.name, "sh", "-c",
+        "exec", source.node.name, "sh", "-c",
         f"tcpdump -nn -r {probe.capture} 'tcp port 5201' 2>/dev/null | wc -l",
     ).stdout.strip()
     plaintext_iperf_payload = docker(
-        "exec", alice.node.name, "sh", "-c",
+        "exec", source.node.name, "sh", "-c",
         f"tcpdump -nn -r {probe.capture} 'tcp port 5201' 2>/dev/null "
         "| grep -Ev 'length 0$' | wc -l",
     ).stdout.strip()
     docker(
-        "exec", alice.node.name, "rm", "-f",
+        "exec", source.node.name, "rm", "-f",
         probe.capture, "/tmp/qkd-iperf.json", "/tmp/qkd-iperf.pid",
     )
     if (
@@ -714,13 +929,83 @@ def verify_relay_evidence(qkd_interface: str) -> dict[str, object]:
     return evidence
 
 
-def verify_pqc_evidence(topology: QkdTopology) -> dict[str, object]:
-    """Require both QKD and PQC contributions at each endpoint KMS."""
+def verify_padua_relay_evidence(topology: QkdTopology) -> dict[str, object]:
+    """Report relay activity for one Padua application path.
+
+    Matching key fingerprints at the two VPN endpoints is the end-to-end
+    correctness check.  The trace counts below additionally prove that the
+    delivery was not mistaken for a direct A-F QKD link.
+    """
+    containers = tuple(f"qkd-padua-site-{letter}" for letter in "abcdef")
+    required_hops = topology.relay_hops
+    if not required_hops:
+        raise RuntimeError("Padua topology has no relay path definition")
+    hops = {
+        f"{left}-{right}": {"relay_consumptions": 0, "relay_confirmations": 0}
+        for left, right in required_hops
+    }
+    pattern = re.compile(
+        r"\[SECOQC_KMS\] Relay (consumed|succeeded) "
+        r"node=\d+ src=(\d+) dst=(\d+)"
+    )
+    for container in containers:
+        output = docker("logs", container, check=False).stdout
+        for kind, source, destination in pattern.findall(output):
+            edge = tuple(sorted((int(source), int(destination))))
+            if edge not in required_hops:
+                continue
+            field = (
+                "relay_consumptions" if kind == "consumed"
+                else "relay_confirmations"
+            )
+            hops[f"{edge[0]}-{edge[1]}"][field] += 1
+    missing = [
+        hop for hop, counts in hops.items()
+        if sum(counts.values()) == 0
+    ]
+    if missing:
+        raise RuntimeError(
+            "Padua VPN relay evidence is missing physical hops: "
+            + ",".join(missing)
+        )
+    total = sum(sum(counts.values()) for counts in hops.values())
+    evidence: dict[str, object] = {
+        "path": topology.relay_path,
+        "hops": hops,
+        "observable_relay_events": total,
+    }
+    print(
+        "[CORE_VPN] paduaRelayEvidence=OK "
+        + json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+    )
+    return evidence
+
+
+def verify_pqc_evidence(topology: QkdTopology, qkd_interface: str) -> dict[str, object]:
+    """Require observable QKD/PQC mixing at each endpoint KMS.
+
+    ETSI 014 exposes the two source contributions through KeyDelivered.  ETSI
+    004 returns one hybrid stream chunk, so its source-level evidence is the
+    QKD_PQC_MIX marker emitted when that chunk is prepared.
+    """
     evidence: dict[str, object] = {}
-    for container in topology.readiness_containers:
+    containers = (
+        topology.pqc_evidence_containers or topology.readiness_containers
+    )
+    for container in containers:
         output = docker("logs", container, check=False).stdout
         qkd = output.count("Mixed key contribution type=qkd")
         pqc = output.count("Mixed key contribution type=pqc")
+        if qkd_interface == "004":
+            mix_events = [
+                line
+                for line in output.splitlines()
+                if "[QKD_PQC_MIX]" in line
+                and re.search(r"qkdBits=[1-9][0-9]*", line)
+                and re.search(r"pqcBits=[1-9][0-9]*", line)
+            ]
+            qkd = max(qkd, len(mix_events))
+            pqc = max(pqc, len(mix_events))
         if qkd < 1 or pqc < 1:
             raise RuntimeError(
                 f"mixed-key evidence is incomplete in {container}: qkd={qkd} pqc={pqc}"
@@ -744,6 +1029,26 @@ def stop_vpn(endpoint: VpnEndpoint | None) -> None:
         "pkill -TERM -f '[q]kd-vpn.py' 2>/dev/null || true; "
         "ipsec stop >/dev/null 2>&1 || true",
         check=False,
+    )
+
+
+def dump_endpoint_diagnostics(endpoint: VpnEndpoint | None) -> None:
+    if endpoint is None:
+        return
+    result = docker(
+        "exec",
+        endpoint.node.name,
+        "sh",
+        "-c",
+        "for file in /tmp/vpn-entrypoint-bootstrap.log "
+        "/tmp/qkdnetsim.log /tmp/charon-qkd-ppk.log; do "
+        "if [ -f \"$file\" ]; then echo \"===== $file =====\"; "
+        "tail -n 300 \"$file\"; fi; done",
+        check=False,
+    )
+    print(
+        f"[CORE_VPN] endpointDiagnostics role={endpoint.role}\n"
+        f"{result.stdout.strip() or 'no endpoint log available'}"
     )
 
 
@@ -868,8 +1173,24 @@ def main() -> None:
             args.traffic_duration
             + (args.min_generations - 1) * args.rekey_interval
         )
+        if args.traffic_start_delay:
+            print(
+                "[CORE_VPN] trafficSchedule=WAITING "
+                f"delaySeconds={args.traffic_start_delay}",
+                flush=True,
+            )
+            time.sleep(args.traffic_start_delay)
+        traffic_source, traffic_destination = (
+            (bob, alice) if args.traffic_direction == "reverse"
+            else (alice, bob)
+        )
         traffic_probe = start_encrypted_traffic(
-            alice, bob, sustained_duration
+            traffic_source,
+            traffic_destination,
+            sustained_duration,
+            args.traffic_rate_mbps,
+            args.traffic_block_size,
+            args.max_rekey_loss_percent,
         )
         if args.min_generations > 1:
             start_rekey_probe(alice, bob)
@@ -882,7 +1203,7 @@ def main() -> None:
             metrics.update(
                 stop_rekey_probe(alice, args.max_rekey_loss_percent)
             )
-            if not encrypted_traffic_is_active(alice):
+            if not encrypted_traffic_is_active(traffic_source):
                 raise RuntimeError(
                     "the sustained TCP session ended before the final VPN "
                     "generation was committed"
@@ -896,6 +1217,9 @@ def main() -> None:
         metrics["generations_verified"] = generation
         if args.keying_mode == "ppk":
             metrics["mandatory_ppk_generations_verified"] = generation
+            metrics["dynamic_ppk_provider"] = verify_dynamic_ppk_provider(
+                alice, bob
+            )
         metrics["generation_fingerprints"] = {
             str(number): fingerprint
             for number, fingerprint in sorted(fingerprints.items())
@@ -908,19 +1232,33 @@ def main() -> None:
         )
         metrics.update(
             finish_encrypted_traffic(
-                alice, traffic_probe, args.min_throughput_mbps
+                traffic_source, traffic_probe, args.min_throughput_mbps
             )
         )
+        if args.traffic_rate_mbps is not None:
+            metrics["offered_rate_mbps"] = args.traffic_rate_mbps
+            metrics["offered_rate_achievement"] = round(
+                float(metrics["throughput_mbps"]) / args.traffic_rate_mbps,
+                6,
+            )
+        if args.traffic_block_size is not None:
+            metrics["traffic_block_size_bytes"] = args.traffic_block_size
         if args.qkd_topology == "key-relay":
             metrics["relay_evidence"] = verify_relay_evidence(args.qkd_interface)
+        elif topology.relay_hops:
+            metrics["relay_evidence"] = verify_padua_relay_evidence(topology)
         if args.require_pqc:
-            metrics["pqc_evidence"] = verify_pqc_evidence(topology)
+            metrics["pqc_evidence"] = verify_pqc_evidence(topology, args.qkd_interface)
         print(
             "[CORE_VPN] OK "
             f"routers={args.routers} delayPerLinkMs={args.delay_ms} "
             f"bandwidthPerLinkMbps={args.bandwidth_mbps} "
             f"lossPerLinkPercent={args.loss_percent}"
         )
+    except Exception:
+        dump_endpoint_diagnostics(alice)
+        dump_endpoint_diagnostics(bob)
+        raise
     finally:
         # Close persistent KMS sockets before removing the network namespace.
         stop_vpn(alice)
@@ -950,6 +1288,10 @@ def main() -> None:
         "rekey_interval_seconds": args.rekey_interval,
         "traffic_tail_duration_seconds": args.traffic_duration,
         "traffic_duration_seconds": sustained_duration,
+        "traffic_rate_mbps": args.traffic_rate_mbps,
+        "traffic_block_size_bytes": args.traffic_block_size,
+        "traffic_direction": args.traffic_direction,
+        "traffic_start_delay_seconds": args.traffic_start_delay,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "metrics": metrics,
     }

@@ -102,20 +102,48 @@ def apply_prefetch_policy(root: Path) -> None:
             "  if(m_master)\n",
             "timeout reset",
         )
-    c = replace_once(
-        c,
+    old_response = (
         "  }else if(reqMethod == \"enc_keys\"){\n"
         "    if(header.GetStatus() == HTTPMessage::Ok){\n"
-        "      std::string keyType {PopHttpKmsRequest()};\n",
-        "  }else if(reqMethod == \"enc_keys\"){\n"
-        "    std::string keyType {PopHttpKmsRequest()};\n"
-        "    if(keyType == \"encryption\")\n"
-        "      m_encryptionRequestPending = false;\n"
-        "    else if(keyType == \"authentication\")\n"
-        "      m_authenticationRequestPending = false;\n"
-        "    if(header.GetStatus() == HTTPMessage::Ok){\n",
-        "response reset",
+        "      std::string keyType {PopHttpKmsRequest()};\n"
     )
+    current_response = (
+        "  }else if(reqMethod == \"enc_keys\")\n"
+        "  {\n"
+        "    if(header.GetStatus() == HTTPMessage::Ok)\n"
+        "    {\n"
+        "      std::string keyType {PopHttpKmsRequest(\"http://\" + header.GetRequestUri())};\n"
+    )
+    if old_response in c:
+        c = replace_once(
+            c,
+            old_response,
+            "  }else if(reqMethod == \"enc_keys\"){\n"
+            "    std::string keyType {PopHttpKmsRequest()};\n"
+            "    if(keyType == \"encryption\")\n"
+            "      m_encryptionRequestPending = false;\n"
+            "    else if(keyType == \"authentication\")\n"
+            "      m_authenticationRequestPending = false;\n"
+            "    if(header.GetStatus() == HTTPMessage::Ok){\n",
+            "response reset",
+        )
+    elif current_response in c:
+        c = replace_once(
+            c,
+            current_response,
+            "  }else if(reqMethod == \"enc_keys\")\n"
+            "  {\n"
+            "    std::string keyType {PopHttpKmsRequest(\"http://\" + header.GetRequestUri())};\n"
+            "    if(keyType == \"encryption\")\n"
+            "      m_encryptionRequestPending = false;\n"
+            "    else if(keyType == \"authentication\")\n"
+            "      m_authenticationRequestPending = false;\n"
+            "    if(header.GetStatus() == HTTPMessage::Ok)\n"
+            "    {\n",
+            "response reset",
+        )
+    else:
+        raise RuntimeError("prefetch response-reset anchor not found")
     c = replace_once(
         c,
         "      PrintStoreStats();\n"

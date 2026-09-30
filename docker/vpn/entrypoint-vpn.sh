@@ -44,8 +44,30 @@ done
 exec > >(tee -a /tmp/qkdnetsim.log) 2>&1
 
 if [ "${VPN_KEYING_MODE}" = "ppk" ]; then
-    # RFC 8784 PPKs are configured through VICI/swanctl, not ipsec.conf.
-    mkdir -p /etc/swanctl
+    # RFC 8784 PPK identities are configured through VICI/swanctl.  The key
+    # bytes are supplied on demand by the local qkd-ppk credential plugin.
+    mkdir -p /etc/swanctl /etc/strongswan.d/charon
+    cat > /etc/strongswan.d/charon/qkd-ppk.conf << EOF
+qkd-ppk {
+    load = yes
+    socket = /run/qkd-vpn/ppk-provider.sock
+    timeout = 15
+}
+EOF
+    cat > /etc/strongswan.d/qkd-ppk-logging.conf << EOF
+charon {
+    filelog {
+        qkd-ppk {
+            path = /tmp/charon-qkd-ppk.log
+            append = no
+            flush_line = yes
+            default = 1
+            cfg = 2
+            ike = 2
+        }
+    }
+}
+EOF
     cat > /etc/ipsec.conf << EOF
 config setup
     uniqueids=yes
@@ -82,11 +104,15 @@ chmod 0600 /etc/ipsec.secrets
 iptables -w -I OUTPUT 1 -d "${PEER_IP}" -m policy --dir out --pol none -j DROP
 iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p esp -j ACCEPT
 iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p udp -m multiport --dports 500,4500 -j ACCEPT
-iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p tcp -m multiport --ports "${CONTROL_PORT:-9090}" -j ACCEPT
 iptables -w -I INPUT 1 -s "${PEER_IP}" -m policy --dir in --pol none -j DROP
 iptables -w -I INPUT 1 -s "${PEER_IP}" -p esp -j ACCEPT
 iptables -w -I INPUT 1 -s "${PEER_IP}" -p udp -m multiport --dports 500,4500 -j ACCEPT
-iptables -w -I INPUT 1 -s "${PEER_IP}" -p tcp -m multiport --ports "${CONTROL_PORT:-9090}" -j ACCEPT
+if [ "${VPN_KEYING_MODE}" = "psk" ]; then
+    iptables -w -I OUTPUT 1 -d "${PEER_IP}" -p tcp -m multiport \
+        --ports "${CONTROL_PORT:-9090}" -j ACCEPT
+    iptables -w -I INPUT 1 -s "${PEER_IP}" -p tcp -m multiport \
+        --ports "${CONTROL_PORT:-9090}" -j ACCEPT
+fi
 
 echo "[vpn] starting strongSwan (role=${VPN_ROLE})"
 ipsec start
@@ -94,6 +120,12 @@ ipsec start
 for _ in $(seq 1 50); do
     if ipsec status >/dev/null 2>&1 && \
        { [ "${VPN_KEYING_MODE}" = "psk" ] || swanctl --stats >/dev/null 2>&1; }; then
+        if [ "${VPN_KEYING_MODE}" = "ppk" ] && \
+           ! grep -q 'loaded plugins:.*qkd-ppk' /tmp/charon-qkd-ppk.log; then
+            echo "[vpn] qkd-ppk plugin was not loaded by charon" >&2
+            cat /tmp/charon-qkd-ppk.log >&2 || true
+            exit 1
+        fi
         exec /opt/qkd-vpn.py
     fi
     sleep 0.2

@@ -2,15 +2,15 @@
 # Builds the comparison images:
 #   qkdnetsim:base-old        upstream model + matched workload, ns-3.46       (commit 1cda34c)
 #   qkdnetsim:base-new        upstream model + matched workload, ns-3.48/PQC   (commit 1f11f55, v3.1.3)
-#   qkdnetsim:base-new-reference  same upstream workload using discrete-event
-#                                execution for the Padua statistics profile
+#   qkdnetsim:base-new-reference  upstream v3.1.4 workload using discrete-event
+#                                execution for the current Padua profile
 #   qkdnetsim-testbed:old     our non-monolithic adaptation, pre-PQC / ns-3.46 (commit 99783ee)
 #   qkdnetsim-testbed:new     our non-monolithic adaptation, PQC / ns-3.48     (commit cc6b619)
 #
 # Run from anywhere; paths below are relative to this script's location.
 #
 #   ./build-all.sh              build every comparison image
-#   ./build-all.sh base-old     build just one (base-old | base-new | testbed-old | testbed-new)
+#   ./build-all.sh base-old     build just one listed image (including base-new-reference)
 #   ./build-all.sh check        verify Docker/Python discovery without building
 
 set -euo pipefail
@@ -104,6 +104,9 @@ UPSTREAM_OLD_COMMIT="1cda34cbe75b5cb33e2ffa87081f724d6484199f"
 # adds CHANGELOG.md/CONTRIBUTING.md over that commit, so the compiled model is
 # unchanged and that historical provenance remains valid.
 UPSTREAM_NEW_COMMIT="1f11f55915249c88fb5542620493a2f6919a7231"
+# Keep the current Padua control separate from the immutable v3.1.3
+# comparison image above. It must match the model imported by the working tree.
+UPSTREAM_REFERENCE_COMMIT="e6330fe6400d7d061c67d84c9ba923396c6db64f"
 TESTBED_OLD_COMMIT="99783ee7f10314b52af71ce0528db7305f461f44"
 TESTBED_NEW_COMMIT="cc6b619a4474913468722ab16000adbcadccce3f"
 
@@ -141,14 +144,17 @@ build_base_new() {
 }
 
 build_base_new_reference() {
-  echo "==> Building qkdnetsim:base-new-reference (upstream model, discrete-event Padua reference)"
-  ensure_upstream_commit "${UPSTREAM_NEW_COMMIT}"
+  echo "==> Building qkdnetsim:base-new-reference (upstream v3.1.4, discrete-event Padua reference)"
+  ensure_upstream_commit "${UPSTREAM_REFERENCE_COMMIT}"
   local ctx
   ctx="$(mktemp -d)"
   trap 'rm -rf "'"${ctx}"'"' RETURN
-  git -C "${REPO_ROOT}" archive "${UPSTREAM_NEW_COMMIT}" | tar -x -C "${ctx}"
-  python3 "${SCRIPT_DIR}/instrument-baseline.py" "${ctx}" default
-  docker build -t qkdnetsim:base-new-reference -f "${SCRIPT_DIR}/Dockerfile.base-new" "${ctx}"
+  git -C "${REPO_ROOT}" archive "${UPSTREAM_REFERENCE_COMMIT}" | tar -x -C "${ctx}"
+  python3 "${SCRIPT_DIR}/instrument-baseline.py" "${ctx}" padua-default
+  docker build \
+    --build-arg QKDNETSIM_PADUA_ONLY=1 \
+    --label org.qkdnetsim.comparison.revision="${UPSTREAM_REFERENCE_COMMIT}" \
+    -t qkdnetsim:base-new-reference -f "${SCRIPT_DIR}/Dockerfile.base-new" "${ctx}"
 }
 
 build_testbed_old() {

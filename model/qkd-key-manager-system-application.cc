@@ -98,29 +98,29 @@ QKDKeyManagerSystemApplication::GetTypeId()
     .AddTraceSource("RxKMSs", "A packet from the APP has been received",
                    MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_rxTraceKMSs),
                    "ns3::QKDKeyManagerSystemApplication::RxKMSs")
-    .AddTraceSource("QKDKeyGenerated", "The trace to monitor key material received from QL",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_qkdKeyGeneratedTrace),
-                     "ns3::QKDKeyManagerSystemApplication::QKDKeyGenerated")
-    .AddTraceSource("KeyServed", "The trece to monitor E2E key usage",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyServedTrace),
-                     "ns3::QKDKeyManagerSystemApplication::KeyServed")
-    .AddTraceSource("KeyServedMixed", "The trece to monitor E2E key usage",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyServedTraceMixed),
+    .AddTraceSource("KeyGenerated", "The trace to monitor key material received from quantum layer",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyGeneratedTrace),
+                     "ns3::QKDKeyManagerSystemApplication::QKDKeyGenerated") 
+    .AddTraceSource("KeyGeneratedPQC", "The trace to monitor PQC key material generated",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyPQCGeneratedTrace),
+                     "ns3::QKDKeyManagerSystemApplication::PQCKeyGenerated") 
+    .AddTraceSource("KeyPrepared", "The trece to monitor P2P key usage. Keys prepared: fetched from q-buffers and stored in s-buffers.",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyPreparedTrace),
                      "ns3::QKDKeyManagerSystemApplication::KeyServedMixed")
-    .AddTraceSource("KeyConsumedLink", "The trece to monitor P2P key usage",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyConsumedLink),
+    .AddTraceSource("KeyDelivered", "The trece to monitor E2E key usage. Keys deliverd to ETSI014/ETSI004 applications.",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyDeliveredTrace),
                      "ns3::QKDKeyManagerSystemApplication::KeyConsumedLink")
-    .AddTraceSource("RelayConsumption", "The trace to monitor key material consumed for key relay",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyConsumedRelay),
+    .AddTraceSource("KeyRelayed", "The trace to monitor key material consumed for key relay",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyRelayedTrace),
                      "ns3::QKDKeyManagerSystemApplication::RelayConsumption") 
     .AddTraceSource("RelaySuccess", "Key material whose relay was confirmed end to end",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyRelayedSuccess),
                      "ns3::QKDKeyManagerSystemApplication::RelaySuccess")
-    .AddTraceSource("WasteRelay", "The trace to monitor failed relays",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyWasteRelay),
+    .AddTraceSource("KeyWasted", "The trace to monitor failed relays.",
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_keyWastedOnRelayTrace),
                      "ns3::QKDKeyManagerSystemApplication::WasteRelay")
     .AddTraceSource("KSIDUpdated", "The trace generated ETSI 004 KSIDs",
-                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_ksidGenerated),
+                     MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_ksidGeneratedTrace),
                      "ns3::QKDKeyManagerSystemApplication::Etsi004KSIDGenerated")
     .AddTraceSource("ListenReady", "APP/KMS and KMS/KMS listeners completed Bind and Listen",
                      MakeTraceSourceAccessor(&QKDKeyManagerSystemApplication::m_listenReadyTrace),
@@ -508,20 +508,17 @@ QKDKeyManagerSystemApplication::SBufferClientCheck(uint32_t dstKmNodeId)
         NS_LOG_FUNCTION(this << "We do not have enoguh keys on P2P QKD link to the nextHop. We cannot proceed with relay nor fill!");
         return;
       }
-
       NS_LOG_FUNCTION(this << "encDemand:" << encDemand << "KeySize: " << ie->second->GetKeySize() << "sBufferBits:" << sBufferBits);
 
       Ptr<SBuffer> relayBuffer = GetSBuffer(dstKmNodeId, "enc");
       NS_ASSERT(relayBuffer);
-
-      //this is master KMS 
-      //if not master, the relay request will trigger check
-      //if buffer is not READY, we start RELAY procedure
-      if( 
-        //GetNode()->GetId() > dstKmNodeId && 
+      if(  
         relayBuffer->GetState() > 0
-      )
-        Relay(dstKmNodeId, encDemand); 
+      ){
+        NS_LOG_FUNCTION(this << "RELAY to " << dstKmNodeId << " INITIATED! RelayBuffer in state: " << relayBuffer->GetState() );
+        NS_LOG_FUNCTION(this << "Amount of key material in RELAY s-buffer (READY) BEFORE relay: " << relayBuffer->GetSKeyCount() << "(" << relayBuffer->GetSBitCount() << ")bits; peer: " << dstKmNodeId);
+        Relay(dstKmNodeId, encDemand);   
+      }
  
     }else
       NS_LOG_FUNCTION(this << "RELAY_SBUFFER" << dstKmNodeId << "is in READY state!");
@@ -1256,6 +1253,10 @@ QKDKeyManagerSystemApplication::ProcessRequest(HTTPMessage headerIn, Ptr<Packet>
       //HTTPMessage h2 = m_queueLogic->Dequeue();
       ProcessEtsi004OpenConnect(headerIn, socket);
 
+  } else if(requestType == ETSI_QKD_004_DISCOVER_SESSION) {
+
+      ProcessEtsi004DiscoverSession(remoteAppId, headerIn, socket);
+
   } else if(requestType == ETSI_QKD_004_GET_KEY) {
       
       ProcessEtsi004GetKey(ksid, headerIn, socket); //@toDo "" should be ksid, read from uri param
@@ -1397,13 +1398,13 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
   nlohmann::json errorDataStructure = ValidateEtsi014GetKeyRequest(keyNumber, keySize, sBuffer, keySize_qkd);
 
   uint32_t requestedBits = keySize * keyNumber;
-  uint32_t keySize_pqc = keySize - keySize_qkd;
+  uint32_t keySize_pqc = requestedBits - keySize_qkd;
   NS_LOG_FUNCTION(this << "requestedBits:" << requestedBits);
   NS_LOG_FUNCTION(this << "keySize_qkd:" << keySize_qkd);
   NS_LOG_FUNCTION(this << "keySize_pqc:" << keySize_pqc);
-  NS_ASSERT((keySize_qkd + keySize_pqc) * keyNumber == requestedBits);
+  NS_ASSERT(keySize_qkd + keySize_pqc == requestedBits);
   
-  if(m_pqc_enabled && sBufferPQC->GetBitCount() < keySize_pqc * keyNumber){
+  if(m_pqc_enabled && sBufferPQC->GetBitCount() < keySize_pqc){
     NS_LOG_FUNCTION(this << "We do not have enough PQC keys!"); 
     CheckSocketsKMS(conn.GetDestinationKmsAddress());
     CheckPQCBuffer(conn.GetDestinationKmsAddress());
@@ -1423,7 +1424,7 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     //QKD part
     std::vector<std::string> candidateSetIds {};
     std::string mergedKey, surplusKeyId;
-    uint32_t targetSize = keySize_qkd * keyNumber;
+    uint32_t targetSize = keySize_qkd;
     NS_LOG_FUNCTION(this << "targetSize:" << targetSize);
     while(true)
     { 
@@ -1451,21 +1452,31 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     NS_LOG_FUNCTION(this << "Now create supply keys!");
     std::vector<std::string> supplyKeyIds {};
     std::vector<Ptr<QKDKey>> supplyKeys {};
-    uint32_t k{0};
-    while(k++<keyNumber)
+
+    uint32_t keyChunkSize = keySize_qkd / keyNumber; // 256 bits
+    for (uint32_t k = 0; k < keyNumber; k++)
     {
-      std::string keyString = mergedKey.substr(0, keySize_qkd/8);
+      NS_LOG_FUNCTION(this << "k:" << k
+                           << "\t keyNumber: " << keyNumber
+                           << "\t keySize_qkd: " << keySize_qkd
+                           << "\t keyChunkSize: " << keyChunkSize
+                     );
+
+      uint32_t offset = k * (keyChunkSize / 8);
+      uint32_t length = keyChunkSize / 8;
+      std::string keyString = mergedKey.substr(offset, length);
+
       if(!keyString.empty())
       {
-        std::string skeyId = GenerateUUID();
-        mergedKey.erase(0, keySize_qkd/8);
+        std::string skeyId = GenerateUUID(); 
         Ptr<QKDKey> tempKey = CreateObject<QKDKey>(skeyId, keyString);
-        //NS_LOG_FUNCTION(this << "PPP2: " << tempKey->GetKeyString());
+        NS_LOG_FUNCTION(this << "PPP2: " << tempKey->GetSizeInBits() << " ::: " << tempKey->ToString());
         supplyKeys.push_back(tempKey);
         supplyKeyIds.push_back(skeyId);
  
         //etsi014
-        m_keyServedTraceMixed(
+        //keys fetched from enc/dec sBuffers and delivered to etsi014 app 
+        m_keyDeliveredTrace(
           remoteAppId,
           "",
           remoteAppId,
@@ -1475,18 +1486,10 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
           tempKey->GetSizeInBits(), 
           std::string("qkd")
         ); 
-
-        if(sBuffer->GetType() == SBuffer::LOCAL_SBUFFER) //Then this is p2p connection!
-          m_keyConsumedLink(
-            GetNode()->GetId(), //Source
-            conn.GetDestinationKmNodeId(), //Destination
-            //tempKey->GetId(),
-            tempKey->GetSizeInBits()
-          ); 
+ 
       }
     }
-    if(m_pqc_enabled )
-      NS_ASSERT(mergedKey.empty());
+    //if(m_pqc_enabled) NS_ASSERT(mergedKey.empty());
 
     //Send skey_create message to peer KM node
     NS_LOG_FUNCTION( this << "keySize_qkd" << keySize_qkd ); //Testing @rm
@@ -1499,7 +1502,7 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     //PQC part
     std::vector<std::string> candidateSetIdsPQC {};
     std::string mergedKeyPQC, surplusKeyIdPQC; 
-    uint32_t targetSizePQC = keySize_pqc * keyNumber;
+    uint32_t targetSizePQC = keySize_pqc;
     if(m_pqc_enabled && keySize_pqc)
     {
       while(true)
@@ -1518,8 +1521,6 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
           CheckPQCBuffer(dstKms);
           return;
         }
-
-        //NS_LOG_FUNCTION(this << "QQQ1: " << candidateKey->GetKeyString());
         NS_ASSERT(candidateKey);
 
         candidateSetIdsPQC.push_back(candidateKey->GetId());
@@ -1540,25 +1541,36 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     std::vector<Ptr<QKDKey>> supplyKeysPQC {};
 
     std::vector<std::string> mixedKeyIds {};
-    std::vector<Ptr<QKDKey>> mixedKeys {};
-    uint32_t kPQC{0};
+    std::vector<Ptr<QKDKey>> mixedKeys {}; 
     if(m_pqc_enabled && keySize_pqc)
     {
-      while(kPQC++<keyNumber)
+
+      uint32_t keyChunkSize = keySize_pqc / keyNumber; // 256 bits
+
+      for (uint32_t kPQC = 0; kPQC < keyNumber; kPQC++)
       {
-        std::string keyString = mergedKeyPQC.substr(0, keySize_pqc/8);
+        NS_LOG_FUNCTION(this << "kPQC:" << kPQC
+                             << "\t keyNumber: " << keyNumber
+                             << "\t keySize_pqc: " << keySize_pqc
+                             << "\t keyChunkSize: " << keyChunkSize
+                       );
+
+        uint32_t offset = kPQC * (keyChunkSize / 8);
+        uint32_t length = keyChunkSize / 8;
+        std::string keyString = mergedKeyPQC.substr(offset, length);
+ 
         if(!keyString.empty())
         {
           std::string skeyId = GenerateUUID();
-          mergedKeyPQC.erase(0, keySize_pqc/8);
-
           Ptr<QKDKey> tempKey = CreateObject<QKDKey>(skeyId, keyString);
-          //NS_LOG_FUNCTION(this << "QQQ2: " << tempKey->GetKeyString());
+          NS_LOG_FUNCTION(this << "PPP2 (PQC): " << tempKey->GetSizeInBits() << " ::: " << tempKey->ToString());
+
           supplyKeysPQC.push_back(tempKey);
           supplyKeyIdsPQC.push_back(skeyId);
  
           //etsi014          
-          m_keyServedTraceMixed(
+          //keys fetched from PQC buffers and delivered to etsi014 app 
+          m_keyDeliveredTrace(
             remoteAppId,
             "",
             remoteAppId,
@@ -1571,7 +1583,8 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
 
         }
       }
-      NS_ASSERT(mergedKeyPQC.empty());
+      // The batch is split with substr() above; the source aggregate is not
+      // consumed/erased by that operation.  Do not assert that it is empty.
     }
 
     //Send skey_create message to peer KM node
@@ -1613,11 +1626,7 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
         std::string mKeyId = GenerateUUID();
         std::string mixedKeyVal = (supplyKeys[i])->GetKeyString() + (supplyKeysPQC[i])->GetKeyString(); 
         Ptr<QKDKey> mKey = CreateObject<QKDKey>(mKeyId, mixedKeyVal);
-
-        //NS_LOG_FUNCTION(this << "QQQ: " << supplyKeys[i]->GetKeyString());
-        //NS_LOG_FUNCTION(this << "PPP: " << supplyKeysPQC[i]->GetKeyString());
-        //NS_LOG_FUNCTION(this << "MMM: " << mKey->GetKeyString());
-
+ 
         mixedKeys.push_back(mKey); 
         NS_LOG_FUNCTION(this << "mKey.size():" << mKey->GetSizeInBits());
 
@@ -1724,9 +1733,8 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     CheckPQCBuffer(dstKms);
   }
 
-  if(sBuffer->GetType() == SBuffer::RELAY_SBUFFER || GetNode()->GetId() < conn.GetDestinationKmNodeId()){
+  if(sBuffer->GetType() == SBuffer::RELAY_SBUFFER || GetNode()->GetId() < conn.GetDestinationKmNodeId())
     SBufferClientCheck(conn.GetDestinationKmNodeId());
-  }
 
   //create packet
   HTTPMessage httpMessage;
@@ -1740,7 +1748,6 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKey(std::string remoteAppI
     hMessage.size()
   );
   NS_ASSERT(packet);
-
 
   NS_LOG_FUNCTION(this 
     << "Sending Response to ETSI_QKD_014_GET_KEY" 
@@ -1825,19 +1832,21 @@ QKDKeyManagerSystemApplication::ValidateEtsi014GetKeyRequest(
     uint32_t keySize_qkd = 0;
     if(buffer->GetState() == 0 && !m_pqc_force_mixing)
     {
-      keySize_qkd = size;
+      keySize_qkd = requestedBits;
       NS_LOG_FUNCTION(this << "We are in READY state! let's TRY to serve keySize_qkd:" << keySize_qkd);
     }else{
-      keySize_qkd = ComputePqcMixing(size, availableKeyBits);
+      keySize_qkd = ComputePqcMixing(requestedBits, availableKeyBits);
+      // The upstream batch splitter divides each contribution equally among
+      // `number` keys.  Keep both QKD and PQC shares byte-aligned per key,
+      // rather than only aligning the aggregate contribution to one byte.
+      const uint32_t batchByteBits = 8 * number;
+      keySize_qkd -= keySize_qkd % batchByteBits;
       NS_LOG_FUNCTION(this << "CALCULATED keySize_qkd:" << keySize_qkd);
     }
   
     //Check if there is enough key material!
-    const uint32_t requiredQkdBits = keySize_qkd * number;
-    if(requiredQkdBits > availableKeyBits || !keySize_qkd)
+    if(keySize_qkd > availableKeyBits || !keySize_qkd)
     { 
- 
-
       uint32_t demendForKeys = requestedBits * 1.2;
       NS_LOG_FUNCTION(this << buffer << " was in " << buffer->GetState() << " state!"  << buffer->GetBitCount()  << " -- " << buffer->GetMthr() ); //Check s-buffer state
       // Only ever raise the threshold to cover an oversized single request;
@@ -1925,7 +1934,8 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
         NS_ASSERT(qkdKey);  
 
         //Etsi014
-        m_keyServedTraceMixed(
+        //keys fetched from ENC/DEC Sbuffers and delivered to ETSI014 apps 
+        m_keyDeliveredTrace(
           remoteAppId,
           "",
           remoteAppId,
@@ -1935,7 +1945,7 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
           qkdKey->GetSizeInBits(), 
           std::string("qkd")
         ); 
-    }
+      }
 
       std::vector<std::string> pqcKeyIds = mKeyStruct.pqcKeyIds;
       for(const auto &pqcKeyId : pqcKeyIds)
@@ -1944,7 +1954,8 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
         NS_ASSERT(pqcKey);  
 
         //Etsi014
-        m_keyServedTraceMixed(
+        //keys fetched from PQC buffer and stored in ENC/DEC Sbuffers for further ETSI014 requests 
+        m_keyDeliveredTrace(
           remoteAppId,
           "",
           remoteAppId,
@@ -1953,19 +1964,21 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
           pqcKey->GetId(), 
           pqcKey->GetSizeInBits(), 
           std::string("pqc")
-        ); 
-    }
+        );  
+      }
 
     }else{
 
       //then check only for QKD key
       Ptr<QKDKey> tempKey = sBuffer->GetSupplyKey(el);
-      if(tempKey){
-        NS_LOG_FUNCTION(this << "krec007 QKD " << el << "succeeded");
+      if(tempKey)
+      {
+        NS_LOG_FUNCTION(this << "krec007 QKD " << el << "succeeded. KeySize:" << tempKey->GetSizeInBits());
         keys.push_back(tempKey);
          
         //Etsi014
-        m_keyServedTraceMixed(
+        //keys fetched from ENC/DEC Sbuffers and delivered to ETSI014 apps  
+        m_keyDeliveredTrace(
           remoteAppId,
           "",
           remoteAppId,
@@ -1974,17 +1987,8 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
           tempKey->GetId(), 
           tempKey->GetSizeInBits(), 
           std::string("qkd")
-        );
-         
-        if(sBuffer->GetType() == SBuffer::LOCAL_SBUFFER) //Then this is p2p connection!
-        {
-          m_keyConsumedLink(
-            GetNode()->GetId(), //Source
-            conn.GetDestinationKmNodeId(), //Destination
-            //tempKey->GetId(),
-            tempKey->GetSizeInBits()
-          );
-        }
+        ); 
+
       }else{ //The key is not present in SBuffer
         error = true;
       }
@@ -2029,6 +2033,68 @@ void QKDKeyManagerSystemApplication::ProcessEtsi014GetKeyWithIds(std::string rem
 ////////////////////////
 /// ETSI GS 004
 ////////////////////////
+void
+QKDKeyManagerSystemApplication::ProcessEtsi004DiscoverSession(
+  std::string remoteAppId,
+  HTTPMessage headerIn,
+  Ptr<Socket> socket)
+{
+  std::string srcSaeId;
+  std::string dstSaeId;
+  try
+  {
+    const auto request = nlohmann::json::parse(headerIn.GetMessageBodyString());
+    if(request.contains("Source"))
+      srcSaeId = request["Source"];
+    if(request.contains("Destination"))
+      dstSaeId = request["Destination"];
+  }
+  catch(...)
+  {
+    // Invalid input is handled by the regular error response below.
+  }
+
+  std::string ksid;
+  if(!srcSaeId.empty() && dstSaeId == remoteAppId)
+  {
+    for(const auto& entry : m_associations004)
+    {
+      const auto& association = entry.second;
+      if(!association.isMaster &&
+         association.srcSaeId == srcSaeId &&
+         association.dstSaeId == dstSaeId)
+      {
+        ksid = entry.first;
+        break;
+      }
+    }
+  }
+
+  const bool found = !ksid.empty();
+  const nlohmann::json response = found
+    ? nlohmann::json{{"Key_stream_ID", ksid}}
+    : nlohmann::json{{"message", "No replica ETSI 004 session is available"}};
+  HTTPMessage httpMessage;
+  httpMessage.CreateResponse(
+    found ? HTTPMessage::HttpStatus::Ok : HTTPMessage::HttpStatus::BadRequest,
+    response.dump(),
+    {
+      {"Content-Type", "application/json; charset=utf-8"},
+      {"Request URI", headerIn.GetUri()}
+    });
+  const std::string serialized = httpMessage.ToString();
+  Ptr<Packet> packet = Create<Packet>(
+    reinterpret_cast<const uint8_t*>(serialized.c_str()),
+    serialized.size());
+  SendToSocketPair(socket, packet);
+
+  if(found)
+  {
+    std::cout << "[QKD_004_SESSION] role=slave event=discovered ksid="
+              << ksid << " node=" << GetNode()->GetId() << std::endl;
+  }
+}
+
 void
 QKDKeyManagerSystemApplication::ProcessEtsi004OpenConnect(HTTPMessage headerIn, Ptr<Socket> socket)
 {
@@ -2149,11 +2215,11 @@ QKDKeyManagerSystemApplication::ProcessEtsi004GetKey(std::string ksid, HTTPMessa
   }
 
   //PeerRegistered must be true @toDo - first check this(in case of QKDApp004 this will never happen)
-  NS_LOG_FUNCTION(this << "EMIRS" << it->second.stre_buffer->GetStreamKeyCount() << it->second.peerRegistered);
+  NS_LOG_FUNCTION(this << it->second.stre_buffer->GetStreamKeyCount() << it->second.peerRegistered);
   
   if( it->second.peerRegistered && it->second.stre_buffer->GetStreamKeyCount())
   {
-    NS_LOG_FUNCTION(this << "We have enough keys in buffer " << it->second.stre_buffer << " to server ETSI 004 GET_KEY request!");
+    NS_LOG_FUNCTION(this << "We have enough keys in buffer " << it->second.stre_buffer << " to server ETSI 004 GET_KEY request! " <<  it->second.stre_buffer->GetStreamKeyCount());
     //Check
     Ptr<QKDKey> keyChunk = it->second.stre_buffer->GetStreamKey();
     if(it->second.isMaster)
@@ -2189,13 +2255,21 @@ QKDKeyManagerSystemApplication::ProcessEtsi004GetKey(std::string ksid, HTTPMessa
     );
     NS_ASSERT(packet);
     SendToSocketPair(socket, packet);
+    NS_LOG_FUNCTION(this << "2083: Sending OK response with message " << msg);
 
-    m_keyConsumedLink( //Is always p2p link now for 004
+    //etsi004
+    //keys fetched from STREAM sBuffers and delivered to etsi004 app 
+    m_keyDeliveredTrace(
+      ksid,
+      it->second.srcSaeId,
+      it->second.dstSaeId,
       it->second.srcNodeId, //Source
       it->second.dstNodeId, //Destination
-      //{ksid + keyChunk->GetId()},  //Key ID should be combination of ksid+index!
-      keyChunk->GetSizeInBits() //Size of key
+      keyChunk->GetId(), 
+      keyChunk->GetSizeInBits(), 
+      std::string("qkd")
     ); 
+
   }else{
     //Respond with an error. Currently this is the only error on GetKey004, therefore no message is included. @toDo
     NS_LOG_FUNCTION(this 
@@ -2558,9 +2632,9 @@ void QKDKeyManagerSystemApplication::ProcessStoreKey(HTTPMessage headerIn, Ptr<S
   Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>(64); //64 bits long key IDs. Collisions->0
   uint32_t keySizeInBits = keyValue.size() ? keyValue.size()*8 : 0;
   if(isMaster)
-    m_qkdKeyGeneratedTrace(moduleId, keyId, keySizeInBits);
+    m_keyGeneratedTrace(moduleId, keyId, keySizeInBits);
   else
-    m_qkdKeyGeneratedTrace(matchingModuleId, keyId, keySizeInBits);
+    m_keyGeneratedTrace(matchingModuleId, keyId, keySizeInBits);
   
   NS_LOG_FUNCTION(this << "keySizeInBytes:" << keyValue.size());
 
@@ -2583,6 +2657,9 @@ void QKDKeyManagerSystemApplication::ProcessStoreKey(HTTPMessage headerIn, Ptr<S
     std::string keyValueTemp {keyValue};
     if(keyValue.size() >= blockSize)
       keyValueTemp = keyValue.substr(0, blockSize); //Take portion of the QKD-key value for KMA-key
+
+    NS_LOG_FUNCTION(this << "keyValue.size():" << keyValue.size() << "keyValueTemp.size():" << keyValueTemp.size() );
+    
     std::string completeHashInput = hashInput + std::to_string(blockIndex); //Complete HASH input
     std::string blockKeyId {encryptor->SHA1(completeHashInput)}; //Generate KMA-key ID based on the HASH output
     Ptr<QKDKey> newKey = CreateObject<QKDKey>(blockKeyId, keyValueTemp); //Create a QKDKey object to represent KMA-key
@@ -3277,20 +3354,22 @@ void QKDKeyManagerSystemApplication::ProcessPQCCipherRequest(HTTPMessage headerI
       continue;
     }
     Ptr<QKDKey> key = CreateObject<QKDKey>(keyId, secret_bin);
+    uint32_t keySizeInBits = key->GetSizeInBits();
     key->SwitchToState(QKDKey::READY);
     bool isStored = sBuffer->StoreKey(key, true);
 
     if(isStored)
     {
       ++storedCount;
-      NS_LOG_DEBUG(this << "Stored PQC key " << keyId << " (" << key->GetSizeInBits() << " bits), READY");
+      NS_LOG_DEBUG(this << "Stored PQC key " << keyId << " (" << keySizeInBits << " bits), READY");
+      m_keyPQCGeneratedTrace(srcNodeId, dstNodeId, keyId, keySizeInBits);
 
       // Build ACK entry
       nlohmann::json ackItem;
       ackItem["key_id"] = keyId;  
       ack.push_back(std::move(ackItem));
     }else{
-      NS_LOG_DEBUG(this << "WARNING: UNABLE to STORE PQC key " << keyId << " (" << key->GetSizeInBits() << " bits)!");
+      NS_LOG_DEBUG(this << "WARNING: UNABLE to STORE PQC key " << keyId << " (" << keySizeInBits << " bits)!");
     }
   }
 
@@ -3379,7 +3458,13 @@ void QKDKeyManagerSystemApplication::ProcessPQCCipherResponse (HTTPMessage heade
       continue;
     }
     const std::string keyId = item["key_id"].get<std::string>();
-    sBuffer->MarkKey(keyId, QKDKey::READY);   
+    sBuffer->MarkKey(keyId, QKDKey::READY);
+    uint32_t keySizeInBits = sBuffer->GetKeySizeById(keyId);
+    if(!keySizeInBits){
+      NS_LOG_ERROR(this << "S-Buffer (PQC) could not find the key " << keyId << "!");
+      return;
+    }
+    m_keyPQCGeneratedTrace(srcId, dstId, keyId, keySizeInBits);
     okCount++;  
   }
   NS_LOG_FUNCTION(this << "PQC_CIPHER response processed: ok=" << okCount << " skip=" << skipCount);
@@ -3424,7 +3509,7 @@ QKDKeyManagerSystemApplication::Relay(uint32_t dstKmNodeId, uint32_t amount)
   NS_ASSERT(relayBuffer);
   if(relayBuffer->IsRelayActive())
   {
-    NS_LOG_FUNCTION(this << "RELAY ACTIVE");
+    NS_LOG_FUNCTION(this << "RELAY ACTIVE! Exiting!");
     return;
   } else {
     NS_LOG_FUNCTION(this << "RELAY was NOT ACTIVE");
@@ -3455,11 +3540,11 @@ QKDKeyManagerSystemApplication::Relay(uint32_t dstKmNodeId, uint32_t amount)
 
   bool stored = false;
   while(true)
-  {
+  { 
     Ptr<QKDKey> key = localBuffer->GetKey(relayBuffer->GetKeySize()); //Get key from sBuffer(key MUST be in default size!)
     NS_ASSERT(key); 
     NS_LOG_FUNCTION(this 
-        << "RELAY:  we fetched key " << key->GetId() << key->GetStateString() 
+        << "RELAY:  we fetched key " << key->GetId() << key->GetStateString()  << " of size " << key->GetSizeInBits() 
         << " from LOCAL sourceBuffer " << localBuffer << localBuffer->GetDescription() << localBuffer->GetRemoteNodeId() 
       );
     if(key->GetState() != QKDKey::READY)
@@ -3495,18 +3580,27 @@ QKDKeyManagerSystemApplication::Relay(uint32_t dstKmNodeId, uint32_t amount)
       NS_LOG_FUNCTION(this << "relay key added" << key->GetId());
 
       NS_LOG_FUNCTION(this 
-        << "Take key " << key->GetId() << key->GetStateString() 
+        << "Take key " << key->GetId() << key->GetStateString() << " of size " << key->GetSizeInBits() 
         << " from LOCAL sourceBuffer " << localBuffer << localBuffer->GetDescription() << localBuffer->GetRemoteNodeId()
         << " and store it in RELAY sBuffer " 
         << relayBuffer << relayBuffer->GetDescription() << relayBuffer->GetRemoteNodeId()
       );
       //Then mark the key as INIT and also trigger QKDPlot (key removed)
       relayBuffer->MarkKey(key->GetId(), QKDKey::INIT); //Keys are marked INIT until relay is completed! 
-      m_keyConsumedRelay(
-        GetNode()->GetId(),
+
+      m_keyRelayedTrace
+      ( 
         GetNode()->GetId(),
         conn.GetNextHop(),
+        key->GetId(), 
         key->GetSizeInBits()
+      );
+
+      NS_LOG_FUNCTION(this 
+        << "m_keyRelayedTrace:: FirstNode -> Relay key " << key->GetId() << "\n"
+        << "MY NODE:" << GetNode()->GetId() << "\n"
+        << "nextHopNodeId: " << conn.GetNextHop() << "\n"
+        << "dstNodeId: " << dstKmNodeId
       );
     }
 
@@ -3588,7 +3682,7 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
   bool terminateRelay {false};
   std::vector<std::string> keyIds {}, keys {};
   if(!jRelayPayload.contains("repeater_node_id"))
-  { 
+  {
     NS_LOG_FUNCTION(this << "Is this first node in path?");
     Ptr<SBuffer> sBuffer = GetSBuffer(srcNodeId, "dec"); //Get decryption buffer!
     NS_ASSERT(sBuffer);
@@ -3648,7 +3742,13 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
         NS_LOG_FUNCTION(this << "Decryption key with ID" <<(it.value())["ekey_ID"] << "is not found! Relay is terminated!");
         terminateRelay = true;
       }
-      keys.push_back( m_encryptor->COTP(key->GetKeyString(),(it.value())["ekey"]) );
+      keys.push_back( 
+        m_encryptor->COTP(
+          key->GetKeyString(),
+          (it.value())["ekey"]
+        ) 
+      );
+
     }
 
     if(GetNode()->GetId() < previousNodeId) //this is master KMS
@@ -3656,7 +3756,7 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
   }
 
   //If it is relay node encrypt keys to next Hop
-  if(GetNode()->GetId() != dstNodeId && !terminateRelay)//0
+  if(GetNode()->GetId() != dstNodeId && !terminateRelay)
   {
     NS_LOG_FUNCTION(this << "Forwarding relay");
     QKDLocationRegisterEntry conn = GetController()->GetRoute(dstNodeId);
@@ -3678,8 +3778,17 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
           previousNodeId = jRelayPayload["source_node_id"];
       }
       NS_LOG_FUNCTION(this << previousNodeId);
+
       //Onda je dovoljno pratiti waste na source node kao vezu source-this node
-      //m_keyWasteRelay( previousNodeId, GetNode()->GetId(), keyIds.size()*encBuffer->GetKeySize() );
+      for(uint32_t i=0; i<keyIds.size(); i++)
+      {
+        m_keyWastedOnRelayTrace( 
+          previousNodeId, 
+          GetNode()->GetId(), 
+          keyIds[i],
+          encBuffer->GetKeySize() 
+        ); 
+      }
 
       NS_LOG_FUNCTION(this << "Relay Failed!");
       //Respond with error! Include Node ID in response!
@@ -3703,7 +3812,6 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
       Ptr<Socket> socket = GetSocketKMS(peerAddress);
       SendToSocketPairKMS(socket, packet);
       return;
-
     }
 
     nlohmann::json jRelay;
@@ -3712,16 +3820,25 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
     {
       NS_LOG_FUNCTION(this << i << keyIds.size() << encDefaultKeySize);
       Ptr<QKDKey> encKey = encBuffer->GetKey(encDefaultKeySize); //Get key with default key size!
-      if(encKey){
-        NS_LOG_FUNCTION(this << "\nMiddleNode -> Relay key -> eKeyId" << encKey->GetId()
-                             << "\nMiddleNode -> Relay key -> keyId" << keyIds[i]);
-        std::string encryptedKey = m_encryptor->COTP(encKey->GetKeyString(), keys[i]); //key, input
-        NS_LOG_FUNCTION(this << "\nMiddleNode -> Relay key -> ekey" << encryptedKey);
+      if(encKey)
+      {
+        NS_LOG_FUNCTION(this 
+          << "m_keyRelayedTrace:: MiddleNode -> Relay key -> eKeyId" << encKey->GetId() << "(keyId)" << keyIds[i] << "\n"
+          << "MY NODE:" << GetNode()->GetId() << "\n"
+          << "nextHopNodeId: " << conn.GetNextHop() << "\n"
+          << "dstNodeId: " << dstNodeId
+        );
+
+        std::string encryptedKey = m_encryptor->COTP(
+          encKey->GetKeyString(), 
+          keys[i]
+        ); //key, input 
         jRelay["keys"].push_back({ {"key_ID", keyIds[i]}, {"ekey_ID", encKey->GetId()}, {"ekey", encryptedKey} });
-        m_keyConsumedRelay(
-          GetNode()->GetId(),
+        m_keyRelayedTrace
+        ( 
           GetNode()->GetId(),
           conn.GetNextHop(),
+          keyIds[i], 
           encKey->GetSizeInBits()
         );
       }
@@ -3732,8 +3849,6 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
     jRelay["source_node_id"] = srcNodeId;
     jRelay["destination_node_id"] = dstNodeId;
     jRelay["repeater_node_id"] = GetNode()->GetId();
-
-    //m_keyConsumedRelay( GetNode()->GetId(), GetNode()->GetId(), conn.GetNextHop(), keyIds.size()*encBuffer->GetKeySize() );
 
     Ipv4Address nextHopAddress = GetPeerKmAddress(conn.GetNextHop());
     std::string headerUri = "http://" + GetAddressString(nextHopAddress);
@@ -3870,7 +3985,6 @@ QKDKeyManagerSystemApplication::ProcessRelayRequest(HTTPMessage headerIn, Ptr<So
 void
 QKDKeyManagerSystemApplication::ProcessRelayResponse(HTTPMessage headerIn)
 {
-
   std::vector<std::string> uriParams = ReadUri(headerIn.GetRequestUri());
   std::string payload = headerIn.GetMessageBodyString();
   std::string reqId = uriParams[6];
@@ -3955,7 +4069,8 @@ QKDKeyManagerSystemApplication::ProcessRelayResponse(HTTPMessage headerIn)
         ); 
         relayBuffer->MarkKey(keyId, QKDKey::READY);
       }else{
-        /*nlohmann::json jrelayResponse;
+        
+        nlohmann::json jrelayResponse;
         try{
           jrelayResponse = nlohmann::json::parse(payload);
         }catch(...){
@@ -3966,15 +4081,25 @@ QKDKeyManagerSystemApplication::ProcessRelayResponse(HTTPMessage headerIn)
           dstNodeFail = jrelayResponse["node-id"];
         else
           NS_LOG_ERROR(this << "Response is missing mandatory 'node-id' value!");
-        m_keyWasteRelay(GetNode()->GetId(), dstNodeFail, relayBuffer->GetKeySize());*/
+
+        m_keyWastedOnRelayTrace(
+          GetNode()->GetId(), 
+          dstNodeFail, 
+          keyId,
+          relayBuffer->GetKeySize()
+        );
+        
         NS_LOG_FUNCTION(this << "since relay " << reqId << " FAILED, we mark key " << keyId << " as OBSOLETE in sBuffer " 
           << relayBuffer << relayBuffer->GetDescription() << relayBuffer->GetRemoteNodeId()
         );
         relayBuffer->MarkKey(keyId, QKDKey::OBSOLETE);
       }
     }
+
     relayBuffer->SetRelayState(false);
-    NS_LOG_FUNCTION(this << "\nAmount of key material in RELAY s-buffer (READY) AFTER relay confirmation: " << relayBuffer->GetSBitCount() << " peer: " << sQuery.peerNodeId);  
+    NS_LOG_FUNCTION(this << "RELAY COMPLETED! RelayBuffer in state: " << relayBuffer->GetState() );
+    NS_LOG_FUNCTION(this << "Amount of key material in RELAY s-buffer (READY) BEFORE relay: " << relayBuffer->GetSKeyCount() << "(" << relayBuffer->GetSBitCount() << ")bits; peer: " << sQuery.peerNodeId);  
+
     dstKeyCount = relayBuffer->GetSKeyCount();
     dstMmax = relayBuffer->GetMmax();
     dstSBufferBits = relayBuffer->GetDefaultKeyCount()*relayBuffer->GetKeySize(); //Available amount of key material in LOCAL_SBUFFER
@@ -3998,6 +4123,11 @@ QKDKeyManagerSystemApplication::ProcessRelayResponse(HTTPMessage headerIn)
 /// KMS-KMS FILL
 ////////////////////////
 
+/*
+  * Fill s-buffer. In case of P2p links: take keys from QBuffer and move them to local enc/dec Sbuffers
+  * In case of long relayed links: take keys from enc local Sbuffers and move them to relay SBuffers identified with ksid
+  * Also, it can form mixed QKD+PQC keys
+  */
 void
 QKDKeyManagerSystemApplication::Fill(
   uint32_t dstKmNodeId,
@@ -4200,7 +4330,7 @@ QKDKeyManagerSystemApplication::Fill(
     } 
 
     NS_LOG_FUNCTION(this 
-      << "Take key " << key->GetId() << key->GetStateString() 
+      << "Take key " << key->GetId() << key->GetStateString() << " of size " << key->GetSizeInBits() 
       << " from sourceBuffer " << sourceBuffer << sourceBuffer->GetDescription() << sourceBuffer->GetRemoteNodeId()
       << " and store it in sBuffer " 
       << sBuffer << sBuffer->GetDescription() << sBuffer->GetRemoteNodeId()
@@ -4221,6 +4351,9 @@ QKDKeyManagerSystemApplication::Fill(
     }    
     sBuffer->MarkKey(key->GetId(), QKDKey::INIT); 
     qkdRemaining -= take;    
+    
+    //we do not track m_keyPreparedTrace here. 
+    //It is tracked when the key is indeed filled in function ProcessFillResponse
   }
 
   ///PQC 
@@ -4428,11 +4561,14 @@ QKDKeyManagerSystemApplication::ProcessFillRequest(
         sBuffer->InsertKeyToStreamSession(key);
       }
 
+      NS_ASSERT_MSG(peerNodeId == sBuffer->GetRemoteNodeId(), "DST Nodes do not match!" << peerNodeId << " - " << sBuffer->GetRemoteNodeId());
+
       uint32_t fullBits = key->GetSizeInBits();
       uint32_t startBit = qkdOffsetBits[keyId];
       uint32_t takeBits = fullBits - startBit;
       uint32_t endBit = startBit + takeBits - 1;
-      if (ok)
+
+      if(ok)
       {
         result["keys_accepted"].push_back({
           {"key_ID", keyId},
@@ -4447,10 +4583,12 @@ QKDKeyManagerSystemApplication::ProcessFillRequest(
         if(itx != m_associations004.end()){
           srcSaeId = itx->second.srcSaeId;
           dstSaeId = itx->second.dstSaeId;
-        } 
+        }
+        if(dstSaeId.empty()) dstSaeId = ksid;
 
-        //fill
-        m_keyServedTraceMixed(
+        //fillRequest
+        //take keys from local buffer and store it in sbuffer
+        m_keyPreparedTrace(
           ksid,
           srcSaeId,
           dstSaeId,
@@ -4572,9 +4710,11 @@ QKDKeyManagerSystemApplication::ProcessFillRequest(
         srcSaeId = itx->second.srcSaeId;
         dstSaeId = itx->second.dstSaeId;
       }
+      if(dstSaeId.empty()) dstSaeId = ksid;
 
-      //fill
-      m_keyServedTraceMixed(
+      //fillRequest
+      //take keys from local buffer and store it in sbuffer
+      m_keyPreparedTrace(
         ksid,
         srcSaeId, 
         dstSaeId,
@@ -4633,9 +4773,10 @@ QKDKeyManagerSystemApplication::ProcessFillRequest(
           srcSaeId = itx->second.srcSaeId;
           dstSaeId = itx->second.dstSaeId;
         }
+        if(dstSaeId.empty()) dstSaeId = ksid;
 
-        //fill
-        m_keyServedTraceMixed(
+        //fillRequest
+        m_keyPreparedTrace(
           ksid,
           srcSaeId,
           dstSaeId,
@@ -4957,9 +5098,11 @@ QKDKeyManagerSystemApplication::ProcessFillResponse(
             srcSaeId = itx->second.srcSaeId;
             dstSaeId = itx->second.dstSaeId;
           }
+          if(dstSaeId.empty()) dstSaeId = ksid;
 
-          //fill
-          m_keyServedTraceMixed(
+          //fillResponse
+          //fetch proposed key and store it in stream004 buffer
+          m_keyPreparedTrace(
             ksid,
             srcSaeId,
             dstSaeId,
@@ -5087,8 +5230,11 @@ QKDKeyManagerSystemApplication::ProcessFillResponse(
           srcSaeId = itx->second.srcSaeId;
           dstSaeId = itx->second.dstSaeId;
         }
+        if(dstSaeId.empty()) dstSaeId = ksid;
 
-        m_keyServedTraceMixed(
+        //fillResponse
+        //take keys from local buffer and store it in sbuffer
+        m_keyPreparedTrace(
           ksid,
           srcSaeId,
           dstSaeId,
@@ -5139,8 +5285,11 @@ QKDKeyManagerSystemApplication::ProcessFillResponse(
           srcSaeId = itx->second.srcSaeId;
           dstSaeId = itx->second.dstSaeId;
         }
+        if(dstSaeId.empty()) dstSaeId = ksid;
 
-        m_keyServedTraceMixed(
+        //fillResponse
+        //take keys from local buffer and store it in sbuffer
+        m_keyPreparedTrace(
           ksid,
           srcSaeId,
           dstSaeId,
@@ -5202,8 +5351,11 @@ QKDKeyManagerSystemApplication::ProcessFillResponse(
         srcSaeId = itx->second.srcSaeId;
         dstSaeId = itx->second.dstSaeId;
       }
+      if(dstSaeId.empty()) dstSaeId = ksid;
 
-      m_keyServedTraceMixed(
+      //fillResponse
+      //take keys from local buffer and store it in sbuffer
+      m_keyPreparedTrace(
         ksid,
         srcSaeId,
         dstSaeId,
@@ -5222,12 +5374,6 @@ QKDKeyManagerSystemApplication::ProcessFillResponse(
   UpdateLinkState(peerNodeId);
   HttpKMSCompleteQuery(dstKms);
 }
-
-
-
-
-
-
 
 void
 QKDKeyManagerSystemApplication::NewAppRequest(std::string ksid)
@@ -5659,12 +5805,9 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
      */
 
     std::string mergedKey;
-    // key_size_QKD is the contribution of each delivered key.  The sender
-    // selected candidate material for the complete batch, so reconstruct the
-    // same key_size_QKD * key_number bits before splitting it into supply
-    // keys.  Using only keySizeQKD left every supply key after the first one
-    // empty when an application requested more than one key.
-    uint32_t targetSize = keySizeQKD * keyNumber;
+    // The upstream skey_create message carries the QKD contribution for the
+    // complete batch; each supply key receives one equal-sized chunk.
+    uint32_t targetSize = keySizeQKD;
 
     for (size_t i = 0; i < candidateSetIds.size(); ++i)
     {
@@ -5678,8 +5821,10 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
             mergedKey += candidateKey->GetKeyString();
 
             NS_LOG_FUNCTION(this
-                << "QKD full key used: "
-                << candidateKey->GetId());
+                << i << " QKD full key used: "
+                << candidateKey->GetId() << "\t"
+                << candidateKey->GetSizeInBits()
+                );
         }
         else
         {
@@ -5707,26 +5852,36 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
 
     /*
      * Create supply keys using UUIDs received from KMS-A
-     */
+     */ 
+    NS_ASSERT(keyNumber == supplyKeyIds.size());
+    uint32_t keyChunkSize = keySizeQKD / keyNumber;
+    for (uint32_t k = 0; k < keyNumber; k++)
+      {
+        NS_LOG_FUNCTION(this << "k:" << k
+                             << "\t keyNumber: " << keyNumber
+                             << "\t mergedKey.size(): " << mergedKey.size()
+                             << "\t keyChunkSize: " << keyChunkSize
+                       );
 
-    for (size_t i = 0; i < supplyKeyIds.size(); ++i)
-    {
-        std::string keyString =
-            mergedKey.substr(0, keySizeQKD / 8);
+        uint32_t offset = k * (keyChunkSize / 8);
+        uint32_t length = keyChunkSize / 8;
+        std::string keyString = mergedKey.substr(offset, length);
+ 
+        if(!keyString.empty())
+        {
+          Ptr<QKDKey> skey =
+              CreateObject<QKDKey>(
+                  supplyKeyIds[k],
+                  keyString);
+          NS_LOG_FUNCTION(this << "PPP3: " << skey->GetSizeInBits() << " ::: " << skey->ToString());
 
-        mergedKey.erase(0, keySizeQKD / 8);
+          sBuffer->StoreSupplyKey(skey);
+          supplyKeys.push_back(skey);
 
-        Ptr<QKDKey> skey =
-            CreateObject<QKDKey>(
-                supplyKeyIds[i],
-                keyString);
-
-        sBuffer->StoreSupplyKey(skey);
-        supplyKeys.push_back(skey);
-
-        NS_LOG_FUNCTION(this
-            << "Created QKD supply key: "
-            << skey->GetId());
+          NS_LOG_FUNCTION(this
+              << "Created QKD supply key: "
+              << skey->GetId());
+        }
     }
 
     // =====================================================
@@ -5755,9 +5910,8 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
             NS_FATAL_ERROR(this << "No PQC s-buffer found!");
 
         std::string mergedKeyPQC;
-        // As for the QKD component above, the PQC candidate set covers the
-        // complete batch rather than one individual supply key.
-        uint32_t targetSizePQC = keySizePQC * keyNumber;
+        // The PQC contribution also covers the complete batch.
+        uint32_t targetSizePQC = keySizePQC;
 
         /*
          * Same logic:
@@ -5813,29 +5967,39 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
          * Create PQC supply keys
          * and final mixed keys
          */
-
-        for (size_t i = 0; i < supplyKeyIdsPQC.size(); ++i)
+        NS_ASSERT(keyNumber == supplyKeyIdsPQC.size()); 
+        uint32_t keyChunkSize = keySizePQC / keyNumber;
+        for (uint32_t k = 0; k < keyNumber; k++)
         {
-            std::string keyString =
-                mergedKeyPQC.substr(0, keySizePQC / 8);
+            NS_LOG_FUNCTION(this << "kPQC:" << k
+                                 << "\t keyNumber: " << keyNumber
+                                 << "\t mergedKeyPQC.size(): " << mergedKeyPQC.size()
+                                 << "\t keyChunkSize: " << keyChunkSize
+                           );
 
-            mergedKeyPQC.erase(0, keySizePQC / 8);
-
+            uint32_t offset = k * (keyChunkSize / 8);
+            uint32_t length = keyChunkSize / 8;
+            std::string keyString = mergedKeyPQC.substr(offset, length);
+     
+            if(!keyString.empty())
+              NS_LOG_ERROR("KeyString is empty!");
+            
             Ptr<QKDKey> skeyPQC =
                 CreateObject<QKDKey>(
-                    supplyKeyIdsPQC[i],
+                    supplyKeyIdsPQC[k],
                     keyString);
 
+            NS_LOG_FUNCTION(this << "PPP3 (PQC): " << skeyPQC->GetSizeInBits() << " ::: " << skeyPQC->ToString());
             sBufferPQC->StoreSupplyKey(skeyPQC);
 
             /*
              * Rebuild final mixed key
              */
 
-            std::string mixedId = mixedKeyIds[i];
+            std::string mixedId = mixedKeyIds[k];
 
             std::string mixedValue =
-                supplyKeys[i]->GetKeyString() +
+                supplyKeys[k]->GetKeyString() +
                 skeyPQC->GetKeyString();
 
             Ptr<QKDKey> mixedKey =
@@ -5850,12 +6014,12 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateRequest(
              * New structure uses vectors
              */
 
-            mk.qkdKeyIds.push_back(supplyKeyIds[i]);
+            mk.qkdKeyIds.push_back(supplyKeyIds[k]);
             mk.qkdStartBits.push_back(0);
             mk.qkdEndBits.push_back(
-                supplyKeys[i]->GetSizeInBits() - 1);
+                supplyKeys[k]->GetSizeInBits() - 1);
 
-            mk.pqcKeyIds.push_back(supplyKeyIdsPQC[i]);
+            mk.pqcKeyIds.push_back(supplyKeyIdsPQC[k]);
             mk.pqcStartBits.push_back(0);
             mk.pqcEndBits.push_back(
                 skeyPQC->GetSizeInBits() - 1);
@@ -5967,7 +6131,16 @@ QKDKeyManagerSystemApplication::ProcessSKeyCreateResponse(HTTPMessage headerIn, 
       NS_ASSERT(sBuffer);
       const std::string surplusKeyId = it->second[matchIndex].surplus_key_ID;
       if(!surplusKeyId.empty())
-        sBuffer->MarkKey(surplusKeyId, QKDKey::READY);
+      {
+        // Relay maintenance may consume the remainder while SKEY_CREATE is
+        // in flight.  In that case there is no reservation left to release;
+        // treating the late ACK as fatal would terminate an otherwise valid
+        // concurrent SAE delivery.
+        if(sBuffer->GetKeySizeById(surplusKeyId) > 0)
+          sBuffer->MarkKey(surplusKeyId, QKDKey::READY);
+        else
+          NS_LOG_DEBUG(this << "SKEY_CREATE surplus already consumed: " << surplusKeyId);
+      }
 
     }else{
         NS_LOG_ERROR(this << "Unexpected error");
@@ -6090,75 +6263,20 @@ QKDKeyManagerSystemApplication::ReleaseAssociation(std::string ksid, std::string
   { //Remove key stream
     m_associations004.erase(it);
   }else{
-    std::string preservedKeyString;
-    uint32_t presentKeyMaterial {0};
     
-    //Remove keys to sync index. Trace consumed keys
+    //Remove keys to sync index. Trace WASTED keys
     while(it->second.stre_buffer->GetNextIndex() && it->second.stre_buffer->GetNextIndex() < syncIndex)
     { //@toDo GetNextIndex could be 0, but for now, we assume association is closed(released) sometimes after
-		NS_LOG_FUNCTION(this << "emir1" << it->second.stre_buffer->GetNextIndex());
-		Ptr<QKDKey> key = it->second.stre_buffer->GetStreamKey();
-		presentKeyMaterial += key->GetSizeInBits();
-     
-    //etsi004
-		m_keyServedTraceMixed(
-			it->second.srcSaeId,
-      it->second.srcSaeId,
-      it->second.dstSaeId,
-			it->second.srcNodeId,
-			it->second.dstNodeId,
-			key->GetId(), 
-			key->GetSizeInBits(), 
-			std::string("qkd")
-		); 
-
-		m_keyConsumedLink( //Is always p2p link now for 004
-			it->second.srcNodeId, //Source
-			it->second.dstNodeId, //Destination
-			//{ksid + key->GetId()},  //Key ID should be combination of ksid+index!
-			key->GetSizeInBits() //Size of key
-		); 
-    }
-    
-    //Get remaining keys, and group them in one string
-    while(true)
-    {
+      NS_LOG_FUNCTION(this << it->second.stre_buffer->GetNextIndex());
       Ptr<QKDKey> key = it->second.stre_buffer->GetStreamKey();
-      if(key)
-        preservedKeyString += key->GetKeyString();
-      else
-        break;
+      m_keyWastedOnRelayTrace( 
+        it->second.srcNodeId, 
+        it->second.dstNodeId, 
+        key->GetId(),
+        key->GetSizeInBits()
+      ); 
     }
-
-    if(!preservedKeyString.empty())
-    {
-      
-      Ptr<QBuffer> qBuffer = GetQBuffer(GetController()->GetRoute(it->second.dstSaeId).GetDestinationKmNodeId());
-      if(qBuffer)
-      {
-        NS_LOG_FUNCTION(this << "preserved key material" << preservedKeyString.size());
-        Ptr<QKDEncryptor> encryptor = CreateObject<QKDEncryptor>(64); //64 bits long key IDs. Collisions->0
-        std::string hashInput {surplusKeyId + ksid}; //HASH input for key id
-        NS_ASSERT(!hashInput.empty());
-
-        uint32_t blockSize {qBuffer->GetKeySize()/8}, blockNum {0}; //Current default key size for connection
-        while(!preservedKeyString.empty())
-        {
-          std::string keyValueTemp {preservedKeyString};
-          if(preservedKeyString.size() >= blockSize)
-            keyValueTemp = preservedKeyString.substr(0, blockSize); //Take portion of the QKD-key value for KMA-key
-          std::string completeHashInput = hashInput + std::to_string(blockNum++); //Complete HASH input
-          std::string blockKeyId {encryptor->SHA1(completeHashInput)}; //Generate KMA-key ID based on the HASH output
-          NS_LOG_FUNCTION(this << "store key " << blockKeyId << keyValueTemp);
-          Ptr<QKDKey> tempKey = CreateObject<QKDKey>(blockKeyId, keyValueTemp);
-          qBuffer->StoreKey(tempKey); //Store KMA-key in QKD buffer
-          preservedKeyString.erase(0, blockSize); //Update QKD-key value
-        }
-
-      }else
-        NS_FATAL_ERROR(this << "unknown q-buffer");
-
-    }
+     
     m_associations004.erase(it);
 
   }
@@ -6191,26 +6309,22 @@ QKDKeyManagerSystemApplication::ProcessKMSCloseResponse(HTTPMessage headerIn, Pt
     return;
 
   }
-  if(headerIn.GetStatus() == HTTPMessage::NotAcceptable){ //Remove key stream. Trace discarded key material
-    //must record key consumed
+
+  if(headerIn.GetStatus() == HTTPMessage::NotAcceptable)
+  { 
+    //Remove key stream. Trace WASTED key material
     uint32_t presentKeyMaterial {0};
     while(true){
       Ptr<QKDKey> key {a->second.stre_buffer->GetStreamKey()};
-      if(key){
+      if(key)
+      {
         presentKeyMaterial += key->GetSizeInBits(); 
-
-        //etsi004
-        m_keyServedTraceMixed(
-    			a->second.srcSaeId,
-          a->second.srcSaeId,
-          a->second.dstSaeId,
-    			a->second.srcNodeId,
-    			a->second.dstNodeId,
-    			key->GetId(), 
-    			key->GetSizeInBits(), 
-    			std::string("qkd")
-    		);  
-        m_keyConsumedLink(a->second.srcNodeId, a->second.dstNodeId, key->GetSizeInBits());
+        m_keyWastedOnRelayTrace( 
+          a->second.srcNodeId, 
+          a->second.dstNodeId, 
+          key->GetId(),
+          key->GetSizeInBits() 
+        );
       }else
         break;
 
@@ -6219,7 +6333,8 @@ QKDKeyManagerSystemApplication::ProcessKMSCloseResponse(HTTPMessage headerIn, Pt
 
   }else if(headerIn.GetStatus() == HTTPMessage::Ok){ //Perserve key material if any. Remove key stream. Trace discarded key material
     uint32_t peerSyncIndex {0}, localSyncIndex {it->second[0].sync_index};
-    if(jcloseResponse.contains("sync_index")){
+    if(jcloseResponse.contains("sync_index"))
+    {
       peerSyncIndex = jcloseResponse["sync_index"];
       if(peerSyncIndex > localSyncIndex)
         localSyncIndex = peerSyncIndex;
@@ -6227,33 +6342,25 @@ QKDKeyManagerSystemApplication::ProcessKMSCloseResponse(HTTPMessage headerIn, Pt
       ReleaseAssociation(it->second[0].ksid, it->second[0].surplus_key_ID, localSyncIndex);
 
     }else{
-      //must record key consumed 
+      //must record key WASTED 
       uint32_t presentKeyMaterial {0};
       while(true){
         Ptr<QKDKey> key {a->second.stre_buffer->GetStreamKey()};
         if(key)
         {
-			NS_LOG_FUNCTION(this << key->GetId());
-			presentKeyMaterial += key->GetSizeInBits(); 
-
-      //etsi004
-			m_keyServedTraceMixed(
-				a->second.srcSaeId,
-        a->second.srcSaeId,
-        a->second.dstSaeId,
-				a->second.srcNodeId,
-				a->second.dstNodeId,
-				key->GetId(), 
-				key->GetSizeInBits(), 
-				std::string("qkd")
-			); 
-          m_keyConsumedLink(a->second.srcNodeId, a->second.dstNodeId, key->GetSizeInBits());
+    			NS_LOG_FUNCTION(this << key->GetId());
+    			presentKeyMaterial += key->GetSizeInBits(); 
+          m_keyWastedOnRelayTrace( 
+            a->second.srcNodeId, 
+            a->second.dstNodeId, 
+            key->GetId(),
+            key->GetSizeInBits()
+          );
         }else
           break;
 
       }
       m_associations004.erase(a);
-
     }
 
   }else
@@ -6375,6 +6482,10 @@ QKDKeyManagerSystemApplication::FetchRequestType(std::string s)
 
       return ETSI_QKD_004_CLOSE;
 
+  } else if(s == "session_discovery") {
+
+      return ETSI_QKD_004_DISCOVER_SESSION;
+
   } else if(s == "new_app") {
 
       return NEW_APP;
@@ -6433,7 +6544,7 @@ QKDKeyManagerSystemApplication::CreateKeyContainer(std::vector<Ptr<QKDKey>> keys
       std::string byteKey = keys[i]->ConsumeKeyString();
       // Convert to Base64 for JSON storage
       std::string encodedKey = m_encryptor->Base64Encode(byteKey); 
-      NS_LOG_FUNCTION(this << "KEY" << i+1 << keys[i]->GetId() << encodedKey << "\n");
+      NS_LOG_FUNCTION(this << "KEY" << i+1 << keys[i]->GetId() << " of size " << byteKey.size() << " encoded to " << encodedKey << " of size " << encodedKey.size() << "\n");
       jkeys["keys"].push_back({ {"key_ID", keys[i]->GetId()}, {"key", encodedKey} });
     }
 
@@ -6572,7 +6683,7 @@ QKDKeyManagerSystemApplication::CreateEtsi004KeyStreamSession(
     {
         ksid = GenerateUUID(); 
         NS_LOG_FUNCTION(this << "New ksid defined: " << ksid << srcSaeId << dstSaeId << inQos.chunkSize);
-        m_ksidGenerated(
+        m_ksidGeneratedTrace(
           ksid,
           srcSaeId,
           dstSaeId,
@@ -6585,22 +6696,6 @@ QKDKeyManagerSystemApplication::CreateEtsi004KeyStreamSession(
 
     return ksid;
 }
-
-std::string
-QKDKeyManagerSystemApplication::GenerateRandomString(const int len, const uint32_t seed){
-    std::string tmp_s;
-    static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-    //if(seed == 0)
-    //    srand( m_kms_key_id );
-    //else
-    //    srand( seed );
-    for(int i = 0; i < len; ++i){
-        tmp_s += alphanum[rand() %(sizeof(alphanum) - 1)];
-    }
-    return tmp_s;
-}
+ 
 
 } // Namespace ns3

@@ -1,0 +1,47 @@
+diff --git a/configure.ac b/configure.ac
+index 4485378..88a2056 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -281,3 +281,4 @@ ARG_ENABL_SET([led],            [enable plugin to control LEDs on IKEv2 activity
+ ARG_ENABL_SET([load-tester],    [enable load testing plugin for IKEv2 daemon.])
++ARG_ENABL_SET([qkd-ppk],        [enable dynamic QKD-backed RFC 8784 PPK provider.])
+ ARG_ENABL_SET([lookip],         [enable fast virtual IP lookup and notification plugin.])
+ ARG_ENABL_SET([radattr],        [enable plugin to inject and process custom RADIUS attributes as IKEv2 client.])
+@@ -1510,5 +1511,6 @@ ADD_PLUGIN([attr],                 [c charon])
+ ADD_PLUGIN([attr-sql],             [c charon])
+ ADD_PLUGIN([load-tester],          [c charon])
++ADD_PLUGIN([qkd-ppk],              [c charon])
+ ADD_PLUGIN([kernel-libipsec],      [c charon cmd])
+ ADD_PLUGIN([kernel-wfp],           [c charon])
+ ADD_PLUGIN([kernel-iph],           [c charon])
+@@ -1688,4 +1690,5 @@ AM_CONDITIONAL(USE_DHCP, test x$dhcp = xtrue)
+ AM_CONDITIONAL(USE_LOAD_TESTER, test x$load_tester = xtrue)
++AM_CONDITIONAL(USE_QKD_PPK, test x$qkd_ppk = xtrue)
+ AM_CONDITIONAL(USE_HA, test x$ha = xtrue)
+ AM_CONDITIONAL(USE_KERNEL_NETLINK, test x$kernel_netlink = xtrue)
+ AM_CONDITIONAL(USE_KERNEL_PFKEY, test x$kernel_pfkey = xtrue)
+@@ -2062,5 +2065,6 @@ AC_CONFIG_FILES([
+ 	src/libcharon/plugins/dhcp/Makefile
+ 	src/libcharon/plugins/load_tester/Makefile
++	src/libcharon/plugins/qkd_ppk/Makefile
+ 	src/libcharon/plugins/resolve/Makefile
+ 	src/libcharon/plugins/attr/Makefile
+ 	src/libcharon/plugins/attr_sql/Makefile
+diff --git a/src/libcharon/Makefile.am b/src/libcharon/Makefile.am
+index ab384bc..9db40db 100644
+--- a/src/libcharon/Makefile.am
++++ b/src/libcharon/Makefile.am
+@@ -207,6 +207,13 @@ if MONOLITHIC
+ endif
+ endif
+ 
++if USE_QKD_PPK
++  SUBDIRS += plugins/qkd_ppk
++if MONOLITHIC
++  libcharon_la_LIBADD += plugins/qkd_ppk/libstrongswan-qkd-ppk.la
++endif
++endif
++
+ if USE_SAVE_KEYS
+  SUBDIRS += plugins/save_keys
+ if MONOLITHIC

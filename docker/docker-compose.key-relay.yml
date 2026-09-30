@@ -83,9 +83,8 @@ services:
     networks:
       net_qkd_alice_relay: { ipv4_address: 192.168.111.1 }
       net_alice_pp_kms: { ipv4_address: 192.168.112.1 }
-    # Waits for KMS Alice to confirm (via ListenReady/healthcheck) that it is
-    # already in Listen() before starting. The model's own connection retry
-    # also covers restarts or transient losses afterward.
+    # The master starts after the peer listener and both local KMS paths are
+    # ready. The model's own connection retry covers transient losses later.
     depends_on:
       pp_relay_a:
         condition: service_healthy

@@ -955,8 +955,14 @@ def main() -> int:
         help="transport isolates process/network overhead; qkd also consumes OTP/VMAC keys",
     )
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="reuse successful run results already present in --output-dir",
+    )
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
+    if args.resume and args.output_dir is None:
+        parser.error("--resume requires --output-dir")
     encryption_type = 0 if args.workload_profile == "transport" else 1
     authentication_type = 0 if args.workload_profile == "transport" else 1
     versions = ("old", "new") if args.version == "both" else (args.version,)
@@ -984,6 +990,34 @@ def main() -> int:
         temp_directory = Path(temporary)
         try:
             for version, topology, repetition in cases:
+                run_dir = output_dir / f"{version}-{topology}-run-{repetition}"
+                result_file = run_dir / "result.json"
+                if args.resume and result_file.is_file():
+                    try:
+                        existing = json.loads(result_file.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        existing = None
+                    controls = existing.get("controls", {}) if existing else {}
+                    reusable = bool(
+                        existing
+                        and existing.get("version") == version
+                        and existing.get("topology") == topology
+                        and existing.get("repetition") == repetition
+                        and controls.get("measurement_duration_seconds") == args.duration
+                        and controls.get("keys_per_request") == args.keys_per_request
+                        and controls.get("workload_profile") == args.workload_profile
+                        and controls.get("encryption_type") == encryption_type
+                        and controls.get("authentication_type") == authentication_type
+                        and existing.get("comparison", {}).get("both_passed") is True
+                    )
+                    if reusable:
+                        records.append(existing)
+                        print(
+                            f"[COMPARE] {version}/{topology}/run-{repetition} "
+                            "status=REUSED",
+                            flush=True,
+                        )
+                        continue
                 print(f"[COMPARE] {version}/{topology}/run-{repetition}", flush=True)
                 try:
                     baseline = run_monolithic(
@@ -999,7 +1033,6 @@ def main() -> int:
                     )
                 except Exception as error:
                     testbed = failed_deployment("distributed", error)
-                run_dir = output_dir / f"{version}-{topology}-run-{repetition}"
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "monolithic.log").write_text(
                     baseline.pop("log"), encoding="utf-8")
@@ -1035,7 +1068,7 @@ def main() -> int:
                     "monolithic": baseline, "distributed": testbed,
                     "comparison": summarize_pair(topology, baseline, testbed),
                 }
-                (run_dir / "result.json").write_text(
+                result_file.write_text(
                     json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
                 records.append(record)
         finally:

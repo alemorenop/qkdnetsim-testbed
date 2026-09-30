@@ -25,6 +25,17 @@
 
 namespace ns3 {
 
+  namespace {
+
+  void
+  ConfigureConnectionRetry(Ptr<Socket> socket)
+  {
+    socket->SetAttributeFailSafe("ConnTimeout", TimeValue(Seconds(1)));
+    socket->SetAttributeFailSafe("ConnCount", UintegerValue(3));
+  }
+
+  } // namespace
+
   NS_LOG_COMPONENT_DEFINE("QKDPostprocessingApplication");
 
 
@@ -99,7 +110,7 @@ namespace ns3 {
       .AddTraceSource("RxKMS", "A packet has been received from LKMS",
                      MakeTraceSourceAccessor(&QKDPostprocessingApplication::m_rxTraceKMS),
                      "ns3::QKDPostprocessingApplication::RxLKMS")
-      .AddTraceSource("ListenReady", "The post-processing TCP listener completed Bind and Listen",
+      .AddTraceSource("ListenReady", "The post-processing TCP listener and local KMS connection are ready",
                      MakeTraceSourceAccessor(&QKDPostprocessingApplication::m_listenReadyTrace),
                      "ns3::QKDPostprocessingApplication::ListenReady")
     ;
@@ -249,7 +260,6 @@ std::string bitsToBytes(const std::string& bits) {
     );
     if(m_sinkSocket->Bind(sinkAddress) == -1) NS_FATAL_ERROR("Failed to bind socket " << m_local);
     m_sinkSocket->Listen();
-    m_listenReadyTrace(GetNode()->GetId());
     m_sinkSocket->ShutdownSend();
     m_sinkSocket->SetRecvCallback(MakeCallback(&QKDPostprocessingApplication::HandleRead, this));
     m_sinkSocket->SetAcceptCallback(
@@ -261,28 +271,29 @@ std::string bitsToBytes(const std::string& bits) {
       MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this)
     );
 
-    // SEND socket settings
-    if(!m_sendSocket) m_sendSocket = Socket::CreateSocket(GetNode(), m_tid);
-    Ptr<Ipv4L3Protocol> ipv4 = GetNode()->GetObject<Ipv4L3Protocol>();
-    uint32_t interface = ipv4->GetInterfaceForAddress( InetSocketAddress::ConvertFrom(m_local).GetIpv4() );
-    Ptr<NetDevice> netDevice = ipv4->GetNetDevice(interface);
-    //m_sendSocket->BindToNetDevice(netDevice);
-    m_sendSocket->ShutdownRecv();
-    m_sendSocket->SetConnectCallback(
-      MakeCallback(&QKDPostprocessingApplication::ConnectionSucceeded, this),
-      MakeCallback(&QKDPostprocessingApplication::ConnectionFailed, this)
-    );
-    m_sendSocket->SetDataSentCallback(
-      MakeCallback(&QKDPostprocessingApplication::DataSend, this)
-    );
-    m_sendSocket->SetCloseCallbacks(
-      MakeCallback(&QKDPostprocessingApplication::HandlePeerClose, this),
-      MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this)
-    );
-    m_sendSocket->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
-    m_sendSocket->Connect(m_peer);
     m_peerSocketConnected = false;
-    m_peerConnectCheckEvent = Simulator::Schedule(Seconds(1.0), &QKDPostprocessingApplication::PeerConnectCheck, this);
+
+    // Post-processing traffic is initiated by the master. The slave only
+    // needs the accepted socket to receive and store the same key material.
+    // Connect() is deferred until the local KMS is reachable.
+    if(m_master)
+    {
+      if(!m_sendSocket) m_sendSocket = Socket::CreateSocket(GetNode(), m_tid);
+      ConfigureConnectionRetry(m_sendSocket);
+      m_sendSocket->ShutdownRecv();
+      m_sendSocket->SetConnectCallback(
+        MakeCallback(&QKDPostprocessingApplication::ConnectionSucceeded, this),
+        MakeCallback(&QKDPostprocessingApplication::ConnectionFailed, this)
+      );
+      m_sendSocket->SetDataSentCallback(
+        MakeCallback(&QKDPostprocessingApplication::DataSend, this)
+      );
+      m_sendSocket->SetCloseCallbacks(
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerClose, this),
+        MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this)
+      );
+      m_sendSocket->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
+    }
 
     NS_LOG_FUNCTION(
       this <<
@@ -338,6 +349,7 @@ std::string bitsToBytes(const std::string& bits) {
 
     // SEND socket settings
     if(!m_sendSocketKMS) m_sendSocketKMS = Socket::CreateSocket(GetNode(), m_tid);
+    ConfigureConnectionRetry(m_sendSocketKMS);
     Ipv4Address localIpv4 = InetSocketAddress::ConvertFrom(m_local).GetIpv4();
     /*InetSocketAddress senderKMS = InetSocketAddress(
       InetSocketAddress::ConvertFrom(m_kms).GetIpv4(), //destination address
@@ -890,7 +902,6 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
 
         }
       }
-      SendData();
   }
 
   void
@@ -1037,7 +1048,6 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication, Connection Failed");
     if(socket == m_sendSocket)
     {
-      socket->Close();
       m_sendSocket = nullptr;
       m_peerSocketConnected = false;
       if(!m_peerConnectCheckEvent.IsPending())
@@ -1055,6 +1065,7 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
     if(!m_sendSocket)
     {
       m_sendSocket = Socket::CreateSocket(GetNode(), m_tid);
+      ConfigureConnectionRetry(m_sendSocket);
       m_sendSocket->ShutdownRecv();
       m_sendSocket->SetConnectCallback(
         MakeCallback(&QKDPostprocessingApplication::ConnectionSucceeded, this),
@@ -1065,14 +1076,12 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
         MakeCallback(&QKDPostprocessingApplication::HandlePeerClose, this),
         MakeCallback(&QKDPostprocessingApplication::HandlePeerError, this));
       m_sendSocket->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
+      m_sendSocket->Connect(m_peer);
     }
 
-    // Do not destroy a socket while TCP is still in SYN_SENT: delayed packets
-    // for the discarded endpoint can trip TcpSocketBase assertions. Calling
-    // Connect again is harmless while it is pending and retries once TCP has
-    // returned the socket to CLOSED after a failed attempt.
-    m_sendSocket->Connect(m_peer);
-
+    // TCP owns retransmission while the socket is in SYN_SENT.  Once its
+    // bounded retry cycle fails, ConnectionFailed() clears the socket and a
+    // later check creates a fresh endpoint.
     m_peerConnectCheckEvent = Simulator::Schedule(Seconds(1.0), &QKDPostprocessingApplication::PeerConnectCheck, this);
   }
 
@@ -1092,6 +1101,19 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
         m_kmsSocketConnected = true;
         if(m_kmsConnectCheckEvent.IsPending())
           Simulator::Cancel(m_kmsConnectCheckEvent);
+
+        m_listenReadyTrace(GetNode()->GetId());
+
+        if(m_master && !m_peerSocketConnected && m_sendSocket)
+        {
+          m_sendSocket->Connect(m_peer);
+          if(m_peerConnectCheckEvent.IsPending())
+            Simulator::Cancel(m_peerConnectCheckEvent);
+          m_peerConnectCheckEvent = Simulator::Schedule(
+            Seconds(1.0),
+            &QKDPostprocessingApplication::PeerConnectCheck,
+            this);
+        }
       }
   }
 
@@ -1102,7 +1124,6 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
     NS_LOG_FUNCTION(this << "QKDPostprocessingApplication-KMS Connection Failed");
     if(socket == m_sendSocketKMS)
     {
-      socket->Close();
       m_sendSocketKMS = nullptr;
       m_kmsSocketConnected = false;
       if(!m_kmsConnectCheckEvent.IsPending())
@@ -1120,6 +1141,7 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
     if(!m_sendSocketKMS)
     {
       m_sendSocketKMS = Socket::CreateSocket(GetNode(), m_tid);
+      ConfigureConnectionRetry(m_sendSocketKMS);
       m_sendSocketKMS->Bind();
       m_sendSocketKMS->ShutdownRecv();
       m_sendSocketKMS->SetConnectCallback(
@@ -1131,8 +1153,8 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
           MakeCallback(&QKDPostprocessingApplication::HandlePeerCloseKMS, this),
           MakeCallback(&QKDPostprocessingApplication::HandlePeerErrorKMS, this));
       m_sendSocketKMS->TraceConnectWithoutContext("RTT", MakeCallback(&QKDPostprocessingApplication::RegisterAckTime, this));
+      m_sendSocketKMS->Connect(m_kms);
     }
-    m_sendSocketKMS->Connect(m_kms);
 
     m_kmsConnectCheckEvent = Simulator::Schedule(Seconds(2.0), &QKDPostprocessingApplication::KmsConnectCheck, this);
   }
@@ -1169,7 +1191,8 @@ QKDPostprocessingApplication::PacketReceived(const Ptr<Packet> &p, const Address
           "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
           "abcdefghijklmnopqrstuvwxyz";
       //srand( m_internalID );
-      for(int i = 0; i < len; ++i){
+      for(int i = 0; i < len; ++i)
+      {
           tmp_s += alphanum[rand() %(sizeof(alphanum) - 1)];
       }
       return tmp_s;

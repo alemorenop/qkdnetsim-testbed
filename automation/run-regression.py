@@ -140,7 +140,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-negative-tests",
         action="store_true",
-        help="Skip the expected mismatched-key rejection case",
+        help="Skip the expected mismatched-key and mismatched-PPK rejection cases",
     )
     parser.add_argument(
         "--keep-core",
@@ -554,7 +554,12 @@ def main() -> int:
             # intentionally a test setting, not the production default.
             os.environ["QKD_BUFFER_THRESHOLD_BITS"] = "400000000"
     cases = matrix(args)
-    if not args.skip_negative_tests:
+    selected_negative = any(
+        name.startswith("negative-") for name in args.selected_cases or ()
+    )
+    if not args.skip_negative_tests and (
+        not (args.pqc or args.pqc_adaptive) or selected_negative
+    ):
         cases.append(negative_case(args))
         cases.append(negative_ppk_case(args))
     if args.selected_cases:

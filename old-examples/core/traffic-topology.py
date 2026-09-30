@@ -227,6 +227,13 @@ def parse_kms_statistics(text: str) -> dict[str, list[dict[str, Any]]]:
             "source_node": int(src_node_match.group(1)) if src_node_match else None,
             "destination_node": int(dst_node_match.group(1)) if dst_node_match else None,
         })
+    prepared = [
+        {"type": kind, "bits": int(bits), "key_id": key_id}
+        for kind, bits, key_id in re.findall(
+            r"Prepared key contribution type=(\S+)\s+bits=(\d+)\s+keyId=(\S+)",
+            text,
+        )
+    ]
     legacy_supplied = [
         {"type": "qkd", "bits": int(bits), "key_id": key_id, "ksid": app_id,
          "source_node": None, "destination_node": None}
@@ -280,6 +287,7 @@ def parse_kms_statistics(text: str) -> dict[str, list[dict[str, Any]]]:
     ]
     return {
         "generated": generated,
+        "prepared": prepared,
         "supplied": supplied,
         "application_supplied": application_supplied,
         "relayed": relayed,
@@ -742,10 +750,9 @@ def verify_relay_evidence(scenario: Scenario) -> dict[str, int]:
     containers = scenario.statistics_containers
     logs = {name: docker("logs", name, check=False).stdout for name in containers}
     relay_consumed = sum(text.count("Relay consumed") for text in logs.values())
-    # Pre-PQC QKDNetSim reports KeyServed; the current release reports every
-    # supplied QKD/PQC component through KeyServedMixed.  Both are valid KMS
-    # delivery evidence and the application Rx trace above is the end-to-end
-    # success criterion.
+    # Historical images expose KeyServed or KeyServedMixed; v3.1.4 exposes
+    # KeyDelivered. The fixture prints the same service marker for each of
+    # these sources, while application Rx remains the end-to-end criterion.
     alice_served = count_key_delivery_events(logs[scenario.readiness_containers[0]])
     bob_served = count_key_delivery_events(logs[scenario.readiness_containers[1]])
     if relay_consumed < 1 or alice_served < 1 or bob_served < 1:

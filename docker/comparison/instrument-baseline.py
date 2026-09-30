@@ -221,7 +221,8 @@ def add_measurement_window(source: str) -> str:
 
 
 def prepare_padua_reference(root: Path, mixed: bool,
-                            simulator: str = "realtime") -> None:
+                            simulator: str = "realtime",
+                            machine_traces: bool = True) -> None:
     """Make the JSON-driven upstream example usable as a single-process control."""
     path = root / "examples" / "examples_qkdnetsim_etsi_combined_input.cc"
     source = path.read_text(encoding="utf-8")
@@ -280,7 +281,8 @@ def prepare_padua_reference(root: Path, mixed: bool,
         "uint32_t showKeyAdded = 1;",
         "double comparisonMeasurementStart = 0.0;\nuint32_t showKeyAdded = 1;",
     )
-    source = add_accounting_traces(source, mixed)
+    if machine_traces:
+        source = add_accounting_traces(source, mixed)
     path.write_text(source, encoding="utf-8")
     (root / "examples" / "padua-reference-input.json").write_text(
         json.dumps(PADUA_INPUT, indent=2), encoding="utf-8"
@@ -289,11 +291,16 @@ def prepare_padua_reference(root: Path, mixed: bool,
 
 def main() -> int:
     if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and
-                                     sys.argv[2] not in ("realtime", "default")):
+                                     sys.argv[2] not in (
+                                         "realtime", "default", "padua-default"
+                                     )):
         raise SystemExit(
-            "usage: instrument-baseline.py ARCHIVE_ROOT [realtime|default]")
+            "usage: instrument-baseline.py ARCHIVE_ROOT "
+            "[realtime|default|padua-default]")
     root = Path(sys.argv[1])
-    simulator = sys.argv[2] if len(sys.argv) == 3 else "realtime"
+    mode = sys.argv[2] if len(sys.argv) == 3 else "realtime"
+    padua_only = mode == "padua-default"
+    simulator = "default" if padua_only else mode
     examples = root / "examples"
     direct = examples / "examples_qkdnetsim_etsi_014.cc"
     relay = examples / "examples_qkdnetsim_secoqc.cc"
@@ -303,66 +310,118 @@ def main() -> int:
     has_mixed_trace = 'AddTraceSource("KeyServedMixed"' in (
         root / "model" / "qkd-key-manager-system-application.cc"
     ).read_text(encoding="utf-8")
-    prepare_padua_reference(root, has_mixed_trace, simulator)
-    direct_text = remove_second_application(direct.read_text(encoding="utf-8"))
-    direct_text = direct_text.replace(
-        "uint32_t ppKeySize = 8192;", "uint32_t ppKeySize = 256;"
+    prepare_padua_reference(
+        root, has_mixed_trace, simulator, machine_traces=not padua_only
     )
-    direct_text = direct_text.replace(
-        'cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
-        'cmd.AddValue ("appRate", "Offered application traffic rate (bps)", appRate);\n'
-        '    cmd.AddValue ("appPacketSize", "Application payload size (bytes)", appPacketSize);\n'
-        '    cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
-    )
-    direct.write_text(
-        add_measurement_window(add_accounting_traces(direct_text, has_mixed_trace)),
-        encoding="utf-8",
-    )
+    if not padua_only:
+        direct_text = remove_second_application(direct.read_text(encoding="utf-8"))
+        direct_text = direct_text.replace(
+            "uint32_t ppKeySize = 8192;", "uint32_t ppKeySize = 256;"
+        )
+        direct_text = direct_text.replace(
+            'cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
+            'cmd.AddValue ("appRate", "Offered application traffic rate (bps)", appRate);\n'
+            '    cmd.AddValue ("appPacketSize", "Application payload size (bytes)", appPacketSize);\n'
+            '    cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
+        )
+        direct.write_text(
+            add_measurement_window(
+                add_accounting_traces(direct_text, has_mixed_trace)
+            ),
+            encoding="utf-8",
+        )
 
-    relay_text = relay.read_text(encoding="utf-8")
-    relay_text = relay_text.replace(
-        "uint32_t ppKeySize = 8192;", "uint32_t ppKeySize = 256;"
-    ).replace(
-        "DataRate (7000), //@testing relay errors, use different ppKeyRate: e.g., 7000",
-        "DataRate (ppKeyRate), //comparison workload: equal rate on every QKD link",
-    )
-    relay_text = relay_text.replace(
-        'cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
-        'cmd.AddValue ("numberOfKeyToFetchFromKMS", "Keys per request", '
-        'numberOfKeyToFetchFromKMS);\n'
-        'cmd.AddValue ("appRate", "Offered application traffic rate (bps)", appRate);\n'
-        '    cmd.AddValue ("appPacketSize", "Application payload size (bytes)", appPacketSize);\n'
-        '    cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
-    )
-    relay.write_text(
-        add_measurement_window(add_accounting_traces(relay_text, has_mixed_trace)),
-        encoding="utf-8",
-    )
+        relay_text = relay.read_text(encoding="utf-8")
+        relay_text = relay_text.replace(
+            "uint32_t ppKeySize = 8192;", "uint32_t ppKeySize = 256;"
+        ).replace(
+            "DataRate (7000), //@testing relay errors, use different ppKeyRate: e.g., 7000",
+            "DataRate (ppKeyRate), //comparison workload: equal rate on every QKD link",
+        )
+        relay_text = relay_text.replace(
+            'cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
+            'cmd.AddValue ("numberOfKeyToFetchFromKMS", "Keys per request", '
+            'numberOfKeyToFetchFromKMS);\n'
+            'cmd.AddValue ("appRate", "Offered application traffic rate (bps)", appRate);\n'
+            '    cmd.AddValue ("appPacketSize", "Application payload size (bytes)", appPacketSize);\n'
+            '    cmd.AddValue ("trace", "Enable datapath stats and pcap traces", trace);',
+        )
+        relay.write_text(
+            add_measurement_window(
+                add_accounting_traces(relay_text, has_mixed_trace)
+            ),
+            encoding="utf-8",
+        )
 
-    # 1cda34c already contains this AES-only guard.  525e9bf accidentally
-    # dropped it, causing OTP keys to be evicted on first use.  Apply the same
-    # correctness condition to the archived upstream and distributed trees so
-    # the deployment boundary, rather than a known regression, is compared.
+    # Preserve AES lifetime semantics while enforcing genuine one-time use for
+    # OTP. The current distributed tree removes an OTP key immediately after
+    # selecting it; apply the same correctness rule to the current monolithic
+    # Padua control so architecture is the only independent variable.
     app014 = root / "model" / "qkd-app-014.cc"
     app014_text = app014.read_text(encoding="utf-8")
-    unguarded = "if( localKey->GetLifetime() < 2*m_size ){"
-    guarded = (
-        "if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && "
-        "localKey->GetLifetime() < 2*m_size ){"
-    )
-    app014_text = app014_text.replace(unguarded, guarded)
-    if app014_text.count(guarded) != 2:
-        raise RuntimeError("expected two AES-only key-lifetime guards")
+    if padua_only:
+        master_old = '''        if(localKey->GetLifetime() < 2*m_size )
+        {
+          NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
+          m_encStore.erase(it);
+        }else
+          it->second->UseLifetime(m_size);'''
+        master_new = '''        if(m_encryptionType == QKDEncryptor::QKDCRYPTO_OTP){
+          m_encStore.erase(it);
+        }else if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && localKey->GetLifetime() < 2*m_size ){
+          NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
+          m_encStore.erase(it);
+        }else
+          it->second->UseLifetime(m_size);'''
+        slave_old = '''      if(localKey->GetType() == AppKey::ENCRYPTION)
+      {
+        if(localKey->GetLifetime() < 2*m_size )
+        {
+          NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
+          m_commonStore.erase(it);
+        }else
+          it->second->UseLifetime(m_size);
+
+      }else{ //Authenticaiton key'''
+        slave_new = '''      if(localKey->GetType() == AppKey::ENCRYPTION)
+      {
+        if(m_encryptionType == QKDEncryptor::QKDCRYPTO_OTP){
+          m_commonStore.erase(it);
+        }else if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && localKey->GetLifetime() < 2*m_size ){
+          NS_LOG_FUNCTION(this << "lifetime expired! key " << localKey->GetId() << " removed");
+          m_commonStore.erase(it);
+        }else
+          it->second->UseLifetime(m_size);
+
+      }else{ //Authenticaiton key'''
+        if app014_text.count(master_old) != 1 or app014_text.count(slave_old) != 1:
+            raise RuntimeError("current OTP single-use anchors not found exactly once")
+        app014_text = app014_text.replace(master_old, master_new)
+        app014_text = app014_text.replace(slave_old, slave_new)
+    else:
+        lifetime_test = r"localKey->GetLifetime\(\)\s*<\s*2\s*\*\s*m_size"
+        app014_text = re.sub(
+            rf"if\s*\(\s*({lifetime_test})\s*\)",
+            r"if(m_encryptionType == QKDEncryptor::QKDCRYPTO_AES && \1)",
+            app014_text,
+        )
+        guarded_lifetime = re.compile(
+            rf"m_encryptionType\s*==\s*QKDEncryptor::QKDCRYPTO_AES\s*&&\s*"
+            rf"{lifetime_test}"
+        )
+        if len(guarded_lifetime.findall(app014_text)) != 2:
+            raise RuntimeError("expected two AES-only key-lifetime guards")
     app014.write_text(app014_text, encoding="utf-8")
     remove_transform_accounting_assertions(root)
     apply_prefetch_policy(root)
 
-    # Keep keySize_qkd/keySize_pqc in bits *per returned key*.  Upstream's
-    # first batched implementation mixed per-request and per-key units, so its
-    # availability test could pass and GetTransformCandidate() still fail.
+    # Historical v3.1.3 comparisons use the per-key normalization that matched
+    # the corresponding distributed revision.  v3.1.4 deliberately changed
+    # these fields to aggregate bits for the complete batch; preserve that
+    # current upstream semantics for the Padua control.
     kms = root / "model" / "qkd-key-manager-system-application.cc"
     kms_text = kms.read_text(encoding="utf-8")
-    unit_fixes = (
+    unit_fixes = () if padua_only else (
         ("uint32_t keySize_pqc = requestedBits - keySize_qkd;",
          "uint32_t keySize_pqc = keySize - keySize_qkd;"),
         ("NS_ASSERT( keySize_qkd + keySize_pqc == requestedBits );",
@@ -388,10 +447,10 @@ def main() -> int:
     if applied_unit_fixes not in (0, len(unit_fixes)):
         raise RuntimeError("incomplete ETSI 014 per-key unit normalization")
 
-    # Current upstream selects only one key's component at the sender and also
-    # reconstructs only one at the receiver of a batched skey_create request.
-    # Normalize both ends for QKD and PQC; the old source predates this code.
-    batch_fixes = (
+    # Apply the matching historical batch normalization only to the immutable
+    # v3.1.3 comparison. In v3.1.4 keySizeQKD/keySizePQC already describe the
+    # complete batch, so multiplying them again would create invalid keys.
+    batch_fixes = () if padua_only else (
         ("uint32_t targetSize = keySize_qkd;",
          "uint32_t targetSize = keySize_qkd * keyNumber;"),
         ("uint32_t targetSizePQC = keySize_pqc;",
@@ -424,11 +483,17 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
-    print(
-        "instrumented upstream workload and applied shared correctness fixes "
-        f"(per-key-units={applied_unit_fixes == len(unit_fixes)}, "
-        f"batched-skey-create={normalized_batch_expressions == 4})"
-    )
+    if padua_only:
+        print(
+            "instrumented current Padua workload and preserved v3.1.4 "
+            "aggregate batch semantics"
+        )
+    else:
+        print(
+            "instrumented upstream workload and applied shared correctness fixes "
+            f"(per-key-units={applied_unit_fixes == len(unit_fixes)}, "
+            f"batched-skey-create={normalized_batch_expressions == 4})"
+        )
     return 0
 
 

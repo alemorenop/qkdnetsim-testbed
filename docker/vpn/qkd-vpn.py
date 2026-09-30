@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import hashlib
 import base64
+import binascii
 import http.client
 import http.server
 import json
 import os
 import pathlib
 import re
+import socketserver
 import subprocess
 import threading
 import time
@@ -46,6 +48,9 @@ STATE_FILE = RUN_DIR / "state.json"
 SECRETS_FILE = pathlib.Path("/etc/ipsec.secrets")
 CONNECTION_DIR = pathlib.Path("/etc/ipsec.d")
 SWANCTL_FILE = pathlib.Path("/etc/swanctl/swanctl.conf")
+PPK_PROVIDER_SOCKET = pathlib.Path(
+    os.getenv("QKD_PPK_PROVIDER_SOCKET", "/run/qkd-vpn/ppk-provider.sock")
+)
 
 
 def log(message: str) -> None:
@@ -292,6 +297,20 @@ def register_replica_session(ksid: str) -> None:
     )
 
 
+def discover_replica_session() -> str:
+    response = KMS.post(
+        f"/api/v1/keys/{PEER_APP_ID}/session_discovery",
+        {
+            "Source": OWN_APP_ID,
+            "Destination": PEER_APP_ID,
+        },
+    )
+    ksid = str(response.get("Key_stream_ID", ""))
+    if not ksid:
+        raise ValueError("session_discovery returned no Key_stream_ID")
+    return ksid
+
+
 def fetch_etsi004_key(ksid: str, generation: int) -> KeyVersion:
     response = KMS.post(
         f"/api/v1/keys/{ksid}/get_key",
@@ -332,6 +351,179 @@ def key_material_hex(key: KeyVersion) -> str:
 
 
 PPK_KEYS: dict[int, KeyVersion] = {}
+PPK_IDENTITIES: dict[int, str] = {}
+PPK_PROVIDER_KEYS: dict[str, KeyVersion] = {}
+
+
+def encode_ppk_identity(key: KeyVersion) -> str:
+    if QKD_INTERFACE == "004":
+        if not STATE.ksid or key.index is None:
+            raise ValueError("ETSI 004 PPK identity requires KSID and index")
+        reference: dict[str, Any] = {
+            "v": 1,
+            "i": "004",
+            "g": key.generation,
+            "s": STATE.ksid,
+            "n": key.index,
+        }
+    else:
+        if not key.key_id:
+            raise ValueError("ETSI 014 PPK identity requires key_ID")
+        reference = {
+            "v": 1,
+            "i": "014",
+            "g": key.generation,
+            "k": key.key_id,
+        }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(reference, separators=(",", ":"), sort_keys=True).encode()
+    ).decode().rstrip("=")
+    return f"qkdppk-{encoded}"
+
+
+def decode_ppk_identity(ppk_id: str) -> dict[str, Any]:
+    prefix = "qkdppk-"
+    if not ppk_id.startswith(prefix):
+        raise ValueError("PPK identity does not belong to the QKD provider")
+    encoded = ppk_id[len(prefix):]
+    encoded += "=" * (-len(encoded) % 4)
+    try:
+        reference = json.loads(base64.urlsafe_b64decode(encoded).decode())
+    except (
+        binascii.Error,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as error:
+        raise ValueError("malformed QKD PPK identity") from error
+    if (
+        not isinstance(reference, dict)
+        or reference.get("v") != 1
+        or reference.get("i") not in {"004", "014"}
+    ):
+        raise ValueError("unsupported QKD PPK identity")
+    if reference["i"] != QKD_INTERFACE:
+        raise ValueError(
+            f"PPK identity requests ETSI {reference['i']}, "
+            f"endpoint uses ETSI {QKD_INTERFACE}"
+        )
+    generation = int(reference.get("g", 0))
+    if generation < 1:
+        raise ValueError("QKD PPK identity has no valid generation")
+    return reference
+
+
+def register_local_ppk(key: KeyVersion) -> str:
+    ppk_id = encode_ppk_identity(key)
+    PPK_KEYS[key.generation] = key
+    PPK_IDENTITIES[key.generation] = ppk_id
+    PPK_PROVIDER_KEYS[ppk_id] = key
+    return ppk_id
+
+
+def resolve_dynamic_ppk(ppk_id: str) -> KeyVersion:
+    with STATE.lock:
+        cached = PPK_PROVIDER_KEYS.get(ppk_id)
+        if cached is not None:
+            if ROLE == "bob":
+                PPK_IDENTITIES[cached.generation] = ppk_id
+                STATE.pending = cached
+                STATE.last_error = None
+                STATE.publish()
+            return cached
+
+        reference = decode_ppk_identity(ppk_id)
+        generation = int(reference["g"])
+        if ROLE != "bob":
+            raise RuntimeError("initiator requested an unknown local PPK")
+
+        if QKD_INTERFACE == "004":
+            ksid = str(reference.get("s", ""))
+            expected_index = int(reference.get("n", -1))
+            if not ksid or expected_index < 0:
+                raise ValueError("ETSI 004 PPK identity lacks KSID or index")
+            if STATE.ksid and STATE.ksid != ksid:
+                raise RuntimeError("PPK identity uses a different ETSI 004 KSID")
+            if not STATE.ksid:
+                retry(
+                    lambda: register_replica_session(ksid),
+                    "dynamic PPK replica open_connect",
+                )
+                STATE.ksid = ksid
+                STATE.session_ready = True
+            key = retry(
+                lambda: fetch_etsi004_key(ksid, generation),
+                f"dynamic PPK get_key generation {generation}",
+            )
+            if key.index != expected_index:
+                raise RuntimeError(
+                    "ETSI 004 dynamic PPK index mismatch: "
+                    f"expected {expected_index}, received {key.index}"
+                )
+        else:
+            key_id = str(reference.get("k", ""))
+            if not key_id:
+                raise ValueError("ETSI 014 PPK identity lacks key_ID")
+            key = retry(
+                lambda: fetch_etsi014_dec_key(key_id, generation),
+                f"dynamic PPK dec_keys generation {generation}",
+            )
+            STATE.session_ready = True
+
+        if TEST_TAMPER_PPK:
+            key = tamper_key_for_negative_test(key)
+        PPK_PROVIDER_KEYS[ppk_id] = key
+        PPK_IDENTITIES[generation] = ppk_id
+        STATE.pending = key
+        STATE.last_error = None
+        STATE.publish()
+        log(
+            f"DYNAMIC PPK RESOLVED generation={generation} "
+            f"{key_reference(key)} ppk_id={ppk_id} "
+            f"fingerprint={key.digest[:16]}"
+        )
+        return key
+
+
+class PpkProviderHandler(socketserver.StreamRequestHandler):
+    def handle(self) -> None:
+        try:
+            request = self.rfile.readline(4097).decode("ascii").strip()
+            if not request.startswith("GET "):
+                raise ValueError("unsupported provider request")
+            identity_bytes = bytes.fromhex(request[4:])
+            ppk_id = identity_bytes.decode("utf-8")
+            key = resolve_dynamic_ppk(ppk_id)
+            self.wfile.write(
+                f"OK {key_material_hex(key)[2:]}\n".encode("ascii")
+            )
+        except Exception as error:
+            log(f"dynamic PPK resolution failed: {error}")
+            self.wfile.write(f"ERR {error}\n".encode("utf-8", errors="replace"))
+
+
+if hasattr(socketserver, "UnixStreamServer"):
+    class PpkProviderServer(
+        socketserver.ThreadingMixIn,
+        socketserver.UnixStreamServer,
+    ):
+        daemon_threads = True
+else:
+    class PpkProviderServer:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            raise OSError("Unix-domain sockets are unavailable on this platform")
+
+
+def start_ppk_provider() -> PpkProviderServer:
+    try:
+        PPK_PROVIDER_SOCKET.unlink()
+    except FileNotFoundError:
+        pass
+    server = PpkProviderServer(str(PPK_PROVIDER_SOCKET), PpkProviderHandler)
+    os.chmod(PPK_PROVIDER_SOCKET, 0o600)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log(f"dynamic PPK provider listening on {PPK_PROVIDER_SOCKET}")
+    return server
 
 
 def render_swanctl_config() -> str:
@@ -343,8 +535,38 @@ def render_swanctl_config() -> str:
         f"    secret = 0x{IKE_AUTH_PSK_HEX}\n"
         "  }\n"
     ]
+    if ROLE == "bob":
+        connections.append(
+            "  qkd-responder {\n"
+            "    version = 2\n"
+            f"    local_addrs = {OWN_IP}\n"
+            f"    remote_addrs = {PEER_IP}\n"
+            "    proposals = aes256-sha256-modp2048\n"
+            "    mobike = no\n"
+            "    rekey_time = 0\n"
+            "    ppk_required = yes\n"
+            "    local {\n"
+            "      auth = psk\n"
+            f"      id = {OWN_IP}\n"
+            "    }\n"
+            "    remote {\n"
+            "      auth = psk\n"
+            f"      id = {PEER_IP}\n"
+            "    }\n"
+            "    children {\n"
+            "      qkd-responder {\n"
+            "        mode = transport\n"
+            f"        local_ts = {OWN_IP}/32\n"
+            f"        remote_ts = {PEER_IP}/32\n"
+            "        esp_proposals = aes256-sha256\n"
+            "        rekey_time = 0\n"
+            "      }\n"
+            "    }\n"
+            "  }\n"
+        )
     for generation, key in sorted(PPK_KEYS.items()):
         name = f"qkd-{generation}"
+        ppk_id = PPK_IDENTITIES[generation]
         connections.append(
             f"  {name} {{\n"
             "    version = 2\n"
@@ -353,7 +575,7 @@ def render_swanctl_config() -> str:
             "    proposals = aes256-sha256-modp2048\n"
             "    mobike = no\n"
             "    rekey_time = 0\n"
-            f"    ppk_id = {name}\n"
+            f"    ppk_id = {ppk_id}\n"
             "    ppk_required = yes\n"
             "    local {\n"
             "      auth = psk\n"
@@ -372,12 +594,6 @@ def render_swanctl_config() -> str:
             "        rekey_time = 0\n"
             "      }\n"
             "    }\n"
-            "  }\n"
-        )
-        secrets.append(
-            f"  ppk-{name} {{\n"
-            f"    id = {name}\n"
-            f"    secret = {key_material_hex(key)}\n"
             "  }\n"
         )
     return (
@@ -418,9 +634,9 @@ def install_connection(generation: int, key: KeyVersion | None = None) -> None:
     if VPN_KEYING_MODE == "ppk":
         if key is None:
             raise ValueError("PPK connection requires QKD key material")
-        PPK_KEYS[generation] = (
-            tamper_key_for_negative_test(key) if TEST_TAMPER_PPK else key
-        )
+        if ROLE != "alice":
+            raise RuntimeError("dynamic PPK connections are initiated by Alice")
+        register_local_ppk(key)
         load_ppk_configuration()
         return
     atomic_write(
@@ -434,6 +650,7 @@ def install_connection(generation: int, key: KeyVersion | None = None) -> None:
 def remove_connection(generation: int) -> None:
     if VPN_KEYING_MODE == "ppk":
         if PPK_KEYS.pop(generation, None) is not None:
+            PPK_IDENTITIES.pop(generation, None)
             load_ppk_configuration()
         return
     try:
@@ -445,10 +662,10 @@ def remove_connection(generation: int) -> None:
 
 def tunnel_is_up(generation: int) -> bool:
     if VPN_KEYING_MODE == "ppk":
-        result = run_swanctl(
-            "--list-sas", "--ike", f"qkd-{generation}", "--raw",
-            check=False,
-        )
+        arguments = ["--list-sas", "--raw"]
+        if ROLE == "alice":
+            arguments[1:1] = ["--ike", f"qkd-{generation}"]
+        result = run_swanctl(*arguments, check=False)
         return result.returncode == 0 and all(
             re.search(rf"\b{field}\s*=\s*{value}\b", result.stdout)
             for field, value in (
@@ -479,14 +696,19 @@ class SharedState:
 
     def publish(self) -> None:
         with self.lock:
+            reported_ppk = self.current or self.pending
             state = {
                 "role": ROLE,
                 "qkd_interface": QKD_INTERFACE,
                 "keying_mode": VPN_KEYING_MODE,
                 "ppk_id": (
-                    f"qkd-{self.current.generation}"
-                    if VPN_KEYING_MODE == "ppk" and self.current else None
+                    PPK_IDENTITIES.get(reported_ppk.generation)
+                    if VPN_KEYING_MODE == "ppk" and reported_ppk else None
                 ),
+                "ppk_provider": (
+                    "dynamic" if VPN_KEYING_MODE == "ppk" else None
+                ),
+                "peer_coordination": VPN_KEYING_MODE != "ppk",
                 "ksid": self.ksid,
                 "generation": self.current.generation if self.current else 0,
                 "key_index": self.current.index if self.current else None,
@@ -737,11 +959,16 @@ class ControlHandler(http.server.BaseHTTPRequestHandler):
 def initiate(generation: int) -> None:
     for attempt in range(1, 6):
         if VPN_KEYING_MODE == "ppk":
-            run_swanctl("--initiate", "--child", f"qkd-{generation}", check=False)
+            run_swanctl(
+                "--initiate", "--child", f"qkd-{generation}",
+                "--timeout", "30", check=False,
+            )
         else:
             run_ipsec("up", f"qkd-{generation}", check=False)
-        if tunnel_is_up(generation):
-            return
+        for _ in range(10):
+            if tunnel_is_up(generation):
+                return
+            time.sleep(1)
         log(
             f"qkd-{generation} is not established "
             f"(attempt {attempt}/5)"
@@ -798,7 +1025,89 @@ def rollback_alice(failed: KeyVersion, previous: KeyVersion | None) -> None:
         log(f"RESTORED generation={previous.generation}")
 
 
+def rollback_dynamic_ppk(
+    failed: KeyVersion, previous: KeyVersion | None
+) -> None:
+    remove_connection(failed.generation)
+    with STATE.lock:
+        STATE.pending = None
+        STATE.current = previous
+        STATE.tunnel_up = False
+        STATE.publish()
+    if previous is not None:
+        install_connection(previous.generation, previous)
+        initiate(previous.generation)
+        with STATE.lock:
+            STATE.current = previous
+            STATE.tunnel_up = True
+            STATE.last_error = None
+            STATE.publish()
+        log(f"RESTORED generation={previous.generation} through dynamic PPK")
+
+
+def rotate_alice_dynamic_ppk() -> None:
+    with STATE.lock:
+        previous = STATE.current
+        generation = (previous.generation if previous else 0) + 1
+        ksid = STATE.ksid
+        session_ready = STATE.session_ready
+    if not session_ready:
+        raise RuntimeError(f"ETSI {QKD_INTERFACE} session is not ready")
+
+    if QKD_INTERFACE == "004":
+        if not ksid:
+            raise RuntimeError("ETSI 004 session has no KSID")
+        key = retry(
+            lambda: fetch_etsi004_key(ksid, generation),
+            f"get_key generation {generation}",
+        )
+    else:
+        key = retry(
+            lambda: fetch_etsi014_enc_key(generation),
+            f"enc_keys generation {generation}",
+        )
+
+    install_connection(generation, key)
+    ppk_id = PPK_IDENTITIES[generation]
+    with STATE.lock:
+        STATE.pending = key
+        STATE.tunnel_up = bool(previous and tunnel_is_up(previous.generation))
+        STATE.last_error = None
+        STATE.publish()
+    log(
+        f"PREPARED generation={generation} {key_reference(key)} "
+        f"ppk_id={ppk_id} fingerprint={key.digest[:16]}"
+    )
+
+    try:
+        if previous is not None:
+            terminate_tunnel(previous.generation)
+            remove_connection(previous.generation)
+            with STATE.lock:
+                STATE.tunnel_up = False
+                STATE.publish()
+        initiate(generation)
+    except Exception:
+        log(f"cutover to generation={generation} failed; rolling back")
+        rollback_dynamic_ppk(key, previous)
+        raise
+
+    with STATE.lock:
+        STATE.current = key
+        STATE.pending = None
+        STATE.tunnel_up = True
+        STATE.last_error = None
+        STATE.publish()
+    log(
+        f"COMMITTED generation={generation} {key_reference(key)}; "
+        f"IKEv2 resolved mandatory PPK_ID={ppk_id} through each local KMS"
+    )
+
+
 def rotate_alice() -> None:
+    if VPN_KEYING_MODE == "ppk":
+        rotate_alice_dynamic_ppk()
+        return
     with STATE.lock:
         previous = STATE.current
         generation = (previous.generation if previous else 0) + 1
@@ -900,6 +1209,51 @@ def rotate_alice() -> None:
 
 
 def run_bob() -> None:
+    if VPN_KEYING_MODE == "ppk":
+        load_ppk_configuration()
+        if QKD_INTERFACE == "004":
+            ksid = retry(
+                discover_replica_session,
+                "local ETSI 004 replica discovery",
+            )
+            retry(
+                lambda: register_replica_session(ksid),
+                "ETSI 004 replica open_connect",
+            )
+            with STATE.lock:
+                STATE.ksid = ksid
+                STATE.session_ready = True
+                STATE.last_error = None
+                STATE.publish()
+            log(f"ETSI 004 REPLICA READY KSID={ksid}")
+        STATE.publish()
+        log("dynamic PPK responder ready; no Alice-Bob coordination API")
+        while True:
+            with STATE.lock:
+                pending = STATE.pending
+                current = STATE.current
+            if pending and tunnel_is_up(pending.generation):
+                with STATE.lock:
+                    if STATE.pending is not pending:
+                        continue
+                    previous = STATE.current
+                    STATE.current = pending
+                    STATE.pending = None
+                    STATE.tunnel_up = True
+                    STATE.last_error = None
+                    STATE.publish()
+                    if not previous or previous.generation != pending.generation:
+                        log(
+                            f"COMMITTED generation={pending.generation} "
+                            f"{key_reference(pending)} through dynamic PPK"
+                        )
+            elif current:
+                established = tunnel_is_up(current.generation)
+                with STATE.lock:
+                    if STATE.current is current:
+                        STATE.tunnel_up = established
+                    STATE.publish()
+            time.sleep(0.5)
     STATE.publish()
     server = http.server.ThreadingHTTPServer(
         ("0.0.0.0", CONTROL_PORT), ControlHandler
@@ -913,20 +1267,21 @@ def run_alice() -> None:
     ksid: str | None = None
     if QKD_INTERFACE == "004":
         ksid = retry(open_master_session, "master open_connect")
-    response = retry(
-        lambda: peer_request(
-            "/session",
-            {
-                "qkd_interface": QKD_INTERFACE,
-                "ksid": ksid,
-            },
-        ),
-        f"ETSI {QKD_INTERFACE} session setup",
-    )
-    if response.get("qkd_interface") != QKD_INTERFACE:
-        raise RuntimeError("peer acknowledged a different QKD interface")
-    if QKD_INTERFACE == "004" and response.get("ksid") != ksid:
-        raise RuntimeError("peer acknowledged a different KSID")
+    if VPN_KEYING_MODE != "ppk":
+        response = retry(
+            lambda: peer_request(
+                "/session",
+                {
+                    "qkd_interface": QKD_INTERFACE,
+                    "ksid": ksid,
+                },
+            ),
+            f"ETSI {QKD_INTERFACE} session setup",
+        )
+        if response.get("qkd_interface") != QKD_INTERFACE:
+            raise RuntimeError("peer acknowledged a different QKD interface")
+        if QKD_INTERFACE == "004" and response.get("ksid") != ksid:
+            raise RuntimeError("peer acknowledged a different KSID")
     with STATE.lock:
         STATE.ksid = ksid
         STATE.session_ready = True
@@ -961,6 +1316,8 @@ def main() -> None:
         raise SystemExit("IKE_AUTH_PSK_HEX must contain at least 256 bits")
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     CONNECTION_DIR.mkdir(parents=True, exist_ok=True)
+    if VPN_KEYING_MODE == "ppk":
+        start_ppk_provider()
     if ROLE == "bob":
         run_bob()
     else:

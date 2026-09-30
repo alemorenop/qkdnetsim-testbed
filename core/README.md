@@ -168,6 +168,13 @@ For trusted-node key relay, start
 `--qkd-topology key-relay`. Both topologies accept ETSI 004 or ETSI 014 and
 zero to eight classical routers. Delay, bandwidth and loss apply to each link.
 
+The Padua topologies are owned by `automation/run-padua-vpn.py` and
+`automation/run-padua-vpn-full.py`. They attach endpoint pairs to sites 1--5,
+5--1 and 1--6 of `docker-compose.padua-reference.yml`. The full runner starts
+the three directions concurrently so they share the same QKD generation,
+KMS and relay resources. `--traffic-rate-mbps`, `--traffic-block-size` and
+`--traffic-start-delay` expose the workload controls used by that runner.
+
 For RFC 8784 PPK-backed operation, add `--keying-mode ppk` to any of the four
 topology/interface combinations above. The runner
 provisions an independent IKE authentication PSK to both endpoints, loads each

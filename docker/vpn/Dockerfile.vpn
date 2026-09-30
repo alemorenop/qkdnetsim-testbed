@@ -1,3 +1,51 @@
+FROM ubuntu:22.04 AS strongswan-build
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+ARG STRONGSWAN_VERSION=5.9.5
+ARG STRONGSWAN_SHA256=6db028c9033dfd7cab578ca7e4b0075922cffec7af8bffc7d67cac67f348a5be
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    curl \
+    flex \
+    gettext \
+    libgmp-dev \
+    libssl-dev \
+    libtool \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src
+
+RUN curl -fsSLO "https://download.strongswan.org/strongswan-${STRONGSWAN_VERSION}.tar.gz" && \
+    echo "${STRONGSWAN_SHA256}  strongswan-${STRONGSWAN_VERSION}.tar.gz" | sha256sum -c - && \
+    tar -xzf "strongswan-${STRONGSWAN_VERSION}.tar.gz"
+
+COPY docker/vpn/strongswan-qkd-ppk/qkd_ppk_plugin.c \
+     docker/vpn/strongswan-qkd-ppk/Makefile.am \
+     /tmp/qkd-ppk/
+COPY docker/vpn/strongswan-qkd-ppk/strongswan-5.9.5.patch \
+     /tmp/qkd-ppk/strongswan.patch
+
+WORKDIR /usr/src/strongswan-${STRONGSWAN_VERSION}
+
+RUN mkdir -p src/libcharon/plugins/qkd_ppk && \
+    cp /tmp/qkd-ppk/qkd_ppk_plugin.c /tmp/qkd-ppk/Makefile.am \
+       src/libcharon/plugins/qkd_ppk/ && \
+    patch -p1 < /tmp/qkd-ppk/strongswan.patch && \
+    autoreconf -fi && \
+    ./configure \
+      --prefix=/usr \
+      --sysconfdir=/etc \
+      --enable-openssl \
+      --enable-qkd-ppk && \
+    make -j"$(nproc)" && \
+    make DESTDIR=/opt/strongswan-root install
+
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,6 +64,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tcpdump \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=strongswan-build \
+    /opt/strongswan-root/usr/lib/ipsec/plugins/libstrongswan-qkd-ppk.so \
+    /usr/lib/ipsec/plugins/libstrongswan-qkd-ppk.so
+
+RUN ipsec version && \
+    command -v swanctl >/dev/null && \
+    test -f /usr/lib/ipsec/plugins/libstrongswan-qkd-ppk.so && \
+    ! ldd /usr/lib/ipsec/plugins/libstrongswan-qkd-ppk.so | grep -q 'not found'
 
 COPY docker/vpn/entrypoint-vpn.sh /opt/entrypoint-vpn.sh
 COPY docker/vpn/qkd-vpn.py /opt/qkd-vpn.py

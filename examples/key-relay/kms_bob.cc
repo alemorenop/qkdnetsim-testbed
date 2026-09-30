@@ -209,28 +209,25 @@ main(int argc, char* argv[])
 
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/QKDKeyGenerated",
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyGenerated",
                      MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
                          std::cout << "[RELAY_KMS_BOB] KMS Bob stores key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
                      }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServed",
-                     MakeCallback(+[](std::string ctx, const std::string& appId, const std::string& keyId, const uint32_t& bits) {
-                         std::cout << "[RELAY_KMS_BOB] KMS Bob serves key appId=" << appId << " keyId=" << keyId << " bits=" << bits << std::endl;
-                     }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyServedMixed",
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyDelivered",
                      MakeCallback(+[](std::string ctx, const std::string& ksid,
                                       const std::string& srcSaeId, const std::string& dstSaeId,
                                       const uint32_t& srcNodeId, const uint32_t& dstNodeId,
                                       const std::string& keyId, const uint32_t& bits,
                                       const std::string& type) {
+                         std::cout << "[RELAY_KMS_BOB] KMS Bob serves key appId=" << srcSaeId << " keyId=" << keyId << " bits=" << bits << std::endl;
                          std::cout << "[RELAY_KMS_BOB] Mixed key contribution type=" << type
                                    << " bits=" << bits << " keyId=" << keyId
                                    << " ksid=" << ksid << " srcSaeId=" << srcSaeId
                                    << " dstSaeId=" << dstSaeId << " srcNodeId=" << srcNodeId
                                    << " dstNodeId=" << dstNodeId << std::endl;
                      }));
-    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/RelayConsumption",
-                     MakeCallback(+[](std::string ctx, const uint32_t& node, const uint32_t& src, const uint32_t& dst, const uint32_t& amount) {
+    Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/KeyRelayed",
+                     MakeCallback(+[](std::string ctx, const uint32_t& src, const uint32_t& dst, const std::string& keyId, const uint32_t& amount) {
                          std::cout << "[RELAY_KMS_BOB] Relay consumed src=" << src << " dst=" << dst << " bits=" << amount << std::endl;
                      }));
     Config::Connect("/NodeList/*/ApplicationList/*/$ns3::QKDKeyManagerSystemApplication/ListenReady",

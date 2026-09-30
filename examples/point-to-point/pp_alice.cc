@@ -25,6 +25,7 @@
 #include "ns3/qkd-postprocessing-application.h"
 
 #include "../qkd-link-budget.h"
+#include "../distributed-emu-utils.h"
 
 using namespace ns3;
 
@@ -120,6 +121,7 @@ main(int argc, char* argv[])
     mobility.Install(self);
 
     AddEmuInterface(node, devSift, myIpSift, "00:00:00:00:01:01");
+    qkd_testbed::SetArpRecoveryTimeout(node, myIpSift, Seconds(1));
     AddEmuInterface(node, devKms, myIpKms, "00:00:00:00:01:02");
 
     InetSocketAddress selfSiftAddr(Ipv4Address(myIpSift.c_str()), siftPort);
