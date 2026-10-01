@@ -9,7 +9,6 @@ import importlib.util
 import json
 import os
 import platform
-import statistics
 import subprocess
 import sys
 import time
@@ -79,7 +78,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--require-pqc", action="store_true")
-    parser.add_argument("--reference-results", type=Path)
     parser.add_argument("--build", action="store_true")
     args = parser.parse_args()
     if not 0 < args.time_scale <= 1:
@@ -344,132 +342,6 @@ def write_summary(
     return summary
 
 
-def comparison_samples(
-    reference_dir: Path, records: list[dict[str, Any]]
-) -> dict[str, dict[str, list[float]]]:
-    samples = {
-        stage: {str(flow["id"]): [] for flow in FLOWS}
-        for stage in (
-            "QKDNetSim monolítico",
-            "QKDNetSim distribuido",
-            "VPN distribuida",
-        )
-    }
-    reference_csv = reference_dir.resolve() / "application-statistics.csv"
-    if not reference_csv.is_file():
-        raise RuntimeError(f"missing Padua reference table: {reference_csv}")
-    with reference_csv.open(newline="", encoding="utf-8") as stream:
-        for row in csv.DictReader(stream):
-            flow_id = row.get("application", "")
-            if row.get("version") != "working" or flow_id not in samples["VPN distribuida"]:
-                continue
-            stage = (
-                "QKDNetSim monolítico"
-                if row.get("deployment") == "monolithic"
-                else "QKDNetSim distribuido"
-            )
-            achievement = row.get("offered_rate_achievement")
-            if achievement:
-                samples[stage][flow_id].append(float(achievement))
-    for record in records:
-        if not record.get("passed"):
-            continue
-        for flow_id, flow in record.get("flows", {}).items():
-            metrics = (flow.get("runner_result") or {}).get("metrics") or {}
-            achievement = metrics.get("offered_rate_achievement")
-            if achievement is not None:
-                samples["VPN distribuida"][flow_id].append(float(achievement))
-    missing = [
-        f"{stage}/{flow_id}"
-        for stage, flows in samples.items()
-        for flow_id, values in flows.items()
-        if not values
-    ]
-    if missing:
-        raise RuntimeError("missing comparison samples: " + ", ".join(missing))
-    return samples
-
-
-def render_comparison(
-    reference_dir: Path, output: Path, records: list[dict[str, Any]]
-) -> None:
-    samples = comparison_samples(reference_dir, records)
-    stages = tuple(samples)
-    flow_ids = ("1-to-5", "5-to-1", "1-to-6")
-    rows: list[tuple[str, str, int, float, float]] = []
-    for stage in stages:
-        for flow_id in flow_ids:
-            values = samples[stage][flow_id]
-            rows.append((
-                stage,
-                flow_id,
-                len(values),
-                statistics.fmean(values),
-                statistics.stdev(values) if len(values) > 1 else 0.0,
-            ))
-    with (output / "padua-full-three-stage.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as stream:
-        writer = csv.writer(stream)
-        writer.writerow((
-            "stage", "flow", "samples", "mean_offered_rate_achievement",
-            "stddev_offered_rate_achievement",
-        ))
-        writer.writerows(rows)
-
-    width, height = 980, 590
-    left, right, top, bottom = 95, 45, 80, 125
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    colors = ("#315C78", "#3C8C74", "#D4773B")
-    body = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#F7F5F0"/>',
-        '<text x="44" y="39" font-family="sans-serif" font-size="24" font-weight="700" fill="#17324D">Padua completo: cumplimiento de la carga ofrecida</text>',
-    ]
-    for tick in range(0, 121, 20):
-        y = top + plot_height - tick / 120 * plot_height
-        body.extend((
-            f'<line x1="{left}" y1="{y:.1f}" x2="{width-right}" y2="{y:.1f}" stroke="#D6D2C9"/>',
-            f'<text x="{left-12}" y="{y+5:.1f}" text-anchor="end" font-family="sans-serif" font-size="13" fill="#52606B">{tick}%</text>',
-        ))
-    x_positions = [left + plot_width * index / 2 for index in range(3)]
-    for flow_id, x in zip(flow_ids, x_positions):
-        body.append(
-            f'<text x="{x:.1f}" y="{top+plot_height+32}" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#1D2730">{flow_id.replace("-to-", "→")}</text>'
-        )
-    for stage_index, stage in enumerate(stages):
-        color = colors[stage_index]
-        points = []
-        for flow_id, x in zip(flow_ids, x_positions):
-            values = samples[stage][flow_id]
-            mean = statistics.fmean(values) * 100
-            y = top + plot_height - min(mean, 120) / 120 * plot_height
-            points.append((x, y, mean))
-        body.append(
-            '<polyline points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y, _ in points)
-            + f'" fill="none" stroke="{color}" stroke-width="4"/>'
-        )
-        for x, y, mean in points:
-            body.extend((
-                f'<circle cx="{x:.1f}" cy="{y:.1f}" r="6" fill="{color}"/>',
-                f'<text x="{x:.1f}" y="{y-13:.1f}" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="{color}">{mean:.1f}%</text>',
-            ))
-        legend_x = left + stage_index * 255
-        body.extend((
-            f'<line x1="{legend_x}" y1="{height-70}" x2="{legend_x+30}" y2="{height-70}" stroke="{color}" stroke-width="4"/>',
-            f'<text x="{legend_x+39}" y="{height-65}" font-family="sans-serif" font-size="13" fill="#1D2730">{stage}</text>',
-        ))
-    body.extend((
-        f'<text x="27" y="{top+plot_height/2:.1f}" transform="rotate(-90 27 {top+plot_height/2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#52606B">goodput / carga ofrecida</text>',
-        f'<text x="{width/2:.1f}" y="{height-20}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#52606B">La etapa VPN usa QKD como PPK de IKEv2; las etapas QKDNetSim aplican OTP o AES según el flujo.</text>',
-        '</svg>',
-    ))
-    (output / "padua-full-three-stage.svg").write_text(
-        "\n".join(body), encoding="utf-8"
-    )
-
-
 def main() -> int:
     args = parse_args()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -525,13 +397,6 @@ def main() -> int:
 
     records.sort(key=lambda record: int(record["repetition"]))
     summary = write_summary(output, args, records)
-    if args.reference_results is not None and summary["failed"] == 0:
-        render_comparison(args.reference_results, output, records)
-    elif args.reference_results is not None:
-        print(
-            "[PADUA_VPN_FULL] comparison skipped because the campaign failed",
-            flush=True,
-        )
     print(
         f"[PADUA_VPN_FULL] results={output} failures={summary['failed']}",
         flush=True,

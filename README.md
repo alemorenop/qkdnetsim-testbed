@@ -608,6 +608,12 @@ as in the upstream SECOQC/reference setup. Application key-use events and
 buffer time series are additional testbed measurements. Distributed runs also
 separate missed sends caused by socket rejection (`missed_send_socket`) from
 those caused by waiting for a key (`missed_send_key_wait`).
+`padua-reference-comparison.csv` and `padua-reference-comparison.svg` compare
+the monolithic and distributed executions separately for flows 1--5, 5--1 and
+1--6. The plotted metric is useful goodput divided by each flow's offered
+rate, with mean and standard-deviation error bars across repetitions. This
+normalization avoids allowing the 10 Mbit/s AES flow to hide the two low-rate
+OTP flows in an aggregate goodput value.
 
 The current QKDNetSim baseline and the figures published with an earlier model
 revision need not be numerically identical. The runner therefore keeps the
@@ -640,10 +646,10 @@ field explicit instead of silently substituting a different algorithm; the
 published SHA2 figures are reference values, not an exact authentication
 reproduction claim.
 
-### Padua VPN integration stage
+### Padua VPN validation
 
 [`automation/run-padua-vpn.py`](automation/run-padua-vpn.py) adds a system-level
-third stage without replacing the controlled Padua comparison above. It reuses
+VPN validation without replacing the controlled Padua comparison above. It reuses
 the six distributed KMS sites and attaches strongSwan endpoints to sites 1 and
 6. QKD material crosses the configured 1--2--3--6 trusted-node path through
 ETSI GS QKD 014 and is installed as a mandatory RFC 8784 PPK. A single TCP
@@ -652,29 +658,22 @@ writes and remains active for 120 seconds across four fresh IKE SA
 establishments. The classical endpoint path retains the reference 100 Mbit/s
 bandwidth and 2 ms delay.
 
-Run this campaign after a successful five-repetition `padua-reference` run:
+Run the single-flow campaign with:
 
 ```bash
 python3 automation/run-padua-vpn.py \
-  --repetitions 5 \
-  --reference-results results/padua-reference-<timestamp>
+  --repetitions 5
 ```
 
-The runner writes per-run logs, `summary.json`, `vpn-statistics.csv` and, when
-the reference directory is supplied, `padua-three-stage.csv` plus
-`padua-three-stage.svg`. The last two artifacts show the 1--6 goodput across:
-
-1. monolithic QKDNetSim with its AES application;
-2. distributed QKDNetSim with the same AES application;
-3. the distributed KMS topology with an external IPsec/IKEv2 VPN.
-
-Only the first transition is an architecture-controlled comparison. The VPN
-stage is deliberately a progressive integration result: QKDNetSim's reference
-application consumes QKD keys for its own AES processing, whereas the VPN uses
-QKD as an IKE PPK and lets IKEv2 derive the IPsec/ESP traffic keys. The shared
-offered rate, active duration and classical-link parameters make transport
-goodput comparable, but key-consumption counts must not be interpreted as the
-same cryptographic workload.
+The runner writes per-run logs, `summary.json` and `vpn-statistics.csv`. The
+VPN result is intentionally kept separate from the monolithic/distributed
+QKDNetSim performance graph. QKDNetSim's reference application consumes QKD
+keys for its own OTP/AES processing, whereas the VPN uses QKD as an IKE PPK and
+lets IKEv2 derive the IPsec/ESP traffic keys. Comparing them as successive
+performance stages would therefore mix different cryptographic workloads.
+The VPN campaign instead validates offered-load achievement, TCP
+retransmissions, ESP traffic and successful PPK generations against the VPN's
+own configured workload.
 
 The complete VPN profile extends that integration stage to the three Padua
 applications running concurrently. It creates independent strongSwan endpoint
@@ -701,16 +700,13 @@ python3 automation/run-padua-vpn-full.py \
   --repetitions 1
 
 python3 automation/run-padua-vpn-full.py \
-  --repetitions 5 \
-  --reference-results results/padua-reference-<timestamp>
+  --repetitions 5
 ```
 
 The full runner writes one result for each flow and repetition,
-`vpn-full-statistics.csv`, and a normalized three-stage comparison in
-`padua-full-three-stage.csv` and `padua-full-three-stage.svg`. Normalizing by
-each flow's offered rate avoids hiding the two low-rate OTP reference flows
-beside the 10 Mbit/s AES flow. The same cryptographic-semantics caveat applies:
-the graph compares achieved application load, not equivalent key consumption.
+`summary.json` and `vpn-full-statistics.csv`. Its three VPN flows are evaluated
+against their own offered rates; they are not merged into the controlled
+QKDNetSim monolithic/distributed comparison.
 
 ### Optional QKD and post-quantum mixing
 
@@ -1069,18 +1065,25 @@ through that daemon. Application traffic traverses only the CORE-created veth,
 bridge/router and NetEm path shown in the data plane.
 
 The canonical editable diagram sources live in
-[`diagrams/src/`](diagrams/src/) as self-contained HTML documents created with
-the testbed's `diagram-design` profile, selected by
-[`.diagram-design`](.diagram-design). Each HTML file contains its CSS and the
-complete inline SVG, so it can be opened in a browser and edited or rendered
-without a separate drawing application. The adjacent SVG is the generated,
-diagram-only publication artifact: Markdown can embed it directly and LaTeX
-can convert it without including the HTML page wrapper. Keeping both therefore
-separates an editable source from a portable output; changes should be made in
-the HTML source and exported to the SVG rather than maintained independently.
-Their project-specific palette is intentionally
-independent of the visual styling of the reference papers. The figures retain
-the implementation-level information of the original drawings: every
+[`diagrams/src/`](diagrams/src/) as Draw.io XML files (`*.drawio`). The adjacent
+SVG files are the publication exports used by this README and by the LaTeX
+documentation; they are kept as portable renderings, not as independent
+sources. Changes must therefore be made in Draw.io and then exported to SVG.
+The export uses plain SVG text (no HTML `foreignObject`), a fixed light theme
+and an embedded copy of the diagram, so the SVG can also be reopened in
+Draw.io:
+
+```bash
+drawio -x -f svg -e --theme light --embed-svg-fonts false -o diagrams/key-relay-vpn.svg diagrams/src/key-relay-vpn.drawio
+```
+
+Each figure separates three planes: the Docker Compose plane with the
+persistent QKD/KMS ns-3 processes, the CORE plane with the VPN endpoints and
+the classical path, and the orchestration plane in the `qkdnetsim-core`
+container.
+The project-specific palette is intentionally independent of the visual
+styling of the reference papers. The figures retain the implementation-level
+information of the original drawings: every
 process boundary, `EmuFdNetDevice`, Linux veth/`AF_PACKET` boundary, Docker
 subnet and endpoint address, ETSI operation, CORE component and data-plane
 address is shown next to the component or connector to which it belongs.
@@ -1146,14 +1149,11 @@ appear in the VPN regression matrix. They remain reproducible, however, and
 established the distributed architecture while exposing library faults that
 also affected the QKD/KMS pipeline now used by the VPN scenarios.
 
-Their detailed figures remain available as
-[point-to-point](old-examples/diagrams/point-to-point.svg) and
-[trusted-node key relay](old-examples/diagrams/key-relay.svg)
-architectures. They use the same project palette and component grammar as the
-active figures, while retaining the historical H1-H9 identifiers, exact IP
-addresses and C++ `QKDApp014`/OTP data plane. Editable HTML sources are stored
-beside them under
-[`old-examples/diagrams/src/`](old-examples/diagrams/src/).
+Their source code and reproduction commands remain under `old-examples/`, but
+the obsolete HTML/SVG diagram copies have been removed. The active, maintained
+figures in [`diagrams/`](diagrams/) describe the current Docker/CORE VPN
+architecture; historical H1--H9 identifiers and the C++ `QKDApp014`/OTP data
+plane are retained only in the corresponding prototype text and sources.
 
 #### Direct point-to-point prototype
 
@@ -1342,8 +1342,8 @@ the SA cutover. Relay cases additionally require evidence from both QKD links
 and the trusted KMS. Packet inspection is transient; captures and CORE endpoints
 are deleted after the run and no capture is stored in the repository.
 
-The endpoint sources, traffic runner, diagrams and reproduction commands are
-retained under [`old-examples/`](old-examples/README.md). Their four consumer
+The endpoint sources, traffic runner and reproduction commands are retained
+under [`old-examples/`](old-examples/README.md). Their four consumer
 binaries are compiled by the standard image but excluded from the active VPN
 regression. The shared PP/KMS programs remain in their normal active
 directories because both the old examples and the VPN scenarios execute
@@ -1380,6 +1380,16 @@ creates role-named `qkd-core-vpn-alice-<PID>` and
 interfaces.
 
 ![Point-to-point QKD-backed IPsec/IKEv2 VPN architecture](diagrams/point-to-point-vpn.svg)
+
+Editable source: [`diagrams/src/point-to-point-vpn.drawio`](diagrams/src/point-to-point-vpn.drawio).
+
+The endpoint boxes in the diagram distinguish the two keying modes. In PSK
+mode the optional Alice--Bob TCP/9090 coordination service carries the
+generation reference; in mandatory RFC 8784 PPK mode each endpoint resolves
+the reference through its local `qkd-ppk` plugin and Unix
+`ppk-provider.sock`, so no endpoint-to-endpoint coordination channel is
+opened. The KMS-to-KMS control network shown elsewhere is a separate ETSI
+004 implementation channel and is not the retired Alice--Bob service.
 
 **Interface selection.** ETSI 004 negotiates one `Key_stream_ID` (KSID) for
 the complete VPN session. In PSK mode Alice sends that KSID once to Bob, which
@@ -1486,6 +1496,19 @@ point-to-point VPN integration across a key-relay path; neither reference
 paper defines this complete topology:
 
 ![Trusted-node QKD-backed IPsec/IKEv2 VPN architecture](diagrams/key-relay-vpn.svg)
+
+Editable source: [`diagrams/src/key-relay-vpn.drawio`](diagrams/src/key-relay-vpn.drawio).
+
+The relay diagram shows the two simulated QKD links, which connect only
+post-processing processes (their default `length` and `attenuation` are QKD
+model parameters, not deployed optical fibres); the classical KMS-to-KMS
+relay transport used by `Relay()` and `skey_create`; the `net_kms_control`
+network shared by KMS Alice, KMS Trusted and KMS Bob, over which the ETSI 004
+association is set up between the endpoint KMSs without being proxied by the
+trusted KMS; and the CORE classical path.
+The `qkd-ppk`/`ppk-provider.sock` element is local to each VPN endpoint; the
+TCP/9090 endpoint coordination shown in the classical plane is therefore
+PSK-only and is absent when PPK is selected.
 
 The four PP and three KMS ns-3 processes are extended unchanged from
 `docker-compose.key-relay.yml`. CORE creates the two strongSwan DockerNode
@@ -1877,12 +1900,12 @@ internal QKDNetSim mechanisms, not new ETSI API methods.
   role-named ns-3 programs implementing the two post-processing links and
   three KMS roles used by the active trusted-node VPN.
 - **[`docker/`](docker/)** — the shared images, Compose definitions for persistent QKD/KMS infrastructure, and interface-aware entrypoints. Application endpoint topology and verification live exclusively under `core/`.
-- **[`diagrams/`](diagrams/)** — accessible SVG architecture diagrams used by
-  the documentation, with their editable, self-contained HTML sources under
-  [`diagrams/src/`](diagrams/src/) and a project-specific visual profile
-  selected by [`.diagram-design`](.diagram-design). The old QKDNetSim
-  application examples and their HTML sources are kept under
-  [`old-examples/diagrams/`](old-examples/diagrams/).
+- **[`diagrams/`](diagrams/)** — SVG exports used by the README and the
+  documentation, with their canonical editable Draw.io sources under
+  [`diagrams/src/`](diagrams/src/). The current figures distinguish QKD links,
+  PP--KMS delivery, KMS relay/control traffic, CORE's classical plane, and the
+  local RFC 8784 PPK provider. In PPK mode no Alice--Bob TCP/9090 coordination
+  channel is opened; that channel is PSK-only.
 - **[`docker-compose.yml`](docker/docker-compose.yml)** — the four-service
   point-to-point QKD/KMS infrastructure. It deliberately contains neither
   Alice/Bob application services nor a classical data network.

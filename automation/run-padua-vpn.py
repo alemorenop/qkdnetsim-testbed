@@ -10,7 +10,6 @@ import os
 import platform
 import re
 import shutil
-import statistics
 import subprocess
 import sys
 import time
@@ -64,14 +63,6 @@ def parse_args() -> argparse.Namespace:
         help=(
             "reuse successful repetitions already present in --output-dir "
             "and run only missing or failed repetitions"
-        ),
-    )
-    parser.add_argument(
-        "--reference-results",
-        type=Path,
-        help=(
-            "completed padua-reference directory; when supplied, produce the "
-            "monolithic/distributed/VPN three-stage CSV and SVG"
         ),
     )
     parser.add_argument(
@@ -335,116 +326,6 @@ def write_summary(
     return summary
 
 
-def render_three_stage(
-    reference_dir: Path, vpn_output: Path, records: list[dict[str, Any]]
-) -> None:
-    reference_csv = reference_dir.resolve() / "application-statistics.csv"
-    if not reference_csv.is_file():
-        raise RuntimeError(f"missing Padua reference table: {reference_csv}")
-    samples: dict[str, list[float]] = {
-        "QKDNetSim monolítico": [],
-        "QKDNetSim distribuido": [],
-        "VPN distribuida": [],
-    }
-    with reference_csv.open(newline="", encoding="utf-8") as stream:
-        for row in csv.DictReader(stream):
-            if (
-                row.get("version") != "working"
-                or row.get("application") != "1-to-6"
-            ):
-                continue
-            stage = (
-                "QKDNetSim monolítico"
-                if row.get("deployment") == "monolithic"
-                else "QKDNetSim distribuido"
-            )
-            value = row.get("application_goodput_bps")
-            if value:
-                samples[stage].append(float(value) / 1_000_000)
-    for record in records:
-        if not record["passed"]:
-            continue
-        metrics = (record.get("runner_result") or {}).get("metrics") or {}
-        value = metrics.get("throughput_mbps")
-        if value is not None:
-            samples["VPN distribuida"].append(float(value))
-    if any(not values for values in samples.values()):
-        missing = [stage for stage, values in samples.items() if not values]
-        raise RuntimeError("missing samples for: " + ", ".join(missing))
-
-    rows = []
-    for stage, values in samples.items():
-        mean = statistics.fmean(values)
-        deviation = statistics.stdev(values) if len(values) > 1 else 0.0
-        rows.append((stage, len(values), mean, deviation, mean / 10.0))
-    with (vpn_output / "padua-three-stage.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as stream:
-        writer = csv.writer(stream)
-        writer.writerow((
-            "stage", "samples", "mean_goodput_mbps", "stddev_goodput_mbps",
-            "offered_rate_achievement",
-        ))
-        writer.writerows(rows)
-
-    width, height = 980, 560
-    left, right, top, bottom = 105, 55, 75, 115
-    plot_width = width - left - right
-    plot_height = height - top - bottom
-    maximum = max(10.0, max(row[2] + row[3] for row in rows)) * 1.12
-    points = []
-    body = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#F7F5F0"/>',
-        '<text x="44" y="38" font-family="sans-serif" font-size="24" font-weight="700" fill="#17324D">Padua 1→6: integración progresiva</text>',
-    ]
-    for tick in range(6):
-        value = maximum * tick / 5
-        y = top + plot_height - value / maximum * plot_height
-        body.append(
-            f'<line x1="{left}" y1="{y:.1f}" x2="{width-right}" y2="{y:.1f}" stroke="#D6D2C9"/>'
-        )
-        body.append(
-            f'<text x="{left-12}" y="{y+5:.1f}" text-anchor="end" font-family="sans-serif" font-size="13" fill="#52606B">{value:.1f}</text>'
-        )
-    offered_y = top + plot_height - 10.0 / maximum * plot_height
-    body.extend((
-        f'<line x1="{left}" y1="{offered_y:.1f}" x2="{width-right}" y2="{offered_y:.1f}" stroke="#D4773B" stroke-width="2" stroke-dasharray="8 7"/>',
-        f'<text x="{width-right-4}" y="{offered_y-8:.1f}" text-anchor="end" font-family="sans-serif" font-size="13" fill="#A85525">carga ofrecida: 10 Mbit/s</text>',
-    ))
-    for index, (stage, count, mean, deviation, _) in enumerate(rows):
-        x = left + plot_width * index / (len(rows) - 1)
-        y = top + plot_height - mean / maximum * plot_height
-        upper = top + plot_height - (mean + deviation) / maximum * plot_height
-        lower = top + plot_height - max(0.0, mean - deviation) / maximum * plot_height
-        points.append((x, y))
-        body.extend((
-            f'<line x1="{x:.1f}" y1="{upper:.1f}" x2="{x:.1f}" y2="{lower:.1f}" stroke="#315C78" stroke-width="2"/>',
-            f'<line x1="{x-7:.1f}" y1="{upper:.1f}" x2="{x+7:.1f}" y2="{upper:.1f}" stroke="#315C78" stroke-width="2"/>',
-            f'<line x1="{x-7:.1f}" y1="{lower:.1f}" x2="{x+7:.1f}" y2="{lower:.1f}" stroke="#315C78" stroke-width="2"/>',
-            f'<text x="{x:.1f}" y="{top+plot_height+31}" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#1D2730">{stage}</text>',
-            f'<text x="{x:.1f}" y="{top+plot_height+51}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#52606B">n={count}</text>',
-        ))
-    body.append(
-        '<polyline points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
-        + '" fill="none" stroke="#315C78" stroke-width="4"/>'
-    )
-    for x, y in points:
-        body.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" fill="#315C78"/>')
-    for (stage, _, mean, deviation, _), (x, y) in zip(rows, points):
-        body.append(
-            f'<text x="{x:.1f}" y="{y-18:.1f}" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#17324D">{mean:.3f} ± {deviation:.3f}</text>'
-        )
-    body.extend((
-        f'<text x="28" y="{top+plot_height/2:.1f}" transform="rotate(-90 28 {top+plot_height/2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#52606B">goodput útil (Mbit/s)</text>',
-        f'<text x="{width/2:.1f}" y="{height-24}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#52606B">Las dos primeras etapas usan cifrado QKDNetSim; la tercera usa QKD como PPK de IKEv2 y ESP para el tráfico.</text>',
-        '</svg>',
-    ))
-    (vpn_output / "padua-three-stage.svg").write_text(
-        "\n".join(body), encoding="utf-8"
-    )
-
-
 def main() -> int:
     args = parse_args()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -496,13 +377,6 @@ def main() -> int:
             compose(CORE_COMPOSE, "down", "--remove-orphans", check=False)
     records.sort(key=lambda record: int(record["repetition"]))
     summary = write_summary(output, args, records)
-    if args.reference_results is not None and summary["failed"] == 0:
-        render_three_stage(args.reference_results, output, records)
-    elif args.reference_results is not None:
-        print(
-            "[PADUA_VPN] three-stage graph skipped because the VPN campaign failed",
-            flush=True,
-        )
     print(
         f"[PADUA_VPN] results={output} failures={summary['failed']}",
         flush=True,

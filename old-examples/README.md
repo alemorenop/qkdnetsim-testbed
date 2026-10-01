@@ -10,8 +10,10 @@ The archive is organized by responsibility:
   classical path;
 - `examples/point-to-point/` and `examples/key-relay/` contain the four
   scenario-specific C++ consumers;
-- `diagrams/` contains the corresponding architectural diagrams and their
-  editable HTML sources.
+- The maintained architecture diagrams are in the repository-level
+  `diagrams/` directory. The historical diagram copies that used to live in
+  this archive were removed because they described an obsolete presentation,
+  not a different implementation.
 
 The PP and KMS programs are not duplicated here because the old and current
 scenarios execute exactly the same active sources under `examples/`. The

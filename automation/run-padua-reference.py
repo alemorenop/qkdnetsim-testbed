@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import shutil
+import statistics
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -450,61 +451,134 @@ def flatten_results(records: list[dict[str, Any]], output: Path) -> None:
                     })
 
 
-def render_comparison(records: list[dict[str, Any]], output: Path) -> None:
-    """Render a dependency-free overview; CSV/JSON remain authoritative."""
-    groups: list[tuple[str, float, float]] = []
-    ordered_versions = tuple(dict.fromkeys(record["version"] for record in records))
-    for version in ordered_versions:
-        for deployment in ("monolithic", "distributed"):
-            values = []
-            deliveries = []
-            for record in records:
-                if record["version"] != version or record["deployment"] != deployment:
+def render_comparison(output: Path) -> None:
+    """Compare matched monolithic/distributed loads without aggregating flows."""
+    source = output / "application-statistics.csv"
+    samples: dict[tuple[str, str, str], list[dict[str, float]]] = {}
+    with source.open(newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            achievement = row.get("offered_rate_achievement")
+            if not achievement:
+                continue
+            key = (row["version"], row["application"], row["deployment"])
+            samples.setdefault(key, []).append({
+                "achievement": float(achievement),
+                "delivery": float(row.get("delivery_ratio") or 0),
+                "goodput": float(row.get("application_goodput_bps") or 0),
+                "offered": float(row.get("offered_rate_bps") or 0),
+            })
+
+    versions = tuple(dict.fromkeys(key[0] for key in samples))
+    flow_order = ("1-to-5", "5-to-1", "1-to-6")
+    deployments = ("monolithic", "distributed")
+    rows: list[dict[str, Any]] = []
+    for version in versions:
+        for flow in flow_order:
+            for deployment in deployments:
+                values = samples.get((version, flow, deployment), [])
+                if not values:
                     continue
-                if deployment == "distributed":
-                    apps = record["result"].get("applications", [])
-                    values.append(sum(float(row.get("application_goodput_bps", 0)) for row in apps))
-                    deliveries.extend(float(row.get("delivery_ratio") or 0) for row in apps)
-                else:
-                    result = record["result"]
-                    apps = result.get("ETSI_014", result.get("etsi_014", {})).values()
-                    total = 0.0
-                    for values_map in apps:
-                        app = values_map.get("QKDApps Statistics", {})
-                        duration = max(float(app.get("Stop Time (sec)", 0)) -
-                                       float(app.get("Start Time (sec)", 0)), 1)
-                        total += float(app.get("Bytes Received", 0)) * 8 / duration
-                        sent = float(app.get("Packets Sent", 0))
-                        deliveries.append(float(app.get("Packets Received", 0)) / sent if sent else 0)
-                    values.append(total)
-            if values:
-                groups.append((f"{version} {deployment}", sum(values) / len(values),
-                               sum(deliveries) / len(deliveries) if deliveries else 0))
-    maximum = max(1.0, max((value for _, value, _ in groups), default=0.0))
-    width, height, left, top, plot_height = 900, 520, 105, 70, 330
-    bar_width = 115
-    gap = 70
-    colors = ("#315C78", "#D4773B", "#56876D", "#8A5A83")
+                achievements = [value["achievement"] for value in values]
+                rows.append({
+                    "version": version,
+                    "flow": flow,
+                    "deployment": deployment,
+                    "samples": len(values),
+                    "mean_offered_rate_achievement": statistics.fmean(achievements),
+                    "stddev_offered_rate_achievement": (
+                        statistics.stdev(achievements) if len(achievements) > 1 else 0.0
+                    ),
+                    "mean_delivery_ratio": statistics.fmean(
+                        value["delivery"] for value in values
+                    ),
+                    "mean_goodput_bps": statistics.fmean(
+                        value["goodput"] for value in values
+                    ),
+                    "offered_rate_bps": statistics.fmean(
+                        value["offered"] for value in values
+                    ),
+                })
+
+    fields = (
+        "version", "flow", "deployment", "samples",
+        "mean_offered_rate_achievement", "stddev_offered_rate_achievement",
+        "mean_delivery_ratio", "mean_goodput_bps", "offered_rate_bps",
+    )
+    with (output / "padua-reference-comparison.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    groups = [(version, flow) for version in versions for flow in flow_order]
+    width = max(980, 150 + len(groups) * 150)
+    height, left, right, top, bottom = 590, 90, 35, 85, 125
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    group_width = plot_width / max(len(groups), 1)
+    bar_width = min(42.0, group_width * 0.30)
+    colors = {"monolithic": "#315C78", "distributed": "#D4773B"}
+    row_index = {
+        (row["version"], row["flow"], row["deployment"]): row for row in rows
+    }
     body = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#F7F5F0"/>',
-        '<text x="40" y="38" font-family="sans-serif" font-size="24" font-weight="700" fill="#1D2730">Padua reference: useful application goodput</text>',
-        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}" stroke="#52606B"/>',
-        f'<line x1="{left}" y1="{top + plot_height}" x2="850" y2="{top + plot_height}" stroke="#52606B"/>',
+        '<text x="44" y="39" font-family="sans-serif" font-size="24" font-weight="700" fill="#17324D">Padua: cumplimiento de carga por flujo</text>',
+        '<text x="44" y="63" font-family="sans-serif" font-size="13" fill="#52606B">Media de las repeticiones; barras de error: ±1 desviación típica</text>',
     ]
-    for index, (label, value, delivery) in enumerate(groups):
-        x = left + 55 + index * (bar_width + gap)
-        bar_height = value / maximum * (plot_height - 35)
-        y = top + plot_height - bar_height
+    for tick in range(0, 121, 20):
+        y = top + plot_height - tick / 120 * plot_height
         body.extend((
-            f'<rect x="{x}" y="{y:.1f}" width="{bar_width}" height="{bar_height:.1f}" rx="5" fill="{colors[index % len(colors)]}"/>',
-            f'<text x="{x + bar_width / 2}" y="{y - 9:.1f}" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#1D2730">{value / 1000:.1f} kb/s</text>',
-            f'<text x="{x + bar_width / 2}" y="{top + plot_height + 25}" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#1D2730">{label}</text>',
-            f'<text x="{x + bar_width / 2}" y="{top + plot_height + 45}" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#52606B">delivery {delivery * 100:.1f}%</text>',
+            f'<line x1="{left}" y1="{y:.1f}" x2="{width-right}" y2="{y:.1f}" stroke="#D6D2C9"/>',
+            f'<text x="{left-10}" y="{y+5:.1f}" text-anchor="end" font-family="sans-serif" font-size="12" fill="#52606B">{tick}%</text>',
         ))
-    body.append('<text x="24" y="245" transform="rotate(-90 24 245)" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#52606B">aggregate goodput (bit/s)</text>')
-    body.append('</svg>')
-    (output / "padua-reference-comparison.svg").write_text("\n".join(body), encoding="utf-8")
+    target_y = top + plot_height - 100 / 120 * plot_height
+    body.append(
+        f'<line x1="{left}" y1="{target_y:.1f}" x2="{width-right}" y2="{target_y:.1f}" stroke="#56876D" stroke-width="2" stroke-dasharray="7 6"/>'
+    )
+    for group_index, (version, flow) in enumerate(groups):
+        center = left + group_width * (group_index + 0.5)
+        body.extend((
+            f'<text x="{center:.1f}" y="{top+plot_height+30}" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#1D2730">{flow.replace("-to-", "→")}</text>',
+            f'<text x="{center:.1f}" y="{top+plot_height+49}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#52606B">{version.upper()}</text>',
+        ))
+        for deployment_index, deployment in enumerate(deployments):
+            row = row_index.get((version, flow, deployment))
+            if row is None:
+                continue
+            mean = float(row["mean_offered_rate_achievement"]) * 100
+            deviation = float(row["stddev_offered_rate_achievement"]) * 100
+            x = center + (deployment_index - 0.5) * (bar_width + 7) - bar_width / 2
+            bar_height = min(mean, 120) / 120 * plot_height
+            y = top + plot_height - bar_height
+            error_top = top + plot_height - min(mean + deviation, 120) / 120 * plot_height
+            error_bottom = top + plot_height - max(mean - deviation, 0) / 120 * plot_height
+            body.extend((
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" rx="3" fill="{colors[deployment]}"/>',
+                f'<line x1="{x+bar_width/2:.1f}" y1="{error_top:.1f}" x2="{x+bar_width/2:.1f}" y2="{error_bottom:.1f}" stroke="#1D2730" stroke-width="1.5"/>',
+                f'<line x1="{x+bar_width/2-5:.1f}" y1="{error_top:.1f}" x2="{x+bar_width/2+5:.1f}" y2="{error_top:.1f}" stroke="#1D2730" stroke-width="1.5"/>',
+                f'<line x1="{x+bar_width/2-5:.1f}" y1="{error_bottom:.1f}" x2="{x+bar_width/2+5:.1f}" y2="{error_bottom:.1f}" stroke="#1D2730" stroke-width="1.5"/>',
+                f'<text x="{x+bar_width/2:.1f}" y="{max(y-8, top+12):.1f}" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#1D2730">{mean:.1f}%</text>',
+            ))
+    legend_y = height - 56
+    for index, (deployment, label) in enumerate((
+        ("monolithic", "QKDNetSim monolítico"),
+        ("distributed", "QKDNetSim distribuido"),
+    )):
+        x = left + index * 240
+        body.extend((
+            f'<rect x="{x}" y="{legend_y-13}" width="16" height="16" rx="2" fill="{colors[deployment]}"/>',
+            f'<text x="{x+25}" y="{legend_y}" font-family="sans-serif" font-size="13" fill="#1D2730">{label}</text>',
+        ))
+    body.extend((
+        f'<text x="27" y="{top+plot_height/2:.1f}" transform="rotate(-90 27 {top+plot_height/2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#52606B">goodput / carga ofrecida</text>',
+        '</svg>',
+    ))
+    (output / "padua-reference-comparison.svg").write_text(
+        "\n".join(body), encoding="utf-8"
+    )
 
 
 def main() -> int:
@@ -610,7 +684,7 @@ def main() -> int:
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     flatten_results(records, output)
-    render_comparison(records, output)
+    render_comparison(output)
     failures = sum(not row["passed"] for row in records)
     print(f"[PADUA] results={output} failures={failures}")
     return 1 if failures else 0
